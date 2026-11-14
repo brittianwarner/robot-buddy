@@ -5,7 +5,7 @@ window.BuddyVoice=(()=>{
  const sources=new Set(),watched=new Set(),played=new Set();
  let currentTurn=null;
  const el=id=>document.getElementById(id);
- function status(text){el('voice-status').textContent=text;document.querySelector('.face').dataset.speaking=String(busy);el('face-status').textContent=busy?text:'Ready. Hello, human!';controls();}
+ function status(text){el('voice-status').textContent=text;document.querySelector('.face').dataset.speaking=String(busy);el('face-status').textContent=busy?text:"I'm here.";controls();}
  async function prepare(){context||=new AudioContext();await context.resume();}
  function stop(){currentTurn=null;watched.clear();generation++;controller?.abort();controller=null;for(const source of sources){try{source.stop();}catch{}}sources.clear();busy=false;nextTime=0;el('audio-buffer').textContent='0 ms';status('Voice stopped');}
  async function speak(turnId,stream=false){

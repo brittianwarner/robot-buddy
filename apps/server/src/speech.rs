@@ -31,8 +31,9 @@ impl Speech {
             return Ok(None);
         };
         ensure!(
-            model == "fish-audio/drama-3",
-            "this PCM adapter currently supports fish-audio/drama-3"
+            model == robot_buddy::voice::SPEECH_MODEL,
+            "this PCM adapter currently supports {}",
+            robot_buddy::voice::SPEECH_MODEL
         );
         let key = std::env::var("TTS_API_KEY")
             .ok()
@@ -141,8 +142,7 @@ async fn synthesize(service: &Speech, answer: &Value) -> Result<(reqwest::Respon
     let text = answer["text"].as_str().context("spoken text missing")?;
     let config: robot_buddy::voice::VoiceConfig =
         serde_json::from_value(answer["voice"]["config"].clone())?;
-    let speech_text = config.speech_input(text)?;
-    let payload = json!({"model":service.model,"input":speech_text,"voice":config.voice.id(),"instructions":format!("{} Read only the supplied dialogue. Do not add words or read these instructions aloud.",config.delivery),"response_format":"pcm","speed":config.synthesis.speed,"provider":{"options":{"fish-audio":config.synthesis.provider_options()}}});
+    let payload = config.speech_body(&service.model, text)?;
     let response = service
         .http
         .post("https://openrouter.ai/api/v1/audio/speech")
@@ -150,12 +150,13 @@ async fn synthesize(service: &Speech, answer: &Value) -> Result<(reqwest::Respon
         .json(&payload)
         .send()
         .await?;
-    ensure!(
-        response.status().is_success(),
-        "speech provider rejected request (HTTP {})",
-        response.status().as_u16()
-    );
-    let format = PcmFormat::parse(
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let body = response.text().await.unwrap_or_default();
+        let snippet: String = body.chars().take(400).collect();
+        anyhow::bail!("speech provider rejected request (HTTP {status}): {snippet}");
+    }
+    let format = PcmFormat::from_provider(
         response
             .headers()
             .get(header::CONTENT_TYPE)

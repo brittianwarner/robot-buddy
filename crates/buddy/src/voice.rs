@@ -1,29 +1,147 @@
-//! Curated public voices from Fish Audio's Drama 3 documentation.
+//! Premade ElevenLabs voices for OpenRouter `elevenlabs/eleven-v4-turbo`.
+//! Legacy Fish names deserialize onto the nearest catalog speaker.
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+
+pub const SPEECH_MODEL: &str = "elevenlabs/eleven-v4-turbo";
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Voice {
+    George,
+    Sarah,
+    Adam,
+    Alice,
+    Bella,
+    Bill,
+    Brian,
+    Callum,
+    Charlie,
+    Chris,
+    Daniel,
+    Eric,
+    Harry,
+    Jessica,
+    Laura,
+    Liam,
+    Lily,
+    Matilda,
+    River,
+    Roger,
     #[default]
-    Adrian,
-    Delia,
-    Sheila,
+    Will,
 }
 impl Voice {
+    pub const ALL: [Voice; 21] = [
+        Self::George,
+        Self::Sarah,
+        Self::Adam,
+        Self::Alice,
+        Self::Bella,
+        Self::Bill,
+        Self::Brian,
+        Self::Callum,
+        Self::Charlie,
+        Self::Chris,
+        Self::Daniel,
+        Self::Eric,
+        Self::Harry,
+        Self::Jessica,
+        Self::Laura,
+        Self::Liam,
+        Self::Lily,
+        Self::Matilda,
+        Self::River,
+        Self::Roger,
+        Self::Will,
+    ];
+    /// OpenRouter voice name. Premade names are not ElevenLabs voice IDs.
     pub fn id(self) -> &'static str {
         match self {
-            Self::Adrian => "bf322df2096a46f18c579d0baa36f41d",
-            Self::Delia => "c70cfb98867a4bfb9ae20d2401257b92",
-            Self::Sheila => "f3a2b90078d54a65af4b95f63bc7798e",
+            Self::George => "george",
+            Self::Sarah => "sarah",
+            Self::Adam => "adam",
+            Self::Alice => "alice",
+            Self::Bella => "bella",
+            Self::Bill => "bill",
+            Self::Brian => "brian",
+            Self::Callum => "callum",
+            Self::Charlie => "charlie",
+            Self::Chris => "chris",
+            Self::Daniel => "daniel",
+            Self::Eric => "eric",
+            Self::Harry => "harry",
+            Self::Jessica => "jessica",
+            Self::Laura => "laura",
+            Self::Liam => "liam",
+            Self::Lily => "lily",
+            Self::Matilda => "matilda",
+            Self::River => "river",
+            Self::Roger => "roger",
+            Self::Will => "will",
         }
     }
     pub fn name(self) -> &'static str {
         match self {
-            Self::Adrian => "Adrian",
-            Self::Delia => "Delia",
-            Self::Sheila => "Sheila",
+            Self::George => "George",
+            Self::Sarah => "Sarah",
+            Self::Adam => "Adam",
+            Self::Alice => "Alice",
+            Self::Bella => "Bella",
+            Self::Bill => "Bill",
+            Self::Brian => "Brian",
+            Self::Callum => "Callum",
+            Self::Charlie => "Charlie",
+            Self::Chris => "Chris",
+            Self::Daniel => "Daniel",
+            Self::Eric => "Eric",
+            Self::Harry => "Harry",
+            Self::Jessica => "Jessica",
+            Self::Laura => "Laura",
+            Self::Liam => "Liam",
+            Self::Lily => "Lily",
+            Self::Matilda => "Matilda",
+            Self::River => "River",
+            Self::Roger => "Roger",
+            Self::Will => "Will",
         }
+    }
+    pub fn from_stored(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            // Fish Drama 3 names from actors created before Eleven v4 Turbo.
+            "adrian" | "will" => Some(Self::Will),
+            "delia" | "sarah" => Some(Self::Sarah),
+            "sheila" | "jessica" => Some(Self::Jessica),
+            "george" => Some(Self::George),
+            "adam" => Some(Self::Adam),
+            "alice" => Some(Self::Alice),
+            "bella" => Some(Self::Bella),
+            "bill" => Some(Self::Bill),
+            "brian" => Some(Self::Brian),
+            "callum" => Some(Self::Callum),
+            "charlie" => Some(Self::Charlie),
+            "chris" => Some(Self::Chris),
+            "daniel" => Some(Self::Daniel),
+            "eric" => Some(Self::Eric),
+            "harry" => Some(Self::Harry),
+            "laura" => Some(Self::Laura),
+            "liam" => Some(Self::Liam),
+            "lily" => Some(Self::Lily),
+            "matilda" => Some(Self::Matilda),
+            "river" => Some(Self::River),
+            "roger" => Some(Self::Roger),
+            _ => None,
+        }
+    }
+}
+impl<'de> Deserialize<'de> for Voice {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Self::from_stored(&raw).ok_or_else(|| serde::de::Error::custom("unknown voice"))
     }
 }
 #[derive(Clone, Serialize, Deserialize)]
@@ -40,13 +158,27 @@ impl Default for VoiceConfig {
     fn default() -> Self {
         Self {
             voice: Voice::default(),
-            synthesis: Synthesis::default(),
+            synthesis: Synthesis {
+                // Stored with the profile. Eleven v4 Turbo does not receive these fields.
+                // Pace stays at the provider default; character is the speaker and the wording.
+                temperature: 0.55,
+                top_p: 0.65,
+                language: Some("en".into()),
+                ..Synthesis::default()
+            },
             speech_rules: Vec::new(),
             delivery: include_str!("prompts/voice.txt").trim().into(),
         }
     }
 }
 impl VoiceConfig {
+    /// True for the pre-J.P. factory seed, including a stored Fish `adrian` row.
+    pub fn is_factory_v1(&self) -> bool {
+        self.voice == Voice::Will
+            && self.speech_rules.is_empty()
+            && self.delivery == include_str!("prompts/voice.factory-v1.txt").trim()
+            && self.synthesis == Synthesis::default()
+    }
     pub fn validate(&self) -> Result<()> {
         ensure!(
             !self.delivery.trim().is_empty() && self.delivery.len() <= 1500,
@@ -59,10 +191,34 @@ impl VoiceConfig {
         self.synthesis.validate()?;
         Ok(())
     }
+    /// Eleven v4 Turbo body. Delivery is not spoken. Fish controls and speed are omitted.
+    pub fn speech_body(&self, model: &str, text: &str) -> Result<Value> {
+        let input = self.speech_input(text)?;
+        Ok(json!({
+            "model": model,
+            "input": input,
+            "voice": self.voice.id(),
+            "response_format": "pcm",
+            "provider": {
+                "zdr": true,
+                "options": {
+                    "elevenlabs": {
+                        "seed": 7,
+                        "voice_settings": {
+                            "stability": 0.5,
+                            "similarity_boost": 0.75,
+                            "style": 0.0,
+                            "use_speaker_boost": true
+                        }
+                    }
+                }
+            }
+        }))
+    }
 }
 pub fn catalog() -> Value {
     json!(
-        [Voice::Adrian, Voice::Delia, Voice::Sheila]
+        Voice::ALL
             .into_iter()
             .map(|voice| json!({"key":voice,"name":voice.name(),"voice_id":voice.id()}))
             .collect::<Vec<_>>()
@@ -92,10 +248,75 @@ mod tests {
         );
         VoiceConfig::default().validate().unwrap();
     }
+    #[test]
+    fn legacy_fish_names_load_as_premade_speakers() {
+        assert_eq!(
+            serde_json::from_value::<Voice>(json!("adrian")).unwrap(),
+            Voice::Will
+        );
+        assert_eq!(
+            serde_json::from_value::<Voice>(json!("delia")).unwrap(),
+            Voice::Sarah
+        );
+        assert_eq!(
+            serde_json::from_value::<Voice>(json!("sheila")).unwrap(),
+            Voice::Jessica
+        );
+        assert_eq!(serde_json::to_value(Voice::Will).unwrap(), json!("will"));
+    }
+    #[test]
+    fn default_voice_is_will_and_factory_adrian_still_matches() {
+        let config = VoiceConfig::default();
+        assert_eq!(config.voice, Voice::Will);
+        assert_eq!(config.voice.id(), "will");
+        assert_eq!(config.synthesis.speed, 1.0);
+        assert_eq!(config.synthesis.volume, 0.0);
+        assert_eq!(config.synthesis.temperature, 0.55);
+        assert_eq!(config.synthesis.language.as_deref(), Some("en"));
+        assert!(config.delivery.contains("Grandma's Boy"));
+        assert!(!config.delivery.contains('['));
+        assert!(config.delivery.len() <= 1500);
+        assert!(!config.is_factory_v1());
+        let stored = json!({
+            "voice": "adrian",
+            "delivery": include_str!("prompts/voice.factory-v1.txt").trim(),
+            "synthesis": Synthesis::default(),
+            "speech_rules": []
+        });
+        let previous: VoiceConfig = serde_json::from_value(stored).unwrap();
+        assert_eq!(previous.voice, Voice::Will);
+        assert!(previous.is_factory_v1());
+        let mut changed = previous.clone();
+        changed.synthesis.speed = 0.9;
+        assert!(!changed.is_factory_v1());
+        assert_eq!(catalog().as_array().unwrap().len(), 21);
+    }
+    #[test]
+    fn eleven_request_speaks_the_line_only() {
+        let body = VoiceConfig::default()
+            .speech_body(SPEECH_MODEL, "It's three.")
+            .unwrap();
+        assert_eq!(body["model"], SPEECH_MODEL);
+        assert_eq!(body["input"], "It's three.");
+        assert_eq!(body["voice"], "will");
+        assert_eq!(body["response_format"], "pcm");
+        assert_eq!(body["provider"]["zdr"], true);
+        assert_eq!(body["provider"]["options"]["elevenlabs"]["seed"], 7);
+        let settings = &body["provider"]["options"]["elevenlabs"]["voice_settings"];
+        assert_eq!(settings["stability"], 0.5);
+        assert_eq!(settings["similarity_boost"], 0.75);
+        assert_eq!(settings["style"], 0.0);
+        assert_eq!(settings["use_speaker_boost"], true);
+        assert!(settings.get("speed").is_none());
+        assert!(body.get("instructions").is_none());
+        assert!(body.get("speed").is_none());
+        assert!(body["provider"]["options"].get("fish-audio").is_none());
+        assert!(!body.to_string().contains("Grandma"));
+    }
 }
 
-/// Bounded Fish provider controls; transport format remains the client's PCM contract.
-#[derive(Clone, Serialize, Deserialize)]
+/// Bounded Fish provider controls. They stay on saved profiles and are not sent to Eleven.
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Synthesis {
     pub temperature: f64,
@@ -113,7 +334,7 @@ pub struct Synthesis {
     pub repetition_penalty: f64,
     pub early_stop_threshold: f64,
 }
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Latency {
     Low,
@@ -173,7 +394,8 @@ impl Synthesis {
     }
 }
 pub fn schema() -> Value {
-    json!({"type":"object","properties":{"voice":{"type":"string","enum":["adrian","delia","sheila"]},"delivery":{"type":"string","maxLength":1500},"speech_rules":{"type":"array","maxItems":32,"items":{"type":"object","properties":{"text":{"type":"string","maxLength":80},"style":{"type":"string","enum":["whisper","emphasis","soft","fast","slow","stress","forceful","phoneme"]},"phonemes":{"type":["string","null"]}},"required":["text","style"],"additionalProperties":false}},"synthesis":{"type":"object","properties":{"temperature":{"type":"number","minimum":0,"maximum":1},"top_p":{"type":"number","minimum":0,"maximum":1},"speed":{"type":"number","minimum":0.5,"maximum":2},"volume":{"type":"number","minimum":-20,"maximum":10},"normalize_loudness":{"type":"boolean"},"normalize":{"type":"boolean"},"language":{"type":["string","null"]},"latency":{"type":"string","enum":["normal","balanced","low"]},"chunk_length":{"type":"integer","minimum":100,"maximum":300},"min_chunk_length":{"type":"integer","minimum":0,"maximum":100},"condition_on_previous_chunks":{"type":"boolean"},"max_new_tokens":{"type":"integer","minimum":256,"maximum":2048},"repetition_penalty":{"type":"number","minimum":1,"maximum":2},"early_stop_threshold":{"type":"number","minimum":0,"maximum":1}},"additionalProperties":false}},"required":["voice","delivery"],"additionalProperties":false})
+    let voices: Vec<&str> = Voice::ALL.into_iter().map(Voice::id).collect();
+    json!({"type":"object","properties":{"voice":{"type":"string","enum":voices},"delivery":{"type":"string","maxLength":1500},"speech_rules":{"type":"array","maxItems":32,"items":{"type":"object","properties":{"text":{"type":"string","maxLength":80},"style":{"type":"string","enum":["whisper","emphasis","soft","fast","slow","stress","forceful","phoneme"]},"phonemes":{"type":["string","null"]}},"required":["text","style"],"additionalProperties":false}},"synthesis":{"type":"object","properties":{"temperature":{"type":"number","minimum":0,"maximum":1},"top_p":{"type":"number","minimum":0,"maximum":1},"speed":{"type":"number","minimum":0.5,"maximum":2},"volume":{"type":"number","minimum":-20,"maximum":10},"normalize_loudness":{"type":"boolean"},"normalize":{"type":"boolean"},"language":{"type":["string","null"]},"latency":{"type":"string","enum":["normal","balanced","low"]},"chunk_length":{"type":"integer","minimum":100,"maximum":300},"min_chunk_length":{"type":"integer","minimum":0,"maximum":100},"condition_on_previous_chunks":{"type":"boolean"},"max_new_tokens":{"type":"integer","minimum":256,"maximum":2048},"repetition_penalty":{"type":"number","minimum":1,"maximum":2},"early_stop_threshold":{"type":"number","minimum":0,"maximum":1}},"additionalProperties":false}},"required":["voice","delivery"],"additionalProperties":false})
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -238,22 +460,16 @@ impl SpeechRule {
         Ok(())
     }
     fn annotate(&self, text: &str) -> String {
-        let tag = match self.style {
-            WordStyle::Whisper => "whisper",
-            WordStyle::Emphasis => "emphasis",
-            WordStyle::Soft => "soft",
-            WordStyle::Fast => "fast",
-            WordStyle::Slow => "slow",
-            WordStyle::Stress => "stress",
-            WordStyle::Forceful => "forceful",
-            WordStyle::Phoneme => {
-                return format!(
-                    "<|phoneme_start|>{}<|phoneme_end|>",
-                    self.phonemes.as_deref().unwrap_or("")
-                );
-            }
-        };
-        format!("<{tag}>{text}</{tag}>")
+        match self.style {
+            // Eleven documents [whispering]. Other Fish tags would be spoken, so the word stays plain.
+            WordStyle::Whisper | WordStyle::Soft => format!("[whispering] {text}"),
+            WordStyle::Emphasis
+            | WordStyle::Stress
+            | WordStyle::Forceful
+            | WordStyle::Fast
+            | WordStyle::Slow
+            | WordStyle::Phoneme => text.to_owned(),
+        }
     }
 }
 impl VoiceConfig {
@@ -319,7 +535,19 @@ mod speech_rule_tests {
             config
                 .speech_input("A robot can read, unlike robotics.")
                 .unwrap(),
-            "A <emphasis>robot</emphasis> can <|phoneme_start|>R IY1 D<|phoneme_end|>, unlike robotics."
+            "A robot can read, unlike robotics."
+        );
+        let whisper = VoiceConfig {
+            speech_rules: vec![SpeechRule {
+                text: "robot".into(),
+                style: WordStyle::Whisper,
+                phonemes: None,
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            whisper.speech_input("A robot can read.").unwrap(),
+            "A [whispering] robot can read."
         );
     }
     #[test]

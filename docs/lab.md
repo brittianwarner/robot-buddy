@@ -41,7 +41,7 @@ The test key under `apps/server/tests/fixtures` is public test material used onl
 
 ## Spoken replies
 
-The prepared local configuration uses `z-ai/glm-5.3-flash:nitro` with low reasoning and `fish-audio/drama-3` for speech. Enable **Speak new replies** after connecting your robot, then type a message. The checkbox click unlocks browser audio. **Replay last answer** speaks a completed answer explicitly; **Stop voice** cancels the active turn and streaming/playback. Reloading the page remains silent.
+The prepared local configuration uses `z-ai/glm-5.3-flash:nitro` with low reasoning and `elevenlabs/eleven-v4-turbo` for speech. The default speaker is Will. Restart the server after a voice-model change so an untouched factory actor adopts it. Enable **Speak new replies** after connecting your robot, then type a message. The checkbox click unlocks browser audio. **Replay last answer** speaks a completed answer explicitly; **Stop voice** cancels the active turn and streaming/playback. Reloading the page remains silent.
 
 The voice panel displays first audio from the speech request, buffer duration and PCM format. This does not measure microphone-to-answer latency. Admitted dialogue sentences play as they become available; thinking and tool activity remain silent. The first-audio panel records whether playback began before turn completion. There is no microphone transcription yet. Set `BUDDY_TEST_VOICE=1` when running `test:lab` to test actual playback, interruption and replay (paid model requests).
 
@@ -54,10 +54,10 @@ Try:
 - “Create and save an Action Buddy persona inspired by Arnold Schwarzenegger action-hero roles. Customize the delivery and voice settings, then switch to it.”
 - “Make Action Buddy a little calmer and save a new version.”
 - “Switch back to Buddy version 1.”
-- “Use Delia’s voice, speak more slowly, and keep the rest of your settings.”
+- “Use Sarah’s voice and keep the rest of your settings.”
 - “Set your timezone to America/New_York. What time is it there?”
 
-The date/time inspector is a snapshot taken when settings refreshes. Model requests receive a fresh clock independently. Location remains unknown until configured; the browser does not silently adopt its own location or timezone. Synthesis parameters affect requests to Drama 3, while PCM format and capacity/authentication limits remain enforced by the server.
+The date/time inspector is a snapshot taken when settings refreshes. Model requests receive a fresh clock independently. Location remains unknown until configured; the browser does not silently adopt its own location or timezone. Stored synthesis numbers are not sent to Eleven v4 Turbo. PCM format and capacity/authentication limits remain enforced by the server. Buddy version 1 on a new install is the J.P. companion. On an actor that still had the original factory profile, the first restart rewrites that untouched version 1. A profile you already edited stays as you saved it.
 
 ## Earlier-speech checks
 

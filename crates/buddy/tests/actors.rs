@@ -349,9 +349,9 @@ async fn registration_streaming_isolation_and_restart() -> Result<()> {
             command: Command::GetVoiceConfig,
         })
         .await?;
-    assert_eq!(v["config"]["voice"], "adrian");
+    assert_eq!(v["config"]["voice"], "will");
     let voice = robot_buddy::voice::VoiceConfig {
-        voice: robot_buddy::voice::Voice::Delia,
+        voice: robot_buddy::voice::Voice::Sarah,
         delivery: "Calm and warm.".into(),
         synthesis: Default::default(),
         speech_rules: Vec::new(),
@@ -472,7 +472,7 @@ async fn registration_streaming_isolation_and_restart() -> Result<()> {
         expected_version: 0,
         prompt: changed["prompt"].as_str().context("prompt")?.into(),
         voice: robot_buddy::voice::VoiceConfig {
-            voice: robot_buddy::voice::Voice::Delia,
+            voice: robot_buddy::voice::Voice::Sarah,
             delivery: "Calm and warm.".into(),
             synthesis: Default::default(),
             speech_rules: Vec::new(),
@@ -645,7 +645,7 @@ async fn registration_streaming_isolation_and_restart() -> Result<()> {
         .await?;
     let mut changed_voice: robot_buddy::voice::VoiceConfig =
         serde_json::from_value(current["config"].clone())?;
-    changed_voice.voice = robot_buddy::voice::Voice::Sheila;
+    changed_voice.voice = robot_buddy::voice::Voice::Jessica;
     c.send(Call {
         session: device.clone(),
         command: Command::SetVoiceConfig {
@@ -804,7 +804,7 @@ async fn registration_streaming_isolation_and_restart() -> Result<()> {
             command: Command::GetVoiceConfig
         })
         .await?["config"]["voice"],
-        "delia"
+        "sarah"
     );
     assert_eq!(
         c.send(Call {

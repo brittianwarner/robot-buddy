@@ -80,7 +80,7 @@ impl Actor for Conversation {
         let default_voice = serde_json::to_string(&crate::voice::VoiceConfig::default())?;
         ctx.sql().transaction(|tx|async move {
             tx.execute("INSERT OR IGNORE INTO personas(name,latest) VALUES('Buddy',1)",None).await?;
-            tx.execute("INSERT OR IGNORE INTO persona_versions(name,version,prompt,voice,reason,updated) SELECT 'Buddy',1,?,?,'Default playful robot',? WHERE EXISTS(SELECT 1 FROM personas WHERE name='Buddy' AND latest=1)",Some(vec![P::Text(include_str!("prompts/persona.txt").into()),P::Text(default_voice),P::Integer(auth::now())])).await?;
+            tx.execute("INSERT OR IGNORE INTO persona_versions(name,version,prompt,voice,reason,updated) SELECT 'Buddy',1,?,?,'J.P. companion on Will',? WHERE EXISTS(SELECT 1 FROM personas WHERE name='Buddy' AND latest=1)",Some(vec![P::Text(include_str!("prompts/persona.txt").into()),P::Text(default_voice),P::Integer(auth::now())])).await?;
             Ok(())
         },Default::default()).await?;
         let context_config = serde_json::to_string(&crate::context::ContextConfig::default())?;
@@ -97,6 +97,7 @@ impl Actor for Conversation {
         })
     }
     async fn on_start(self: Arc<Self>, ctx: Ctx<Self>) -> Result<()> {
+        self.adopt_factory_companion(&ctx).await?;
         ctx.sql().execute("UPDATE turns SET status='queued' WHERE status='running' AND id IN (SELECT turn_id FROM runs WHERE phase='ready')",None).await?;
         // A provider stream cannot resume after process loss. Preserve its output and make interruption explicit.
         let interrupted = ctx
@@ -131,6 +132,92 @@ impl Actor for Conversation {
     }
 }
 impl Conversation {
+    /// Replace an untouched factory seed with the J.P. companion and Will.
+    /// Customized prompts, voices, and later persona versions stay as saved.
+    async fn adopt_factory_companion(&self, ctx: &Ctx<Self>) -> Result<()> {
+        let prompt_rows = ctx
+            .sql()
+            .query(
+                "SELECT revision,prompt FROM system_prompt WHERE singleton=1",
+                None,
+            )
+            .await?
+            .rows;
+        if let Some(row) = prompt_rows.first()
+            && integer(row, 0)? == 1
+            && string(row, 1)? == include_str!("prompts/persona.factory-v1.txt")
+        {
+            self.set_persona(
+                ctx,
+                1,
+                include_str!("prompts/persona.txt"),
+                "Adopt J.P. companion wording",
+                None,
+            )
+            .await?;
+        }
+        let voice_rows = ctx
+            .sql()
+            .query(
+                "SELECT revision,config FROM voice_settings WHERE singleton=1",
+                None,
+            )
+            .await?
+            .rows;
+        if let Some(row) = voice_rows.first()
+            && integer(row, 0)? == 1
+        {
+            let config: crate::voice::VoiceConfig = serde_json::from_str(&string(row, 1)?)?;
+            if config.is_factory_v1() {
+                self.set_voice(
+                    ctx,
+                    1,
+                    &crate::voice::VoiceConfig::default(),
+                    "Adopt Will on Eleven v4 Turbo",
+                    None,
+                )
+                .await?;
+            }
+        }
+        let buddy = ctx
+            .sql()
+            .query("SELECT latest FROM personas WHERE name='Buddy'", None)
+            .await?
+            .rows;
+        if buddy
+            .first()
+            .is_some_and(|row| integer(row, 0).ok() == Some(1))
+        {
+            let versions = ctx
+                .sql()
+                .query(
+                    "SELECT prompt,voice FROM persona_versions WHERE name='Buddy' AND version=1",
+                    None,
+                )
+                .await?
+                .rows;
+            if let Some(row) = versions.first() {
+                let prompt = string(row, 0)?;
+                let voice: crate::voice::VoiceConfig = serde_json::from_str(&string(row, 1)?)?;
+                if prompt == include_str!("prompts/persona.factory-v1.txt") && voice.is_factory_v1()
+                {
+                    let encoded = serde_json::to_string(&crate::voice::VoiceConfig::default())?;
+                    ctx.sql()
+                        .execute(
+                            "UPDATE persona_versions SET prompt=?,voice=?,reason=?,updated=? WHERE name='Buddy' AND version=1",
+                            Some(vec![
+                                P::Text(include_str!("prompts/persona.txt").into()),
+                                P::Text(encoded),
+                                P::Text("J.P. companion on Will".into()),
+                                P::Integer(auth::now()),
+                            ]),
+                        )
+                        .await?;
+                }
+            }
+        }
+        Ok(())
+    }
     async fn authorize(
         &self,
         ctx: &Ctx<Self>,
