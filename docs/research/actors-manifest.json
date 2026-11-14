@@ -1,0 +1,827 @@
+[
+  {
+    "url": "https://rivet.dev/actors/docs/",
+    "path": "/private/tmp/robot-buddy-research/actors/index.md",
+    "bytes": 4755,
+    "code_blocks": 2,
+    "links": [
+      "/actors/docs/quickstart/backend",
+      "/actors/docs/quickstart/react",
+      "/actors/docs/quickstart/next-js",
+      "/actors/docs/quickstart/rust",
+      "/actors/docs/quickstart/effect",
+      "/agentos/docs",
+      "/ecosystem/pi-durable/",
+      "/actors/docs/events",
+      "/guides/per-tenant-database",
+      "/actors/docs/state",
+      "/actors/docs/sqlite",
+      "/actors/docs/lifecycle",
+      "/actors/docs/keys",
+      "/actors/docs/events",
+      "/actors/docs/schedule",
+      "/actors/docs/communicating-between-actors",
+      "/actors/docs/general/edge",
+      "/actors/docs/debugging",
+      "/docs/mcp",
+      "/agentos/docs",
+      "/ecosystem/rivet-workflows/",
+      "/actors/docs/quickstart/backend",
+      "/docs/deploy/self-host/control-plane",
+      "/docs/deploy/cloud"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/actions/",
+    "path": "/private/tmp/robot-buddy-research/actors/actions.md",
+    "bytes": 9508,
+    "code_blocks": 11,
+    "links": [
+      "/actors/docs/connections",
+      "/actors/docs/request-handler",
+      "/actors/docs/websocket-handler",
+      "/actors/docs/sqlite#transactions",
+      "/actors/docs/communicating-between-actors",
+      "/actors/docs/communicating-between-actors",
+      "https://zod.dev/",
+      "/actors/docs/events",
+      "/actors/docs/lifecycle#actor-shutdown-abort-signal",
+      "/actors/docs/types"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/actor-configuration/",
+    "path": "/private/tmp/robot-buddy-research/actors/actor-configuration.md",
+    "bytes": 706,
+    "code_blocks": 1,
+    "links": [
+      "/actors/docs/registry-configuration",
+      "/actors/docs/state",
+      "/actors/docs/actions",
+      "/actors/docs/lifecycle"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/appearance/",
+    "path": "/private/tmp/robot-buddy-research/actors/appearance.md",
+    "bytes": 3071,
+    "code_blocks": 5,
+    "links": [
+      "https://fontawesome.com/search",
+      "#workflow-actors",
+      "/workflows/docs"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/authentication/",
+    "path": "/private/tmp/robot-buddy-research/actors/authentication.md",
+    "bytes": 16986,
+    "code_blocks": 12,
+    "links": [
+      "/docs/authentication",
+      "/docs/jwt",
+      "/docs/jwt",
+      "/actors/docs/access-control",
+      "/actors/docs/connections#parameters",
+      "/actors/docs/keys",
+      "/actors/docs/errors",
+      "/actors/docs/state#ephemeral-state",
+      "/actors/docs/sqlite",
+      "/actors/docs/state#ephemeral-state"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/clients/",
+    "path": "/private/tmp/robot-buddy-research/actors/clients.md",
+    "bytes": 473,
+    "code_blocks": 0,
+    "links": [
+      "/docs/clients/javascript",
+      "/docs/clients/react",
+      "/docs/clients/rust",
+      "/docs/clients/swift",
+      "/docs/clients/swiftui"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/clients/javascript/",
+    "path": "/private/tmp/robot-buddy-research/actors/clients__javascript.md",
+    "bytes": 7511,
+    "code_blocks": 13,
+    "links": [
+      "/actors/docs/quickstart/backend",
+      "/docs/endpoints#url-auth-syntax",
+      "/actors/docs/lifecycle#shutdown-sequence",
+      "#low-level-http--websocket",
+      "https://www.npmjs.com/package/rivetkit",
+      "/actors/docs/clients"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/clients/react/",
+    "path": "/private/tmp/robot-buddy-research/actors/clients__react.md",
+    "bytes": 5846,
+    "code_blocks": 11,
+    "links": [
+      "/actors/docs/quickstart/react",
+      "/actors/docs/clients/javascript",
+      "/docs/endpoints#url-auth-syntax",
+      "https://www.npmjs.com/package/@rivetkit/react",
+      "/actors/docs/clients/react",
+      "/actors/docs/clients/react"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/clients/rust/",
+    "path": "/private/tmp/robot-buddy-research/actors/clients__rust.md",
+    "bytes": 10967,
+    "code_blocks": 13,
+    "links": [
+      "/actors/docs/quickstart/rust",
+      "/actors/docs/quickstart/rust#define-your-actor",
+      "/docs/endpoints",
+      "https://docs.rs/rivetkit-client/latest/rivetkit_client/"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/clients/swift/",
+    "path": "/private/tmp/robot-buddy-research/actors/clients__swift.md",
+    "bytes": 11220,
+    "code_blocks": 17,
+    "links": [
+      "/docs/endpoints#url-auth-syntax"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/clients/swiftui/",
+    "path": "/private/tmp/robot-buddy-research/actors/clients__swiftui.md",
+    "bytes": 8863,
+    "code_blocks": 12,
+    "links": [
+      "/docs/endpoints#url-auth-syntax"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/communicating-between-actors/",
+    "path": "/private/tmp/robot-buddy-research/actors/communicating-between-actors.md",
+    "bytes": 8781,
+    "code_blocks": 5,
+    "links": [
+      "/actors/docs/clients"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/connections/",
+    "path": "/private/tmp/robot-buddy-research/actors/connections.md",
+    "bytes": 9778,
+    "code_blocks": 8,
+    "links": [
+      "/actors/docs/clients",
+      "/actors/docs/state#ephemeral-state",
+      "/actors/docs/sqlite",
+      "/actors/docs/permissions",
+      "/actors/docs/events",
+      "/actors/docs/websocket-handler"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/cors/",
+    "path": "/private/tmp/robot-buddy-research/actors/cors.md",
+    "bytes": 2046,
+    "code_blocks": 2,
+    "links": [
+      "https://github.com/rivet-dev/rivet/issues/3539"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/crash-course/",
+    "path": "/private/tmp/robot-buddy-research/actors/crash-course.md",
+    "bytes": 26235,
+    "code_blocks": 25,
+    "links": [
+      "/actors/docs/clients/javascript",
+      "/actors/docs/clients/react",
+      "/actors/docs/clients/swift",
+      "/actors/docs/state",
+      "/actors/docs/keys",
+      "/actors/docs/input",
+      "/actors/docs/state",
+      "/actors/docs/actions",
+      "/actors/docs/events",
+      "/actors/docs/connections",
+      "/actors/docs/lifecycle#background-tasks",
+      "/workflows/docs",
+      "/actors/docs/communicating-between-actors",
+      "/actors/docs/schedule",
+      "/actors/docs/destroy",
+      "/actors/docs/lifecycle",
+      "/actors/docs/types",
+      "/actors/docs/errors",
+      "/actors/docs/request-handler",
+      "/actors/docs/websocket-handler",
+      "/actors/docs/appearance",
+      "/actors/docs/clients/javascript",
+      "/actors/docs/clients/react",
+      "/actors/docs/clients/swift",
+      "/actors/docs/design-patterns",
+      "/actors/docs/sqlite#transactions",
+      "/actors/docs/permissions",
+      "/actors/docs/cors",
+      "/docs/versions",
+      "/docs/versions"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/debugging/",
+    "path": "/private/tmp/robot-buddy-research/actors/debugging.md",
+    "bytes": 1574,
+    "code_blocks": 2,
+    "links": [
+      "/docs/debugging",
+      "/docs/api/actor-routing"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/deprecated/kv/",
+    "path": "/private/tmp/robot-buddy-research/actors/deprecated__kv.md",
+    "bytes": 5552,
+    "code_blocks": 3,
+    "links": [
+      "/actors/docs/sqlite"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/deprecated/prevent-sleep/",
+    "path": "/private/tmp/robot-buddy-research/actors/deprecated__prevent-sleep.md",
+    "bytes": 2051,
+    "code_blocks": 2,
+    "links": [
+      "/actors/docs/lifecycle"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/deprecated/queues/",
+    "path": "/private/tmp/robot-buddy-research/actors/deprecated__queues.md",
+    "bytes": 10582,
+    "code_blocks": 6,
+    "links": [
+      "/actors/docs/actions",
+      "/actors/docs/sqlite",
+      "#build-a-durable-job-queue",
+      "/durable-streams/docs",
+      "/docs/api/actor-routing",
+      "/docs/api/authentication"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/deprecated/run/",
+    "path": "/private/tmp/robot-buddy-research/actors/deprecated__run.md",
+    "bytes": 3673,
+    "code_blocks": 2,
+    "links": [
+      "/actors/docs/sqlite",
+      "/actors/docs/deprecated/queues#build-a-durable-job-queue"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/deprecated/state/",
+    "path": "/private/tmp/robot-buddy-research/actors/deprecated__state.md",
+    "bytes": 15789,
+    "code_blocks": 9,
+    "links": [
+      "/actors/docs/sqlite",
+      "/actors/docs/state#ephemeral-state",
+      "#connection-state",
+      "#update-data-in-sql",
+      "https://cbor.io",
+      "/actors/docs/deprecated/run",
+      "/actors/docs/websocket-handler#websocket-hibernation"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/design-patterns/",
+    "path": "/private/tmp/robot-buddy-research/actors/design-patterns.md",
+    "bytes": 16211,
+    "code_blocks": 12,
+    "links": [
+      "/actors/docs/actions",
+      "/actors/docs/events"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/destroy/",
+    "path": "/private/tmp/robot-buddy-research/actors/destroy.md",
+    "bytes": 3661,
+    "code_blocks": 5,
+    "links": [],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/environment-variables/",
+    "path": "/private/tmp/robot-buddy-research/actors/environment-variables.md",
+    "bytes": 1592,
+    "code_blocks": 0,
+    "links": [
+      "/docs/environment-variables"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/errors/",
+    "path": "/private/tmp/robot-buddy-research/actors/errors.md",
+    "bytes": 11647,
+    "code_blocks": 13,
+    "links": [],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/events/",
+    "path": "/private/tmp/robot-buddy-research/actors/events.md",
+    "bytes": 9432,
+    "code_blocks": 9,
+    "links": [
+      "/actors/docs/websocket-handler",
+      "/actors/docs/connections"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/forking/",
+    "path": "/private/tmp/robot-buddy-research/actors/forking.md",
+    "bytes": 18191,
+    "code_blocks": 9,
+    "links": [
+      "/actors/docs/communicating-between-actors",
+      "/guides/forking-subagents",
+      "/docs/jwt",
+      "/docs/namespaces",
+      "/actors/docs/metadata#namespace",
+      "/docs/api/namespaces/create",
+      "/actors/docs/limits#forks",
+      "/guides/side-questions",
+      "/guides/branch-conversations",
+      "/guides/forking-subagents",
+      "/guides/agent-swarms"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/http-server/",
+    "path": "/private/tmp/robot-buddy-research/actors/http-server.md",
+    "bytes": 1524,
+    "code_blocks": 2,
+    "links": [
+      "/docs/endpoints",
+      "/docs/deploy/self-host/workers/",
+      "/actors/docs/request-handler"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/input/",
+    "path": "/private/tmp/robot-buddy-research/actors/input.md",
+    "bytes": 10311,
+    "code_blocks": 6,
+    "links": [
+      "/actors/docs/sqlite"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/keys/",
+    "path": "/private/tmp/robot-buddy-research/actors/keys.md",
+    "bytes": 6964,
+    "code_blocks": 9,
+    "links": [
+      "/actors/docs/design-patterns",
+      "/actors/docs/metadata",
+      "/actors/docs/input"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/lifecycle/",
+    "path": "/private/tmp/robot-buddy-research/actors/lifecycle.md",
+    "bytes": 38599,
+    "code_blocks": 26,
+    "links": [
+      "#background-tasks",
+      "#background-tasks",
+      "/actors/docs/forking",
+      "#background-tasks",
+      "/actors/docs/state#ephemeral-state",
+      "/actors/docs/state#ephemeral-state",
+      "/actors/docs/sqlite",
+      "/actors/docs/forking",
+      "/actors/docs/forking#onfork",
+      "#background-tasks",
+      "/workflows/docs",
+      "#keeping-the-actor-awake",
+      "/actors/docs/permissions",
+      "/actors/docs/permissions",
+      "/actors/docs/request-handler",
+      "/actors/docs/websocket-handler",
+      "#background-tasks",
+      "#shutdown-sequence",
+      "/actors/docs/clients/javascript#skip-ready-wait",
+      "#onsleep",
+      "#shutdown-sequence",
+      "#options",
+      "#shutdown-sequence",
+      "#background-tasks",
+      "/actors/docs/actions#canceling-long-running-actions",
+      "/actors/docs/types"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/limits/",
+    "path": "/private/tmp/robot-buddy-research/actors/limits.md",
+    "bytes": 9555,
+    "code_blocks": 2,
+    "links": [
+      "/actors/docs/websocket-handler",
+      "/actors/docs/request-handler",
+      "/actors/docs/request-handler",
+      "/actors/docs/sqlite",
+      "/actors/docs/sqlite",
+      "/actors/docs/forking",
+      "/docs/jwt",
+      "/talk-to-an-engineer/"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/logging/",
+    "path": "/private/tmp/robot-buddy-research/actors/logging.md",
+    "bytes": 5100,
+    "code_blocks": 5,
+    "links": [
+      "https://getpino.io/#/docs/api?id=logger",
+      "https://getpino.io/#/docs/api?id=export"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/metadata/",
+    "path": "/private/tmp/robot-buddy-research/actors/metadata.md",
+    "bytes": 3696,
+    "code_blocks": 7,
+    "links": [
+      "/actors/docs/keys"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/performance-monitoring/",
+    "path": "/private/tmp/robot-buddy-research/actors/performance-monitoring.md",
+    "bytes": 8727,
+    "code_blocks": 7,
+    "links": [
+      "/actors/docs/environment-variables#metrics",
+      "/actors/docs/sqlite-profiling#query-metrics",
+      "/actors/docs/performance-monitoring",
+      "/actors/docs/sqlite-profiling"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/permissions/",
+    "path": "/private/tmp/robot-buddy-research/actors/permissions.md",
+    "bytes": 22237,
+    "code_blocks": 16,
+    "links": [
+      "/docs/authentication",
+      "/docs/jwt",
+      "/actors/docs/sqlite",
+      "#quickstart",
+      "/actors/docs/connections#parameters",
+      "/actors/docs/keys",
+      "/actors/docs/errors",
+      "/actors/docs/state#ephemeral-state",
+      "/actors/docs/sqlite",
+      "/docs/jwt"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/production-checklist/",
+    "path": "/private/tmp/robot-buddy-research/actors/production-checklist.md",
+    "bytes": 3697,
+    "code_blocks": 0,
+    "links": [
+      "/docs/deploy/self-host/workers/production-checklist/",
+      "/actors/docs/design-patterns",
+      "/actors/docs/design-patterns",
+      "/actors/docs/lifecycle",
+      "/actors/docs/sqlite",
+      "/actors/docs/input",
+      "/actors/docs/events",
+      "/actors/docs/actor-configuration",
+      "/actors/docs/registry-configuration",
+      "/workflows/docs",
+      "/actors/docs/permissions",
+      "/actors/docs/cors",
+      "/docs/jwt",
+      "/docs/connect",
+      "/actors/docs/permissions",
+      "/actors/docs/clients/javascript#connection-lifecycle",
+      "/docs/versions#upgrading-rivetkit"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/quickstart/backend/",
+    "path": "/private/tmp/robot-buddy-research/actors/quickstart__backend.md",
+    "bytes": 3310,
+    "code_blocks": 8,
+    "links": [
+      "https://github.com/rivet-dev/rivet/tree/main/examples/hello-world",
+      "/actors/docs/clients/javascript",
+      "/actors/docs/clients/react"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/quickstart/effect/",
+    "path": "/private/tmp/robot-buddy-research/actors/quickstart__effect.md",
+    "bytes": 10365,
+    "code_blocks": 10,
+    "links": [
+      "https://github.com/rivet-dev/rivet/tree/main/examples/hello-world-effect",
+      "https://github.com/rivet-dev/rivet/tree/main/examples/chat-room-effect",
+      "https://effect.website/docs/schema/introduction/",
+      "/actors/docs/sqlite",
+      "https://github.com/rivet-dev/rivet/tree/main/examples/chat-room-effect",
+      "/actors/docs/clients/javascript",
+      "#raw-escape-hatch",
+      "/actors/docs/events",
+      "/actors/docs/schedule",
+      "/actors/docs/sqlite",
+      "/actors/docs/lifecycle",
+      "/actors/docs",
+      "/actors/docs/actions",
+      "/actors/docs/sqlite",
+      "/actors/docs/events"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/quickstart/react/",
+    "path": "/private/tmp/robot-buddy-research/actors/quickstart__react.md",
+    "bytes": 3762,
+    "code_blocks": 12,
+    "links": [
+      "/actors/docs/clients/react"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/quickstart/rust/",
+    "path": "/private/tmp/robot-buddy-research/actors/quickstart__rust.md",
+    "bytes": 6147,
+    "code_blocks": 8,
+    "links": [
+      "https://github.com/rivet-dev/rivet",
+      "https://github.com/rivet-dev/rivet/tree/main/examples/hello-world-rust",
+      "/actors/docs/clients/javascript",
+      "/actors/docs/clients/react",
+      "https://docs.rs/rivetkit",
+      "/actors/docs/actions",
+      "/actors/docs/sqlite",
+      "/actors/docs/events"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/registry-configuration/",
+    "path": "/private/tmp/robot-buddy-research/actors/registry-configuration.md",
+    "bytes": 1516,
+    "code_blocks": 4,
+    "links": [
+      "/docs/architecture#nodes",
+      "/docs/environment-variables",
+      "/actors/docs/actor-configuration",
+      "/actors/docs/http-server"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/request-handler/",
+    "path": "/private/tmp/robot-buddy-research/actors/request-handler.md",
+    "bytes": 10256,
+    "code_blocks": 9,
+    "links": [
+      "/actors/docs/actions",
+      "/actors/docs/http-api",
+      "/actors/docs/lifecycle",
+      "/actors/docs/connections",
+      "/actors/docs/lifecycle#shutdown-sequence",
+      "/actors/docs/clients/javascript#skip-ready-wait"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/schedule/",
+    "path": "/private/tmp/robot-buddy-research/actors/schedule.md",
+    "bytes": 5572,
+    "code_blocks": 11,
+    "links": [
+      "/actors/docs/lifecycle#sleeping",
+      "#sleep-between-runs",
+      "#view-run-history"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/secure-code-execution/",
+    "path": "/private/tmp/robot-buddy-research/actors/secure-code-execution.md",
+    "bytes": 5078,
+    "code_blocks": 7,
+    "links": [
+      "/agentos/docs",
+      "/agentos/docs/bash",
+      "/agentos/docs/processes",
+      "/agentos/docs/filesystem",
+      "/agentos/docs/javascript",
+      "/agentos/docs/python",
+      "/agentos/docs/networking",
+      "/agentos/docs/software",
+      "/agentos/docs/cron",
+      "/agentos/docs/permissions",
+      "/agentos/docs/resource-limits",
+      "/actors/docs/state",
+      "/actors/docs/sqlite",
+      "/agentos/docs/persistence",
+      "/agentos/docs",
+      "/guides/sandbox-adapter",
+      "/actors/docs/lifecycle"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/sqlite-drizzle/",
+    "path": "/private/tmp/robot-buddy-research/actors/sqlite-drizzle.md",
+    "bytes": 6765,
+    "code_blocks": 14,
+    "links": [
+      "/actors/docs/state",
+      "/actors/docs/sqlite#transactions",
+      "https://orm.drizzle.team/docs/get-started-sqlite",
+      "https://orm.drizzle.team/docs/drizzle-kit-generate",
+      "https://orm.drizzle.team/docs/deploy-cloudflare-d1",
+      "https://orm.drizzle.team/docs/deploy-cloudflare-do",
+      "https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/sqlite-profiling/",
+    "path": "/private/tmp/robot-buddy-research/actors/sqlite-profiling.md",
+    "bytes": 11339,
+    "code_blocks": 16,
+    "links": [
+      "/docs/deploy/self-host/workers/prometheus-metrics/",
+      "#configure-profiling"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/sqlite/",
+    "path": "/private/tmp/robot-buddy-research/actors/sqlite.md",
+    "bytes": 7389,
+    "code_blocks": 9,
+    "links": [
+      "/actors/docs/state",
+      "https://orm.drizzle.team/",
+      "/actors/docs/sqlite-drizzle",
+      "#transactions",
+      "/actors/docs/sqlite-profiling",
+      "/docs/versions#sqlite-recommended-for-complex-schemas",
+      "/actors/docs/sqlite-drizzle",
+      "https://sqlite.org/docs.html",
+      "https://sqlite.org/lang.html"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/state/",
+    "path": "/private/tmp/robot-buddy-research/actors/state.md",
+    "bytes": 11040,
+    "code_blocks": 9,
+    "links": [
+      "/actors/docs/sqlite",
+      "/actors/docs/actions",
+      "/actors/docs/design-patterns",
+      "#embedded-sqlite",
+      "/actors/docs/sqlite",
+      "/actors/docs/sqlite-drizzle"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/testing/",
+    "path": "/private/tmp/robot-buddy-research/actors/testing.md",
+    "bytes": 6667,
+    "code_blocks": 5,
+    "links": [
+      "/actors/docs/sqlite"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/troubleshooting/",
+    "path": "/private/tmp/robot-buddy-research/actors/troubleshooting.md",
+    "bytes": 2949,
+    "code_blocks": 0,
+    "links": [
+      "/actors/docs/logging",
+      "https://rivet.dev/discord",
+      "https://github.com/rivet-dev/rivet/issues",
+      "/docs/statuses",
+      "https://rivet.dev/actors/docs",
+      "/docs/versions",
+      "/docs/statuses"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/types/",
+    "path": "/private/tmp/robot-buddy-research/actors/types.md",
+    "bytes": 3393,
+    "code_blocks": 2,
+    "links": [],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/wasm-vs-native-sdk/",
+    "path": "/private/tmp/robot-buddy-research/actors/wasm-vs-native-sdk.md",
+    "bytes": 1688,
+    "code_blocks": 2,
+    "links": [
+      "/docs/architecture"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/websocket-handler/",
+    "path": "/private/tmp/robot-buddy-research/actors/websocket-handler.md",
+    "bytes": 11100,
+    "code_blocks": 13,
+    "links": [
+      "/actors/docs/actions",
+      "/actors/docs/events",
+      "https://github.com/rivet-dev/rivet/tree/main/examples/raw-websocket-handler",
+      "/actors/docs/http-api",
+      "/actors/docs/lifecycle",
+      "/actors/docs/connections",
+      "/actors/docs/sqlite",
+      "/actors/docs/connections",
+      "/actors/docs/lifecycle#shutdown-sequence",
+      "/actors/docs/clients/javascript#skip-ready-wait"
+    ],
+    "status": "ok"
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/access-control",
+    "status": "error",
+    "error": "Command '['curl', '-fsSL', '--max-time', '40', 'https://rivet.dev/actors/docs/access-control.md']' returned non-zero exit status 56."
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/general/edge",
+    "status": "error",
+    "error": "Command '['curl', '-fsSL', '--max-time', '40', 'https://rivet.dev/actors/docs/general/edge.md']' returned non-zero exit status 56."
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/http-api",
+    "status": "error",
+    "error": "Command '['curl', '-fsSL', '--max-time', '40', 'https://rivet.dev/actors/docs/http-api.md']' returned non-zero exit status 56."
+  },
+  {
+    "url": "https://rivet.dev/actors/docs/quickstart/next-js",
+    "status": "error",
+    "error": "Command '['curl', '-fsSL', '--max-time', '40', 'https://rivet.dev/actors/docs/quickstart/next-js.md']' returned non-zero exit status 56."
+  }
+]

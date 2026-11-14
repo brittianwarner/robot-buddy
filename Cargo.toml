@@ -1,0 +1,33 @@
+[workspace]
+members = ["crates/buddy", "apps/server", "apps/robot"]
+resolver = "3"
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "MIT"
+[workspace.dependencies]
+anyhow = "1"
+async-trait = "0.1"
+axum = { version = "0.8", features = ["form"] }
+base64 = "0.22"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+futures-util = "0.3"
+hmac = "0.12"
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+rivetkit = "=3.1.1"
+rig = { version = "=0.46.0", default-features = false, features = ["agent", "reqwest", "rustls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "v7"] }
+url = "2"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+[profile.dev]
+debug = 0
+[profile.release]
+lto = "thin"
+strip = true

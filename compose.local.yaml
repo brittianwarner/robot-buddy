@@ -1,0 +1,15 @@
+# Local-only test workspace, isolated from the default Rivet ports.
+services:
+  robot-buddy:
+    build: .
+    image: robot-buddy:local
+    env_file: .env.local
+    ports:
+      - "127.0.0.1:18080:8080"
+      - "127.0.0.1:17420:6420"
+    volumes:
+      - buddy-local-data:/data
+    restart: unless-stopped
+    stop_grace_period: 60s
+volumes:
+  buddy-local-data:

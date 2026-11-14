@@ -1,0 +1,16 @@
+[Unit]
+Description=Robot Buddy setup and Rivet client
+After=NetworkManager.service
+Requires=NetworkManager.service
+[Service]
+Type=simple
+EnvironmentFile=/etc/robot-buddy/device.env
+ExecStart=/usr/local/bin/robot-buddy-robot
+Restart=on-failure
+RestartSec=5
+StateDirectory=robot-buddy
+UMask=0077
+# NetworkManager profile management and local port 80 require device-side privileges.
+# Run only on the robot; never put this service in the backend container.
+[Install]
+WantedBy=multi-user.target

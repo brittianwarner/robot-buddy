@@ -1,0 +1,10 @@
+/target/
+/node_modules/
+.turbo/
+.env
+.env.*
+!.env.example
+secrets/
+*.key
+*.identity.json
+/data/

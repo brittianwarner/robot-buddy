@@ -1,0 +1,3593 @@
+{
+  "scope": "Directly linked Rivet-owned GitHub source files under examples; tree links catalogued in crawl manifest. Downloaded for review, not all manually reviewed.",
+  "files": [
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/embedded/advanced.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/embedded/advanced.ts",
+      "status": 200,
+      "characters": 475
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/embedded/config-reference.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/embedded/config-reference.ts",
+      "status": 200,
+      "characters": 1828
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/embedded/host-functions-bash.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/embedded/host-functions-bash.ts",
+      "status": 200,
+      "characters": 987
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/embedded/host-functions-javascript.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/embedded/host-functions-javascript.ts",
+      "status": 200,
+      "characters": 1414
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/embedded/host-functions-python.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/embedded/host-functions-python.ts",
+      "status": 200,
+      "characters": 1047
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/embedded/host-functions.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/embedded/host-functions.ts",
+      "status": 200,
+      "characters": 687
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/embedded/limits.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/embedded/limits.ts",
+      "status": 200,
+      "characters": 581
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/embedded/mounts.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/embedded/mounts.ts",
+      "status": 200,
+      "characters": 628
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/embedded/permissions.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/embedded/permissions.ts",
+      "status": 200,
+      "characters": 459
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/embedded/persistence.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/embedded/persistence.ts",
+      "status": 200,
+      "characters": 846
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/embedded/quickstart-configure.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/embedded/quickstart-configure.ts",
+      "status": 200,
+      "characters": 1146
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/embedded/quickstart.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/embedded/quickstart.ts",
+      "status": 200,
+      "characters": 777
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/embedded/software-install.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/embedded/software-install.ts",
+      "status": 200,
+      "characters": 801
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/embedded/software-local.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/embedded/software-local.ts",
+      "status": 200,
+      "characters": 759
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/embedded/software.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/embedded/software.ts",
+      "status": 200,
+      "characters": 512
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/embedded/vm.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/embedded/vm.ts",
+      "status": 200,
+      "characters": 3599
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/js-code-mode/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/js-code-mode/src/index.ts",
+      "status": 200,
+      "characters": 1244
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/js-dev-servers/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/js-dev-servers/src/index.ts",
+      "status": 200,
+      "characters": 1232
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/js-quickstart/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/js-quickstart/src/index.ts",
+      "status": 200,
+      "characters": 642
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/js-runtime-platform/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/js-runtime-platform/src/index.ts",
+      "status": 200,
+      "characters": 632
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/js-sdk-overview/src/contexts.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/js-sdk-overview/src/contexts.ts",
+      "status": 200,
+      "characters": 676
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/js-sdk-overview/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/js-sdk-overview/src/index.ts",
+      "status": 200,
+      "characters": 369
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/js-sdk-overview/src/inputs.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/js-sdk-overview/src/inputs.ts",
+      "status": 200,
+      "characters": 406
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/js-sdk-overview/src/limits.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/js-sdk-overview/src/limits.ts",
+      "status": 200,
+      "characters": 431
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/js-sdk-overview/src/npm.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/js-sdk-overview/src/npm.ts",
+      "status": 200,
+      "characters": 410
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/js-sdk-overview/src/platform.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/js-sdk-overview/src/platform.ts",
+      "status": 200,
+      "characters": 1179
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/js-typescript/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/js-typescript/src/index.ts",
+      "status": 200,
+      "characters": 961
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/python-quickstart/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/python-quickstart/src/index.ts",
+      "status": 200,
+      "characters": 286
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/python-sdk-overview/src/contexts.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/python-sdk-overview/src/contexts.ts",
+      "status": 200,
+      "characters": 635
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/python-sdk-overview/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/python-sdk-overview/src/index.ts",
+      "status": 200,
+      "characters": 355
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/python-sdk-overview/src/inputs.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/python-sdk-overview/src/inputs.ts",
+      "status": 200,
+      "characters": 389
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/python-sdk-overview/src/limits.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/python-sdk-overview/src/limits.ts",
+      "status": 200,
+      "characters": 439
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/python-sdk-overview/src/modules.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/python-sdk-overview/src/modules.ts",
+      "status": 200,
+      "characters": 605
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/python-sdk-overview/src/packages.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/python-sdk-overview/src/packages.ts",
+      "status": 200,
+      "characters": 355
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/python-sdk-overview/src/platform.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/python-sdk-overview/src/platform.ts",
+      "status": 200,
+      "characters": 1088
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/python-sdk-overview/src/spawn.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/python-sdk-overview/src/spawn.ts",
+      "status": 200,
+      "characters": 560
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/quickstart/bash/files.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/quickstart/bash/files.ts",
+      "status": 200,
+      "characters": 492
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/quickstart/bash/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/quickstart/bash/index.ts",
+      "status": 200,
+      "characters": 984
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/quickstart/bash/limits.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/quickstart/bash/limits.ts",
+      "status": 200,
+      "characters": 401
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/quickstart/bash/spawn.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/quickstart/bash/spawn.ts",
+      "status": 200,
+      "characters": 638
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/quickstart/hello-world/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/quickstart/hello-world/index.ts",
+      "status": 200,
+      "characters": 355
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/quickstart/host-functions/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/quickstart/host-functions/index.ts",
+      "status": 200,
+      "characters": 1225
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/examples/quickstart/sandbox/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/examples/quickstart/sandbox/index.ts",
+      "status": 200,
+      "characters": 1609
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/secure-exec/examples/ai-agent/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/secure-exec/examples/ai-agent/src/index.ts",
+      "status": 200,
+      "characters": 1720
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/secure-exec/examples/benchmark/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/secure-exec/examples/benchmark/src/index.ts",
+      "status": 200,
+      "characters": 3873
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/secure-exec/examples/code-mode/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/secure-exec/examples/code-mode/src/index.ts",
+      "status": 200,
+      "characters": 1889
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/secure-exec/examples/contexts/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/secure-exec/examples/contexts/src/index.ts",
+      "status": 200,
+      "characters": 1592
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/secure-exec/examples/contexts/src/parallel.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/secure-exec/examples/contexts/src/parallel.ts",
+      "status": 200,
+      "characters": 870
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/secure-exec/examples/dev-server/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/secure-exec/examples/dev-server/src/index.ts",
+      "status": 200,
+      "characters": 1545
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/secure-exec/examples/host-functions/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/secure-exec/examples/host-functions/src/index.ts",
+      "status": 200,
+      "characters": 1174
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/secure-exec/examples/limits/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/secure-exec/examples/limits/src/index.ts",
+      "status": 200,
+      "characters": 596
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/secure-exec/examples/mounts/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/secure-exec/examples/mounts/src/index.ts",
+      "status": 200,
+      "characters": 1681
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/secure-exec/examples/npm/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/secure-exec/examples/npm/src/index.ts",
+      "status": 200,
+      "characters": 1085
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/secure-exec/examples/permissions/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/secure-exec/examples/permissions/src/index.ts",
+      "status": 200,
+      "characters": 1277
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/secure-exec/examples/plugins/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/secure-exec/examples/plugins/src/index.ts",
+      "status": 200,
+      "characters": 996
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/secure-exec/examples/quickstart/src/errors.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/secure-exec/examples/quickstart/src/errors.ts",
+      "status": 200,
+      "characters": 1013
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/secure-exec/examples/quickstart/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/secure-exec/examples/quickstart/src/index.ts",
+      "status": 200,
+      "characters": 1333
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/secure-exec/examples/quickstart/src/lifecycle.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/secure-exec/examples/quickstart/src/lifecycle.ts",
+      "status": 200,
+      "characters": 613
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/secure-exec/examples/quickstart/src/module.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/secure-exec/examples/quickstart/src/module.ts",
+      "status": 200,
+      "characters": 375
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/secure-exec/examples/quickstart/src/output.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/secure-exec/examples/quickstart/src/output.ts",
+      "status": 200,
+      "characters": 815
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/secure-exec/examples/typescript/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/secure-exec/examples/typescript/src/index.ts",
+      "status": 200,
+      "characters": 796
+    },
+    {
+      "url": "https://github.com/rivet-dev/agentos/blob/main/secure-exec/examples/vm/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agentos/main/secure-exec/examples/vm/src/index.ts",
+      "status": 200,
+      "characters": 1586
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/agent-to-agent/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/agent-to-agent/client.ts",
+      "status": 200,
+      "characters": 484
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/agent-to-agent/coder.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/agent-to-agent/coder.ts",
+      "status": 200,
+      "characters": 1203
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/agent-to-agent/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/agent-to-agent/server.ts",
+      "status": 200,
+      "characters": 896
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/built-in-tools/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/built-in-tools/client.ts",
+      "status": 200,
+      "characters": 430
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/built-in-tools/reviewer.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/built-in-tools/reviewer.ts",
+      "status": 200,
+      "characters": 676
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/built-in-tools/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/built-in-tools/server.ts",
+      "status": 200,
+      "characters": 709
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/client-sdk/browser.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/client-sdk/browser.ts",
+      "status": 200,
+      "characters": 856
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/client-sdk/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/client-sdk/client.ts",
+      "status": 200,
+      "characters": 2467
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/client-sdk/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/client-sdk/server.ts",
+      "status": 200,
+      "characters": 508
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/client-sdk/token.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/client-sdk/token.ts",
+      "status": 200,
+      "characters": 837
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/connectors/discord/discord.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/connectors/discord/discord.ts",
+      "status": 200,
+      "characters": 1921
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/connectors/discord/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/connectors/discord/server.ts",
+      "status": 200,
+      "characters": 1138
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/connectors/github/github.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/connectors/github/github.ts",
+      "status": 200,
+      "characters": 1633
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/connectors/github/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/connectors/github/server.ts",
+      "status": 200,
+      "characters": 1125
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/connectors/linear/linear.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/connectors/linear/linear.ts",
+      "status": 200,
+      "characters": 1851
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/connectors/linear/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/connectors/linear/server.ts",
+      "status": 200,
+      "characters": 1137
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/connectors/slack/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/connectors/slack/server.ts",
+      "status": 200,
+      "characters": 1107
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/connectors/slack/slack.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/connectors/slack/slack.ts",
+      "status": 200,
+      "characters": 1975
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/credentials/api-keys.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/credentials/api-keys.ts",
+      "status": 200,
+      "characters": 667
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/custom-tools/get-order.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/custom-tools/get-order.ts",
+      "status": 200,
+      "characters": 1090
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/custom-tools/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/custom-tools/server.ts",
+      "status": 200,
+      "characters": 457
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/design-patterns/agent-per-key/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/design-patterns/agent-per-key/client.ts",
+      "status": 200,
+      "characters": 1049
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/design-patterns/agent-per-key/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/design-patterns/agent-per-key/server.ts",
+      "status": 200,
+      "characters": 889
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/design-patterns/background-job/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/design-patterns/background-job/client.ts",
+      "status": 200,
+      "characters": 684
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/design-patterns/background-job/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/design-patterns/background-job/server.ts",
+      "status": 200,
+      "characters": 1596
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/design-patterns/key-per-request.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/design-patterns/key-per-request.ts",
+      "status": 200,
+      "characters": 355
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/design-patterns/one-agent.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/design-patterns/one-agent.ts",
+      "status": 200,
+      "characters": 377
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/design-patterns/tenant-credentials/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/design-patterns/tenant-credentials/client.ts",
+      "status": 200,
+      "characters": 719
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/design-patterns/tenant-credentials/credentials.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/design-patterns/tenant-credentials/credentials.ts",
+      "status": 200,
+      "characters": 1332
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/design-patterns/tenant-credentials/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/design-patterns/tenant-credentials/server.ts",
+      "status": 200,
+      "characters": 651
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/durable-ai-agents/chat-agent.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/durable-ai-agents/chat-agent.ts",
+      "status": 200,
+      "characters": 2227
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/durable-ai-agents/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/durable-ai-agents/client.ts",
+      "status": 200,
+      "characters": 2930
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/durable-ai-agents/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/durable-ai-agents/server.ts",
+      "status": 200,
+      "characters": 151
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/durable-ai-agents/tools.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/durable-ai-agents/tools.ts",
+      "status": 200,
+      "characters": 2248
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/extensions/audit.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/extensions/audit.ts",
+      "status": 200,
+      "characters": 494
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/extensions/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/extensions/client.ts",
+      "status": 200,
+      "characters": 816
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/extensions/read-only.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/extensions/read-only.ts",
+      "status": 200,
+      "characters": 583
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/extensions/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/extensions/server.ts",
+      "status": 200,
+      "characters": 773
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/human-in-the-loop/ApprovalDialog.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/human-in-the-loop/ApprovalDialog.tsx",
+      "status": 200,
+      "characters": 2920
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/human-in-the-loop/deploy.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/human-in-the-loop/deploy.ts",
+      "status": 200,
+      "characters": 1763
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/human-in-the-loop/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/human-in-the-loop/server.ts",
+      "status": 200,
+      "characters": 468
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/multi-agent-system/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/multi-agent-system/client.ts",
+      "status": 200,
+      "characters": 1007
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/multi-agent-system/orchestrator.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/multi-agent-system/orchestrator.ts",
+      "status": 200,
+      "characters": 2723
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/multi-agent-system/researcher.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/multi-agent-system/researcher.ts",
+      "status": 200,
+      "characters": 1166
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/multi-agent-system/reviewer.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/multi-agent-system/reviewer.ts",
+      "status": 200,
+      "characters": 1203
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/multi-agent-system/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/multi-agent-system/server.ts",
+      "status": 200,
+      "characters": 263
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/personal-agent/assistant.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/personal-agent/assistant.ts",
+      "status": 200,
+      "characters": 1405
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/personal-agent/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/personal-agent/client.ts",
+      "status": 200,
+      "characters": 742
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/personal-agent/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/personal-agent/server.ts",
+      "status": 200,
+      "characters": 2187
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/personal-agent/user.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/personal-agent/user.ts",
+      "status": 200,
+      "characters": 2064
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/personal-agent/weather.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/personal-agent/weather.ts",
+      "status": 200,
+      "characters": 635
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/pi/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/pi/client.ts",
+      "status": 200,
+      "characters": 466
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/pi/cost.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/pi/cost.ts",
+      "status": 200,
+      "characters": 637
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/pi/daytona.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/pi/daytona.ts",
+      "status": 200,
+      "characters": 575
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/pi/documents/chambers.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/pi/documents/chambers.ts",
+      "status": 200,
+      "characters": 495
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/pi/documents/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/pi/documents/client.ts",
+      "status": 200,
+      "characters": 326
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/pi/documents/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/pi/documents/server.ts",
+      "status": 200,
+      "characters": 995
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/pi/messages.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/pi/messages.ts",
+      "status": 200,
+      "characters": 810
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/pi/pokedex.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/pi/pokedex.ts",
+      "status": 200,
+      "characters": 1387
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/pi/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/pi/server.ts",
+      "status": 200,
+      "characters": 563
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/pi/stream.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/pi/stream.ts",
+      "status": 200,
+      "characters": 1912
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/pi/tasks.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/pi/tasks.ts",
+      "status": 200,
+      "characters": 2869
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/quickstart/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/quickstart/client.ts",
+      "status": 200,
+      "characters": 438
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/quickstart/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/quickstart/server.ts",
+      "status": 200,
+      "characters": 648
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/react-sdk/Chat.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/react-sdk/Chat.tsx",
+      "status": 200,
+      "characters": 1107
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/react-sdk/useAgentChat.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/react-sdk/useAgentChat.ts",
+      "status": 200,
+      "characters": 2920
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/run-amp/cli.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/run-amp/cli.ts",
+      "status": 200,
+      "characters": 1589
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/run-amp/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/run-amp/client.ts",
+      "status": 200,
+      "characters": 775
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/run-amp/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/run-amp/server.ts",
+      "status": 200,
+      "characters": 150
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/run-amp/session.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/run-amp/session.ts",
+      "status": 200,
+      "characters": 4364
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/run-claude-code/cli.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/run-claude-code/cli.ts",
+      "status": 200,
+      "characters": 1687
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/run-claude-code/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/run-claude-code/client.ts",
+      "status": 200,
+      "characters": 795
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/run-claude-code/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/run-claude-code/server.ts",
+      "status": 200,
+      "characters": 156
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/run-claude-code/session.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/run-claude-code/session.ts",
+      "status": 200,
+      "characters": 4407
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/run-codex/cli.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/run-codex/cli.ts",
+      "status": 200,
+      "characters": 1806
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/run-codex/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/run-codex/client.ts",
+      "status": 200,
+      "characters": 782
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/run-codex/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/run-codex/server.ts",
+      "status": 200,
+      "characters": 154
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/run-codex/session.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/run-codex/session.ts",
+      "status": 200,
+      "characters": 4376
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/run-opencode/cli.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/run-opencode/cli.ts",
+      "status": 200,
+      "characters": 1820
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/run-opencode/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/run-opencode/client.ts",
+      "status": 200,
+      "characters": 791
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/run-opencode/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/run-opencode/server.ts",
+      "status": 200,
+      "characters": 160
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/run-opencode/session.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/run-opencode/session.ts",
+      "status": 200,
+      "characters": 4394
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/sandbox-adapter/actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/sandbox-adapter/actor.ts",
+      "status": 200,
+      "characters": 2298
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/sandbox-adapter/custom-provider.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/sandbox-adapter/custom-provider.ts",
+      "status": 200,
+      "characters": 1845
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/sandbox-code-mode/Dockerfile",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/sandbox-code-mode/Dockerfile",
+      "status": 200,
+      "characters": 418
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/sandbox-code-mode/callback.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/sandbox-code-mode/callback.ts",
+      "status": 200,
+      "characters": 2562
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/sandbox-code-mode/cli.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/sandbox-code-mode/cli.ts",
+      "status": 200,
+      "characters": 2642
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/sandbox-code-mode/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/sandbox-code-mode/server.ts",
+      "status": 200,
+      "characters": 3822
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/sandboxes/agentos.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/sandboxes/agentos.ts",
+      "status": 200,
+      "characters": 575
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/sandboxes/daytona.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/sandboxes/daytona.ts",
+      "status": 200,
+      "characters": 575
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/sandboxes/docker.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/sandboxes/docker.ts",
+      "status": 200,
+      "characters": 610
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/sandboxes/e2b.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/sandboxes/e2b.ts",
+      "status": 200,
+      "characters": 583
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/sandboxes/freestyle.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/sandboxes/freestyle.ts",
+      "status": 200,
+      "characters": 962
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/schedules/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/schedules/client.ts",
+      "status": 200,
+      "characters": 713
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/schedules/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/schedules/server.ts",
+      "status": 200,
+      "characters": 763
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/scoped-access/report.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/scoped-access/report.ts",
+      "status": 200,
+      "characters": 347
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/scoped-access/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/scoped-access/server.ts",
+      "status": 200,
+      "characters": 1130
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/scoped-access/viewer.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/scoped-access/viewer.ts",
+      "status": 200,
+      "characters": 445
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/sign-in-with-chatgpt/chatgpt-login.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/sign-in-with-chatgpt/chatgpt-login.ts",
+      "status": 200,
+      "characters": 3206
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/sign-in-with-chatgpt/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/sign-in-with-chatgpt/client.ts",
+      "status": 200,
+      "characters": 1030
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/sign-in-with-chatgpt/credentials.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/sign-in-with-chatgpt/credentials.ts",
+      "status": 200,
+      "characters": 1421
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/sign-in-with-chatgpt/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/sign-in-with-chatgpt/server.ts",
+      "status": 200,
+      "characters": 659
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/skills/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/skills/server.ts",
+      "status": 200,
+      "characters": 571
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/skills/skills.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/skills/skills.ts",
+      "status": 200,
+      "characters": 1846
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/subagents/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/subagents/client.ts",
+      "status": 200,
+      "characters": 463
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/subagents/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/subagents/server.ts",
+      "status": 200,
+      "characters": 513
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/subagents/specialists.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/subagents/specialists.ts",
+      "status": 200,
+      "characters": 2252
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/system-prompt/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/system-prompt/client.ts",
+      "status": 200,
+      "characters": 1016
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/system-prompt/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/system-prompt/server.ts",
+      "status": 200,
+      "characters": 1429
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/user-subscriptions/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/user-subscriptions/client.ts",
+      "status": 200,
+      "characters": 747
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/user-subscriptions/credentials.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/user-subscriptions/credentials.ts",
+      "status": 200,
+      "characters": 1332
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/user-subscriptions/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/user-subscriptions/server.ts",
+      "status": 200,
+      "characters": 521
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/workflows/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/workflows/client.ts",
+      "status": 200,
+      "characters": 451
+    },
+    {
+      "url": "https://github.com/rivet-dev/agents/blob/main/examples/docs/workflows/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/agents/main/examples/docs/workflows/server.ts",
+      "status": 200,
+      "characters": 1693
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/chat-room/frontend/App.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/chat-room/frontend/App.tsx",
+      "status": 200,
+      "characters": 2637
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/chat-room/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/chat-room/src/index.ts",
+      "status": 200,
+      "characters": 1672
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/collaborative-document-ot/frontend/App.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/collaborative-document-ot/frontend/App.tsx",
+      "status": 200,
+      "characters": 3863
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/collaborative-document-ot/frontend/sync.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/collaborative-document-ot/frontend/sync.ts",
+      "status": 200,
+      "characters": 3224
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/collaborative-document-ot/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/collaborative-document-ot/src/index.ts",
+      "status": 200,
+      "characters": 4048
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/collaborative-document-ot/src/ot.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/collaborative-document-ot/src/ot.ts",
+      "status": 200,
+      "characters": 6517
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/collaborative-document/frontend/App.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/collaborative-document/frontend/App.tsx",
+      "status": 200,
+      "characters": 13211
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/collaborative-document/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/collaborative-document/src/index.ts",
+      "status": 200,
+      "characters": 5629
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/cursors/frontend/App.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/cursors/frontend/App.tsx",
+      "status": 200,
+      "characters": 9329
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/cursors/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/cursors/src/index.ts",
+      "status": 200,
+      "characters": 3208
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-actions/action-context.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-actions/action-context.ts",
+      "status": 200,
+      "characters": 306
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-actions/calling-actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-actions/calling-actor.ts",
+      "status": 200,
+      "characters": 582
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-actions/calling-frontend.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-actions/calling-frontend.ts",
+      "status": 200,
+      "characters": 594
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-actions/canceling-actions.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-actions/canceling-actions.ts",
+      "status": 200,
+      "characters": 647
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-actions/nested-actions.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-actions/nested-actions.ts",
+      "status": 200,
+      "characters": 258
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-actions/schema-validation.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-actions/schema-validation.ts",
+      "status": 200,
+      "characters": 641
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-actions/type-safety-client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-actions/type-safety-client.ts",
+      "status": 200,
+      "characters": 677
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-actions/type-safety-index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-actions/type-safety-index.ts",
+      "status": 200,
+      "characters": 325
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-actions/user-error-actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-actions/user-error-actor.ts",
+      "status": 200,
+      "characters": 506
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-actions/user-error-client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-actions/user-error-client.ts",
+      "status": 200,
+      "characters": 985
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-actions/writing-actions.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-actions/writing-actions.ts",
+      "status": 200,
+      "characters": 172
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-appearance/config-basic.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-appearance/config-basic.ts",
+      "status": 200,
+      "characters": 218
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-appearance/examples-patterns.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-appearance/examples-patterns.ts",
+      "status": 200,
+      "characters": 614
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-appearance/icon-emoji.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-appearance/icon-emoji.ts",
+      "status": 200,
+      "characters": 144
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-appearance/icon-fontawesome.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-appearance/icon-fontawesome.ts",
+      "status": 200,
+      "characters": 250
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-appearance/workflow-override.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-appearance/workflow-override.ts",
+      "status": 200,
+      "characters": 370
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-communicating-between-actors/actor-orchestration.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-communicating-between-actors/actor-orchestration.ts",
+      "status": 200,
+      "characters": 1582
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-communicating-between-actors/batch-operations.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-communicating-between-actors/batch-operations.ts",
+      "status": 200,
+      "characters": 613
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-communicating-between-actors/data-aggregation.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-communicating-between-actors/data-aggregation.ts",
+      "status": 200,
+      "characters": 1608
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-communicating-between-actors/event-driven.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-communicating-between-actors/event-driven.ts",
+      "status": 200,
+      "characters": 1696
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-communicating-between-actors/server-side-client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-communicating-between-actors/server-side-client.ts",
+      "status": 200,
+      "characters": 1774
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-connections/connection-list.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-connections/connection-list.ts",
+      "status": 200,
+      "characters": 946
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-connections/disconnect-await.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-connections/disconnect-await.ts",
+      "status": 200,
+      "characters": 169
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-connections/disconnect-clients.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-connections/disconnect-clients.ts",
+      "status": 200,
+      "characters": 745
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-connections/on-before-connect.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-connections/on-before-connect.ts",
+      "status": 200,
+      "characters": 1131
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-connections/on-connect.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-connections/on-connect.ts",
+      "status": 200,
+      "characters": 675
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-connections/on-disconnect.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-connections/on-disconnect.ts",
+      "status": 200,
+      "characters": 818
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-connections/params-actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-connections/params-actor.ts",
+      "status": 200,
+      "characters": 1013
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-connections/params-client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-connections/params-client.ts",
+      "status": 200,
+      "characters": 567
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/actions.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/actions.ts",
+      "status": 200,
+      "characters": 195
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/actor-per-entity/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/actor-per-entity/client.ts",
+      "status": 200,
+      "characters": 342
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/actor-per-entity/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/actor-per-entity/index.ts",
+      "status": 200,
+      "characters": 268
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/actor-to-actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/actor-to-actor.ts",
+      "status": 200,
+      "characters": 416
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/background-task.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/background-task.ts",
+      "status": 200,
+      "characters": 1284
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/conn-dynamic.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/conn-dynamic.ts",
+      "status": 200,
+      "characters": 840
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/conn-static.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/conn-static.ts",
+      "status": 200,
+      "characters": 386
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/context-types.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/context-types.ts",
+      "status": 200,
+      "characters": 592
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/coordinator/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/coordinator/client.ts",
+      "status": 200,
+      "characters": 418
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/coordinator/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/coordinator/index.ts",
+      "status": 200,
+      "characters": 1193
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/destroying.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/destroying.ts",
+      "status": 200,
+      "characters": 554
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/errors-actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/errors-actor.ts",
+      "status": 200,
+      "characters": 375
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/errors-client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/errors-client.ts",
+      "status": 200,
+      "characters": 838
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/events.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/events.ts",
+      "status": 200,
+      "characters": 267
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/input.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/input.ts",
+      "status": 200,
+      "characters": 910
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/keys.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/keys.ts",
+      "status": 200,
+      "characters": 435
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/lifecycle.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/lifecycle.ts",
+      "status": 200,
+      "characters": 1786
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/minimal-project.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/minimal-project.ts",
+      "status": 200,
+      "characters": 756
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/scheduling.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/scheduling.ts",
+      "status": 200,
+      "characters": 569
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/state-dynamic.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/state-dynamic.ts",
+      "status": 200,
+      "characters": 746
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/state-static.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/state-static.ts",
+      "status": 200,
+      "characters": 622
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/vars-dynamic.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/vars-dynamic.ts",
+      "status": 200,
+      "characters": 276
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/vars-static.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/vars-static.ts",
+      "status": 200,
+      "characters": 206
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-crash-course/workflows.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-crash-course/workflows.ts",
+      "status": 200,
+      "characters": 1293
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-deprecated-kv/before.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-deprecated-kv/before.ts",
+      "status": 200,
+      "characters": 412
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-deprecated-kv/migrate.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-deprecated-kv/migrate.ts",
+      "status": 200,
+      "characters": 1494
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-deprecated-kv/sqlite-kv.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-deprecated-kv/sqlite-kv.ts",
+      "status": 200,
+      "characters": 1107
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-deprecated-prevent-sleep/before.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-deprecated-prevent-sleep/before.ts",
+      "status": 200,
+      "characters": 339
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-deprecated-prevent-sleep/keep-awake.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-deprecated-prevent-sleep/keep-awake.ts",
+      "status": 200,
+      "characters": 536
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-deprecated-queues/actions.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-deprecated-queues/actions.ts",
+      "status": 200,
+      "characters": 866
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-deprecated-queues/before.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-deprecated-queues/before.ts",
+      "status": 200,
+      "characters": 425
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-deprecated-queues/drain-legacy.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-deprecated-queues/drain-legacy.ts",
+      "status": 200,
+      "characters": 852
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-deprecated-queues/mini-queue.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-deprecated-queues/mini-queue.ts",
+      "status": 200,
+      "characters": 2550
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-deprecated-run/background-task.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-deprecated-run/background-task.ts",
+      "status": 200,
+      "characters": 1723
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-deprecated-run/before.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-deprecated-run/before.ts",
+      "status": 200,
+      "characters": 439
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-deprecated-state/before.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-deprecated-state/before.ts",
+      "status": 200,
+      "characters": 367
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-deprecated-state/conn-sqlite.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-deprecated-state/conn-sqlite.ts",
+      "status": 200,
+      "characters": 1502
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-deprecated-state/conn-vars.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-deprecated-state/conn-vars.ts",
+      "status": 200,
+      "characters": 601
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-deprecated-state/decode-legacy-state.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-deprecated-state/decode-legacy-state.ts",
+      "status": 200,
+      "characters": 1426
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-deprecated-state/migrate.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-deprecated-state/migrate.ts",
+      "status": 200,
+      "characters": 1562
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-deprecated-state/update-in-sql.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-deprecated-state/update-in-sql.ts",
+      "status": 200,
+      "characters": 1822
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-design-patterns/actor-per-request.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-design-patterns/actor-per-request.ts",
+      "status": 200,
+      "characters": 693
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-design-patterns/coordinator-actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-design-patterns/coordinator-actor.ts",
+      "status": 200,
+      "characters": 1778
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-design-patterns/coordinator-client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-design-patterns/coordinator-client.ts",
+      "status": 200,
+      "characters": 1188
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-design-patterns/loading-state-actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-design-patterns/loading-state-actor.ts",
+      "status": 200,
+      "characters": 1096
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-design-patterns/loading-state-client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-design-patterns/loading-state-client.ts",
+      "status": 200,
+      "characters": 750
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-design-patterns/map-reduce-actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-design-patterns/map-reduce-actor.ts",
+      "status": 200,
+      "characters": 1596
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-design-patterns/map-reduce-client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-design-patterns/map-reduce-client.ts",
+      "status": 200,
+      "characters": 1009
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-design-patterns/random-sharding-actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-design-patterns/random-sharding-actor.ts",
+      "status": 200,
+      "characters": 420
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-design-patterns/random-sharding-client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-design-patterns/random-sharding-client.ts",
+      "status": 200,
+      "characters": 789
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-design-patterns/sharding-time-actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-design-patterns/sharding-time-actor.ts",
+      "status": 200,
+      "characters": 772
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-design-patterns/sharding-time-client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-design-patterns/sharding-time-client.ts",
+      "status": 200,
+      "characters": 722
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-destroy/destroy-via-action.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-destroy/destroy-via-action.ts",
+      "status": 200,
+      "characters": 666
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-destroy/on-destroy.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-destroy/on-destroy.ts",
+      "status": 200,
+      "characters": 1214
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-errors/error-codes-actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-errors/error-codes-actor.ts",
+      "status": 200,
+      "characters": 517
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-errors/error-codes-client-connection.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-errors/error-codes-client-connection.ts",
+      "status": 200,
+      "characters": 732
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-errors/error-codes-client-stateless.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-errors/error-codes-client-stateless.ts",
+      "status": 200,
+      "characters": 732
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-errors/expose-errors.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-errors/expose-errors.ts",
+      "status": 200,
+      "characters": 638
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-errors/internal-actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-errors/internal-actor.ts",
+      "status": 200,
+      "characters": 566
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-errors/internal-client-connection.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-errors/internal-client-connection.ts",
+      "status": 200,
+      "characters": 704
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-errors/internal-client-stateless.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-errors/internal-client-stateless.ts",
+      "status": 200,
+      "characters": 710
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-errors/metadata-actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-errors/metadata-actor.ts",
+      "status": 200,
+      "characters": 652
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-errors/metadata-client-connection.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-errors/metadata-client-connection.ts",
+      "status": 200,
+      "characters": 812
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-errors/metadata-client-stateless.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-errors/metadata-client-stateless.ts",
+      "status": 200,
+      "characters": 810
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-errors/throwing-actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-errors/throwing-actor.ts",
+      "status": 200,
+      "characters": 349
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-errors/throwing-client-connection.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-errors/throwing-client-connection.ts",
+      "status": 200,
+      "characters": 702
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-errors/throwing-client-stateless.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-errors/throwing-client-stateless.ts",
+      "status": 200,
+      "characters": 702
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-events/broadcast.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-events/broadcast.ts",
+      "status": 200,
+      "characters": 538
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-events/remove-listener.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-events/remove-listener.ts",
+      "status": 200,
+      "characters": 677
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-events/send-except-sender.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-events/send-except-sender.ts",
+      "status": 200,
+      "characters": 1408
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-events/send-to-connection.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-events/send-to-connection.ts",
+      "status": 200,
+      "characters": 1501
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-events/subscribe-basic.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-events/subscribe-basic.ts",
+      "status": 200,
+      "characters": 1135
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-events/subscribe-once.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-events/subscribe-once.ts",
+      "status": 200,
+      "characters": 756
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-forking/fork-chain.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-forking/fork-chain.ts",
+      "status": 200,
+      "characters": 411
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-forking/from-actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-forking/from-actor.ts",
+      "status": 200,
+      "characters": 930
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-forking/from-client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-forking/from-client.ts",
+      "status": 200,
+      "characters": 556
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-forking/on-fork.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-forking/on-fork.ts",
+      "status": 200,
+      "characters": 1270
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-forking/quickstart/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-forking/quickstart/client.ts",
+      "status": 200,
+      "characters": 568
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-forking/quickstart/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-forking/quickstart/index.ts",
+      "status": 200,
+      "characters": 1442
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-input/input-validation.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-input/input-validation.ts",
+      "status": 200,
+      "characters": 1737
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-input/input-vs-connection.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-input/input-vs-connection.ts",
+      "status": 200,
+      "characters": 1445
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-input/lifecycle-hooks.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-input/lifecycle-hooks.ts",
+      "status": 200,
+      "characters": 1855
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-input/passing-input.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-input/passing-input.ts",
+      "status": 200,
+      "characters": 1250
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-input/store-input-in-state.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-input/store-input-in-state.ts",
+      "status": 200,
+      "characters": 1455
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-input/type-safety.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-input/type-safety.ts",
+      "status": 200,
+      "characters": 848
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-keys/complex-config.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-keys/complex-config.ts",
+      "status": 200,
+      "characters": 1156
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-keys/compound-keys.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-keys/compound-keys.ts",
+      "status": 200,
+      "characters": 845
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-keys/config-client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-keys/config-client.ts",
+      "status": 200,
+      "characters": 434
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-keys/config-index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-keys/config-index.ts",
+      "status": 200,
+      "characters": 334
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-keys/key-format.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-keys/key-format.ts",
+      "status": 200,
+      "characters": 543
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-keys/key-uniqueness.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-keys/key-uniqueness.ts",
+      "status": 200,
+      "characters": 488
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-keys/metadata-client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-keys/metadata-client.ts",
+      "status": 200,
+      "characters": 700
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-keys/metadata-index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-keys/metadata-index.ts",
+      "status": 200,
+      "characters": 303
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-keys/omitting-keys.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-keys/omitting-keys.ts",
+      "status": 200,
+      "characters": 348
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/abort-signal.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/abort-signal.ts",
+      "status": 200,
+      "characters": 349
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/actor-context-of.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/actor-context-of.ts",
+      "status": 200,
+      "characters": 288
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/can-subscribe.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/can-subscribe.ts",
+      "status": 200,
+      "characters": 910
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/create-vars.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/create-vars.ts",
+      "status": 200,
+      "characters": 271
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/full-example.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/full-example.ts",
+      "status": 200,
+      "characters": 4767
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/keep-awake.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/keep-awake.ts",
+      "status": 200,
+      "characters": 421
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/on-before-action-response.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/on-before-action-response.ts",
+      "status": 200,
+      "characters": 988
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/on-before-connect.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/on-before-connect.ts",
+      "status": 200,
+      "characters": 1179
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/on-connect.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/on-connect.ts",
+      "status": 200,
+      "characters": 744
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/on-create.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/on-create.ts",
+      "status": 200,
+      "characters": 671
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/on-destroy.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/on-destroy.ts",
+      "status": 200,
+      "characters": 158
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/on-disconnect.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/on-disconnect.ts",
+      "status": 200,
+      "characters": 858
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/on-migrate.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/on-migrate.ts",
+      "status": 200,
+      "characters": 186
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/on-request.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/on-request.ts",
+      "status": 200,
+      "characters": 511
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/on-sleep-hook.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/on-sleep-hook.ts",
+      "status": 200,
+      "characters": 365
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/on-sleep.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/on-sleep.ts",
+      "status": 200,
+      "characters": 676
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/on-wake.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/on-wake.ts",
+      "status": 200,
+      "characters": 1289
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/on-websocket.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/on-websocket.ts",
+      "status": 200,
+      "characters": 752
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/options.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/options.ts",
+      "status": 200,
+      "characters": 961
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/run-one-shot.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/run-one-shot.ts",
+      "status": 200,
+      "characters": 511
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/run-tick-loop.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/run-tick-loop.ts",
+      "status": 200,
+      "characters": 1461
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/vars.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/vars.ts",
+      "status": 200,
+      "characters": 119
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-lifecycle/wait-until.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-lifecycle/wait-until.ts",
+      "status": 200,
+      "characters": 447
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-limits/actor-options.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-limits/actor-options.ts",
+      "status": 200,
+      "characters": 173
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-limits/registry-message-size.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-limits/registry-message-size.ts",
+      "status": 200,
+      "characters": 158
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-metadata/actor-id.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-metadata/actor-id.ts",
+      "status": 200,
+      "characters": 151
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-metadata/actor-key.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-metadata/actor-key.ts",
+      "status": 200,
+      "characters": 150
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-metadata/actor-name.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-metadata/actor-name.ts",
+      "status": 200,
+      "characters": 154
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-metadata/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-metadata/client.ts",
+      "status": 200,
+      "characters": 363
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-metadata/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-metadata/index.ts",
+      "status": 200,
+      "characters": 314
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-metadata/namespace.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-metadata/namespace.ts",
+      "status": 200,
+      "characters": 904
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-metadata/region.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-metadata/region.ts",
+      "status": 200,
+      "characters": 152
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-performance-monitoring/log-cache.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-performance-monitoring/log-cache.ts",
+      "status": 200,
+      "characters": 346
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-permissions/caching-tokens.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-permissions/caching-tokens.ts",
+      "status": 200,
+      "characters": 1924
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-permissions/chat-room.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-permissions/chat-room.ts",
+      "status": 200,
+      "characters": 2149
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-permissions/external-auth-provider.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-permissions/external-auth-provider.ts",
+      "status": 200,
+      "characters": 1256
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-permissions/handling-errors-connection.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-permissions/handling-errors-connection.ts",
+      "status": 200,
+      "characters": 763
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-permissions/handling-errors-stateless.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-permissions/handling-errors-stateless.ts",
+      "status": 200,
+      "characters": 833
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-permissions/jwt.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-permissions/jwt.ts",
+      "status": 200,
+      "characters": 1679
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-permissions/on-before-connect.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-permissions/on-before-connect.ts",
+      "status": 200,
+      "characters": 1002
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-permissions/passing-credentials-connection.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-permissions/passing-credentials-connection.ts",
+      "status": 200,
+      "characters": 395
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-permissions/passing-credentials-headers.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-permissions/passing-credentials-headers.ts",
+      "status": 200,
+      "characters": 363
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-permissions/passing-credentials-stateless.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-permissions/passing-credentials-stateless.ts",
+      "status": 200,
+      "characters": 309
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-permissions/quickstart/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-permissions/quickstart/client.ts",
+      "status": 200,
+      "characters": 483
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-permissions/quickstart/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-permissions/quickstart/index.ts",
+      "status": 200,
+      "characters": 2082
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-permissions/rate-limiting.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-permissions/rate-limiting.ts",
+      "status": 200,
+      "characters": 1078
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-permissions/role-based-access-control.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-permissions/role-based-access-control.ts",
+      "status": 200,
+      "characters": 1788
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-permissions/using-state.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-permissions/using-state.ts",
+      "status": 200,
+      "characters": 1313
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-quickstart-backend/Counter.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-quickstart-backend/Counter.tsx",
+      "status": 200,
+      "characters": 698
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-quickstart-backend/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-quickstart-backend/client.ts",
+      "status": 200,
+      "characters": 601
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-quickstart-backend/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-quickstart-backend/index.ts",
+      "status": 200,
+      "characters": 708
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-quickstart-react/backend/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-quickstart-react/backend/index.ts",
+      "status": 200,
+      "characters": 708
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-quickstart-react/frontend/Counter.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-quickstart-react/frontend/Counter.tsx",
+      "status": 200,
+      "characters": 715
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-quickstart-react/frontend/main.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-quickstart-react/frontend/main.tsx",
+      "status": 200,
+      "characters": 221
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-request-handler/hono.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-request-handler/hono.ts",
+      "status": 200,
+      "characters": 1623
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-request-handler/http-api-fetch.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-request-handler/http-api-fetch.ts",
+      "status": 200,
+      "characters": 403
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-request-handler/proxy.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-request-handler/proxy.ts",
+      "status": 200,
+      "characters": 757
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-request-handler/raw-http.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-request-handler/raw-http.ts",
+      "status": 200,
+      "characters": 1245
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-request-handler/sse-client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-request-handler/sse-client.ts",
+      "status": 200,
+      "characters": 869
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-request-handler/sse.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-request-handler/sse.ts",
+      "status": 200,
+      "characters": 685
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-request-handler/via-client/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-request-handler/via-client/client.ts",
+      "status": 200,
+      "characters": 426
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-request-handler/via-gateway/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-request-handler/via-gateway/client.ts",
+      "status": 200,
+      "characters": 492
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-secure-code-execution/actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-secure-code-execution/actor.ts",
+      "status": 200,
+      "characters": 796
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-secure-code-execution/capabilities.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-secure-code-execution/capabilities.ts",
+      "status": 200,
+      "characters": 1028
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-secure-code-execution/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-secure-code-execution/client.ts",
+      "status": 200,
+      "characters": 385
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-secure-code-execution/evaluate.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-secure-code-execution/evaluate.ts",
+      "status": 200,
+      "characters": 555
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-sqlite-drizzle/schema.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-sqlite-drizzle/schema.ts",
+      "status": 200,
+      "characters": 286
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-sqlite/basic/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-sqlite/basic/client.ts",
+      "status": 200,
+      "characters": 361
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-sqlite/basic/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-sqlite/basic/index.ts",
+      "status": 200,
+      "characters": 1196
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-state/ephemeral-basic.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-state/ephemeral-basic.ts",
+      "status": 200,
+      "characters": 382
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-state/ephemeral-dynamic-init.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-state/ephemeral-dynamic-init.ts",
+      "status": 200,
+      "characters": 911
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-state/runtime-objects.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-state/runtime-objects.ts",
+      "status": 200,
+      "characters": 380
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-state/sqlite-basic.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-state/sqlite-basic.ts",
+      "status": 200,
+      "characters": 626
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-state/sqlite-snapshot.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-state/sqlite-snapshot.ts",
+      "status": 200,
+      "characters": 2766
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-testing/basic-setup.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-testing/basic-setup.ts",
+      "status": 200,
+      "characters": 867
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-testing/testing-events.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-testing/testing-events.ts",
+      "status": 200,
+      "characters": 1223
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-testing/testing-schedules.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-testing/testing-schedules.ts",
+      "status": 200,
+      "characters": 1284
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-testing/testing-state.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-testing/testing-state.ts",
+      "status": 200,
+      "characters": 1490
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-types/context-types.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-types/context-types.ts",
+      "status": 200,
+      "characters": 791
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-types/extracting-context-types.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-types/extracting-context-types.ts",
+      "status": 200,
+      "characters": 902
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-versions/sqlite-migrate.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-versions/sqlite-migrate.ts",
+      "status": 200,
+      "characters": 747
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-websocket-handler/accessing-request.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-websocket-handler/accessing-request.ts",
+      "status": 200,
+      "characters": 332
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-websocket-handler/async-handler.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-websocket-handler/async-handler.ts",
+      "status": 200,
+      "characters": 558
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-websocket-handler/chat-actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-websocket-handler/chat-actor.ts",
+      "status": 200,
+      "characters": 1128
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-websocket-handler/hibernation.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-websocket-handler/hibernation.ts",
+      "status": 200,
+      "characters": 145
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/actors-websocket-handler/proxy.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/actors-websocket-handler/proxy.ts",
+      "status": 200,
+      "characters": 1377
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/actors-create.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/actors-create.ts",
+      "status": 200,
+      "characters": 459
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/actors-destroy.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/actors-destroy.ts",
+      "status": 200,
+      "characters": 476
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/actors-get-or-create.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/actors-get-or-create.ts",
+      "status": 200,
+      "characters": 434
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/actors-list-names.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/actors-list-names.ts",
+      "status": 200,
+      "characters": 396
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/actors-list.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/actors-list.ts",
+      "status": 200,
+      "characters": 577
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/actors-reschedule.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/actors-reschedule.ts",
+      "status": 200,
+      "characters": 547
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/actors-sleep.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/actors-sleep.ts",
+      "status": 200,
+      "characters": 537
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/connection-actions-client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/connection-actions-client.ts",
+      "status": 200,
+      "characters": 478
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/connection-actions.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/connection-actions.ts",
+      "status": 200,
+      "characters": 972
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/connection-connect-client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/connection-connect-client.ts",
+      "status": 200,
+      "characters": 476
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/connection-connect.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/connection-connect.ts",
+      "status": 200,
+      "characters": 916
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/connection-errors-client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/connection-errors-client.ts",
+      "status": 200,
+      "characters": 625
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/connection-errors.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/connection-errors.ts",
+      "status": 200,
+      "characters": 898
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/connection-events-client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/connection-events-client.ts",
+      "status": 200,
+      "characters": 531
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/connection-events.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/connection-events.ts",
+      "status": 200,
+      "characters": 705
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/control-plane-datacenters.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/control-plane-datacenters.ts",
+      "status": 200,
+      "characters": 283
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/control-plane-metadata.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/control-plane-metadata.ts",
+      "status": 200,
+      "characters": 172
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/gateway-call-action.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/gateway-call-action.ts",
+      "status": 200,
+      "characters": 539
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/gateway-health.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/gateway-health.ts",
+      "status": 200,
+      "characters": 577
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/gateway-metadata.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/gateway-metadata.ts",
+      "status": 200,
+      "characters": 253
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/namespaces-create.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/namespaces-create.ts",
+      "status": 200,
+      "characters": 404
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/namespaces-list.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/namespaces-list.ts",
+      "status": 200,
+      "characters": 311
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/pools-delete.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/pools-delete.ts",
+      "status": 200,
+      "characters": 460
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/pools-get.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/pools-get.ts",
+      "status": 200,
+      "characters": 442
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/pools-list-nodes.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/pools-list-nodes.ts",
+      "status": 200,
+      "characters": 504
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/pools-list.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/pools-list.ts",
+      "status": 200,
+      "characters": 417
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/pools-upsert.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/pools-upsert.ts",
+      "status": 200,
+      "characters": 568
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/tokens-create.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/tokens-create.ts",
+      "status": 200,
+      "characters": 614
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/api/tokens-inspect.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/api/tokens-inspect.ts",
+      "status": 200,
+      "characters": 435
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/clients-javascript/calling-from-backend.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/clients-javascript/calling-from-backend.ts",
+      "status": 200,
+      "characters": 348
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/clients-javascript/connection-lifecycle.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/clients-javascript/connection-lifecycle.ts",
+      "status": 200,
+      "characters": 381
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/clients-javascript/connection-params/get-params.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/clients-javascript/connection-params/get-params.ts",
+      "status": 200,
+      "characters": 320
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/clients-javascript/connection-params/params.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/clients-javascript/connection-params/params.ts",
+      "status": 200,
+      "characters": 213
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/clients-javascript/error-handling.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/clients-javascript/error-handling.ts",
+      "status": 200,
+      "characters": 307
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/clients-javascript/getting-actors.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/clients-javascript/getting-actors.ts",
+      "status": 200,
+      "characters": 368
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/clients-javascript/keys/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/clients-javascript/keys/client.ts",
+      "status": 200,
+      "characters": 245
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/clients-javascript/minimal-client/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/clients-javascript/minimal-client/client.ts",
+      "status": 200,
+      "characters": 297
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/clients-javascript/stateless-vs-stateful.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/clients-javascript/stateless-vs-stateful.ts",
+      "status": 200,
+      "characters": 368
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/clients-javascript/subscribing-events.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/clients-javascript/subscribing-events.ts",
+      "status": 200,
+      "characters": 242
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/clients-react/connection-lifecycle.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/clients-react/connection-lifecycle.tsx",
+      "status": 200,
+      "characters": 339
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/clients-react/connection-parameters.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/clients-react/connection-parameters.tsx",
+      "status": 200,
+      "characters": 272
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/clients-react/error-handling.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/clients-react/error-handling.tsx",
+      "status": 200,
+      "characters": 516
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/clients-react/getting-actors.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/clients-react/getting-actors.tsx",
+      "status": 200,
+      "characters": 643
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/clients-react/keys/ChatRoom.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/clients-react/keys/ChatRoom.tsx",
+      "status": 200,
+      "characters": 312
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/clients-react/minimal-client/Counter.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/clients-react/minimal-client/Counter.tsx",
+      "status": 200,
+      "characters": 470
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/clients-react/stateful-counter.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/clients-react/stateful-counter.tsx",
+      "status": 200,
+      "characters": 318
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/clients-react/stateless-client.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/clients-react/stateless-client.tsx",
+      "status": 200,
+      "characters": 211
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/clients-react/subscribing-to-events.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/clients-react/subscribing-to-events.tsx",
+      "status": 200,
+      "characters": 271
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/durable-streams/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/durable-streams/client.ts",
+      "status": 200,
+      "characters": 486
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/durable-streams/create.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/durable-streams/create.ts",
+      "status": 200,
+      "characters": 358
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/durable-streams/producer.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/durable-streams/producer.ts",
+      "status": 200,
+      "characters": 718
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/durable-streams/read-history.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/durable-streams/read-history.ts",
+      "status": 200,
+      "characters": 359
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/durable-streams/read-live.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/durable-streams/read-live.ts",
+      "status": 200,
+      "characters": 535
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/durable-streams/write.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/durable-streams/write.ts",
+      "status": 200,
+      "characters": 477
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/general-actor-configuration/basic-example.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/general-actor-configuration/basic-example.ts",
+      "status": 200,
+      "characters": 285
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/general-cors/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/general-cors/client.ts",
+      "status": 200,
+      "characters": 676
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/general-cors/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/general-cors/server.ts",
+      "status": 200,
+      "characters": 626
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/general-edge/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/general-edge/client.ts",
+      "status": 200,
+      "characters": 395
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/general-endpoints/private-endpoint.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/general-endpoints/private-endpoint.ts",
+      "status": 200,
+      "characters": 202
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/general-http-server/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/general-http-server/index.ts",
+      "status": 200,
+      "characters": 147
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/general-http-server/node-hono.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/general-http-server/node-hono.ts",
+      "status": 200,
+      "characters": 412
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/general-jwt/quickstart/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/general-jwt/quickstart/client.ts",
+      "status": 200,
+      "characters": 864
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/general-jwt/quickstart/registry.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/general-jwt/quickstart/registry.ts",
+      "status": 200,
+      "characters": 922
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/general-jwt/quickstart/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/general-jwt/quickstart/server.ts",
+      "status": 200,
+      "characters": 1086
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/general-logging/custom-pino.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/general-logging/custom-pino.ts",
+      "status": 200,
+      "characters": 393
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/general-logging/disable-welcome.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/general-logging/disable-welcome.ts",
+      "status": 200,
+      "characters": 208
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/general-logging/log-examples.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/general-logging/log-examples.ts",
+      "status": 200,
+      "characters": 754
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/general-logging/log-level.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/general-logging/log-level.ts",
+      "status": 200,
+      "characters": 226
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/general-registry-configuration/basic-setup.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/general-registry-configuration/basic-setup.ts",
+      "status": 200,
+      "characters": 131
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/general-registry-configuration/config.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/general-registry-configuration/config.ts",
+      "status": 200,
+      "characters": 230
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/general-registry-configuration/environment-variables.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/general-registry-configuration/environment-variables.ts",
+      "status": 200,
+      "characters": 194
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/general-registry-configuration/registry-start.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/general-registry-configuration/registry-start.ts",
+      "status": 200,
+      "characters": 147
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/general-tracing/application-span.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/general-tracing/application-span.ts",
+      "status": 200,
+      "characters": 520
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/general-tracing/sdk.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/general-tracing/sdk.ts",
+      "status": 200,
+      "characters": 92
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/general-wasm-vs-native-sdk/native-runtime.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/general-wasm-vs-native-sdk/native-runtime.ts",
+      "status": 200,
+      "characters": 129
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/integrations-daytona/actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/integrations-daytona/actor.ts",
+      "status": 200,
+      "characters": 2276
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/integrations-docker/actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/integrations-docker/actor.ts",
+      "status": 200,
+      "characters": 2315
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/integrations-e2b/actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/integrations-e2b/actor.ts",
+      "status": 200,
+      "characters": 2284
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/integrations-freestyle/actor.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/integrations-freestyle/actor.ts",
+      "status": 200,
+      "characters": 2652
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/mcp/call-actor-action.txt",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/mcp/call-actor-action.txt",
+      "status": 200,
+      "characters": 27
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/mcp/claude-code.sh",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/mcp/claude-code.sh",
+      "status": 200,
+      "characters": 64
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/mcp/codex.sh",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/mcp/codex.sh",
+      "status": 200,
+      "characters": 52
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/mcp/cursor.json",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/mcp/cursor.json",
+      "status": 200,
+      "characters": 88
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/mcp/find-running-actors.txt",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/mcp/find-running-actors.txt",
+      "status": 200,
+      "characters": 34
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/mcp/gemini-cli.sh",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/mcp/gemini-cli.sh",
+      "status": 200,
+      "characters": 64
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/mcp/inspect-actor-inline.txt",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/mcp/inspect-actor-inline.txt",
+      "status": 200,
+      "characters": 47
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/mcp/local.json",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/mcp/local.json",
+      "status": 200,
+      "characters": 131
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/mcp/one-request.js",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/mcp/one-request.js",
+      "status": 200,
+      "characters": 362
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/mcp/vs-code.sh",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/mcp/vs-code.sh",
+      "status": 200,
+      "characters": 82
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/onboarding-actors/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/onboarding-actors/client.ts",
+      "status": 200,
+      "characters": 824
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/docs/onboarding-actors/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/docs/onboarding-actors/index.ts",
+      "status": 200,
+      "characters": 1182
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/frontend/games/arena/arena-game.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/frontend/games/arena/arena-game.ts",
+      "status": 200,
+      "characters": 9555
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/frontend/games/arena/menu.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/frontend/games/arena/menu.tsx",
+      "status": 200,
+      "characters": 5683
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/frontend/games/arena/wait-for-assignment.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/frontend/games/arena/wait-for-assignment.ts",
+      "status": 200,
+      "characters": 1589
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/frontend/games/battle-royale/battle-royale-game.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/frontend/games/battle-royale/battle-royale-game.ts",
+      "status": 200,
+      "characters": 11347
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/frontend/games/battle-royale/menu.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/frontend/games/battle-royale/menu.tsx",
+      "status": 200,
+      "characters": 1617
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/frontend/games/idle/game.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/frontend/games/idle/game.tsx",
+      "status": 200,
+      "characters": 6121
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/frontend/games/io-style/io-game.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/frontend/games/io-style/io-game.ts",
+      "status": 200,
+      "characters": 4272
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/frontend/games/io-style/menu.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/frontend/games/io-style/menu.tsx",
+      "status": 200,
+      "characters": 1594
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/frontend/games/open-world/open-world-game.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/frontend/games/open-world/open-world-game.ts",
+      "status": 200,
+      "characters": 22701
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/frontend/games/party/game.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/frontend/games/party/game.tsx",
+      "status": 200,
+      "characters": 5860
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/frontend/games/party/menu.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/frontend/games/party/menu.tsx",
+      "status": 200,
+      "characters": 3165
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/frontend/games/physics-2d/physics-2d-game.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/frontend/games/physics-2d/physics-2d-game.ts",
+      "status": 200,
+      "characters": 6984
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/frontend/games/physics-3d/physics-3d-game.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/frontend/games/physics-3d/physics-3d-game.ts",
+      "status": 200,
+      "characters": 11307
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/frontend/games/ranked/menu.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/frontend/games/ranked/menu.tsx",
+      "status": 200,
+      "characters": 11787
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/frontend/games/ranked/ranked-game.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/frontend/games/ranked/ranked-game.ts",
+      "status": 200,
+      "characters": 8751
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/frontend/games/turn-based/game.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/frontend/games/turn-based/game.tsx",
+      "status": 200,
+      "characters": 4957
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/frontend/games/turn-based/menu.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/frontend/games/turn-based/menu.tsx",
+      "status": 200,
+      "characters": 6931
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/arena/match.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/arena/match.ts",
+      "status": 200,
+      "characters": 12420
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/arena/matchmaker.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/arena/matchmaker.ts",
+      "status": 200,
+      "characters": 6780
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/battle-royale/match.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/battle-royale/match.ts",
+      "status": 200,
+      "characters": 17293
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/battle-royale/matchmaker.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/battle-royale/matchmaker.ts",
+      "status": 200,
+      "characters": 8273
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/idle/leaderboard.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/idle/leaderboard.ts",
+      "status": 200,
+      "characters": 2206
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/idle/world.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/idle/world.ts",
+      "status": 200,
+      "characters": 7874
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/index.ts",
+      "status": 200,
+      "characters": 1843
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/io-style/match.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/io-style/match.ts",
+      "status": 200,
+      "characters": 9325
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/io-style/matchmaker.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/io-style/matchmaker.ts",
+      "status": 200,
+      "characters": 7950
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/open-world/chunk.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/open-world/chunk.ts",
+      "status": 200,
+      "characters": 12968
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/open-world/config.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/open-world/config.ts",
+      "status": 200,
+      "characters": 275
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/party/match.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/party/match.ts",
+      "status": 200,
+      "characters": 7947
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/party/matchmaker.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/party/matchmaker.ts",
+      "status": 200,
+      "characters": 5602
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/physics-2d/config.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/physics-2d/config.ts",
+      "status": 200,
+      "characters": 1170
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/physics-2d/world.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/physics-2d/world.ts",
+      "status": 200,
+      "characters": 10875
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/physics-3d/config.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/physics-3d/config.ts",
+      "status": 200,
+      "characters": 1206
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/physics-3d/world.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/physics-3d/world.ts",
+      "status": 200,
+      "characters": 12172
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/ranked/leaderboard.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/ranked/leaderboard.ts",
+      "status": 200,
+      "characters": 2104
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/ranked/match.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/ranked/match.ts",
+      "status": 200,
+      "characters": 14115
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/ranked/matchmaker.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/ranked/matchmaker.ts",
+      "status": 200,
+      "characters": 13125
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/ranked/player.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/ranked/player.ts",
+      "status": 200,
+      "characters": 2585
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/turn-based/match.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/turn-based/match.ts",
+      "status": 200,
+      "characters": 8486
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/actors/turn-based/matchmaker.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/actors/turn-based/matchmaker.ts",
+      "status": 200,
+      "characters": 8615
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/multiplayer-game-patterns/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/multiplayer-game-patterns/src/index.ts",
+      "status": 200,
+      "characters": 87
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/per-tenant-database/frontend/App.tsx",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/per-tenant-database/frontend/App.tsx",
+      "status": 200,
+      "characters": 10675
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/per-tenant-database/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/per-tenant-database/src/index.ts",
+      "status": 200,
+      "characters": 4386
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/scheduling/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/scheduling/src/index.ts",
+      "status": 200,
+      "characters": 7109
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/turso/scripts/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/turso/scripts/client.ts",
+      "status": 200,
+      "characters": 640
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/turso/src/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/turso/src/index.ts",
+      "status": 200,
+      "characters": 5339
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/workflow-sdk/nitro.config.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/workflow-sdk/nitro.config.ts",
+      "status": 200,
+      "characters": 146
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/workflow-sdk/src/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/workflow-sdk/src/server.ts",
+      "status": 200,
+      "characters": 452
+    },
+    {
+      "url": "https://github.com/rivet-dev/rivet/blob/main/examples/workflow-sdk/workflows/order.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/rivet/main/examples/workflow-sdk/workflows/order.ts",
+      "status": 200,
+      "characters": 460
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/approval-gate.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/approval-gate.ts",
+      "status": 200,
+      "characters": 1401
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/batch-drainer.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/batch-drainer.ts",
+      "status": 200,
+      "characters": 1167
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/bounded-drain.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/bounded-drain.ts",
+      "status": 200,
+      "characters": 1779
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/checkpoint-friendly.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/checkpoint-friendly.ts",
+      "status": 200,
+      "characters": 1212
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/child-worker-orchestration.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/child-worker-orchestration.ts",
+      "status": 200,
+      "characters": 2094
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/coordinator-worker.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/coordinator-worker.ts",
+      "status": 200,
+      "characters": 1287
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/cron.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/cron.ts",
+      "status": 200,
+      "characters": 954
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/cross-actor-saga.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/cross-actor-saga.ts",
+      "status": 200,
+      "characters": 2802
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/error-hooks.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/error-hooks.ts",
+      "status": 200,
+      "characters": 722
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/fan-in-out.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/fan-in-out.ts",
+      "status": 200,
+      "characters": 1344
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/get-version.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/get-version.ts",
+      "status": 200,
+      "characters": 1134
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/join/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/join/client.ts",
+      "status": 200,
+      "characters": 293
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/join/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/join/index.ts",
+      "status": 200,
+      "characters": 1429
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/loops/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/loops/client.ts",
+      "status": 200,
+      "characters": 392
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/loops/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/loops/index.ts",
+      "status": 200,
+      "characters": 1274
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/poll-backoff.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/poll-backoff.ts",
+      "status": 200,
+      "characters": 1135
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/queue-worker.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/queue-worker.ts",
+      "status": 200,
+      "characters": 678
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/race/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/race/client.ts",
+      "status": 200,
+      "characters": 305
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/race/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/race/index.ts",
+      "status": 200,
+      "characters": 1295
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/request-response-queue/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/request-response-queue/client.ts",
+      "status": 200,
+      "characters": 437
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/request-response-queue/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/request-response-queue/index.ts",
+      "status": 200,
+      "characters": 750
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/request-response/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/request-response/client.ts",
+      "status": 200,
+      "characters": 458
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/request-response/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/request-response/index.ts",
+      "status": 200,
+      "characters": 708
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/rollback.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/rollback.ts",
+      "status": 200,
+      "characters": 2092
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/scatter-gather.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/scatter-gather.ts",
+      "status": 200,
+      "characters": 1663
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/setup-teardown-pattern.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/setup-teardown-pattern.ts",
+      "status": 200,
+      "characters": 955
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/setup-teardown/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/setup-teardown/client.ts",
+      "status": 200,
+      "characters": 479
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/setup-teardown/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/setup-teardown/index.ts",
+      "status": 200,
+      "characters": 2878
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/signal-control-loop.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/signal-control-loop.ts",
+      "status": 200,
+      "characters": 1062
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/simple-workflow/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/simple-workflow/client.ts",
+      "status": 200,
+      "characters": 298
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/simple-workflow/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/simple-workflow/index.ts",
+      "status": 200,
+      "characters": 2038
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/store-progress/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/store-progress/client.ts",
+      "status": 200,
+      "characters": 454
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/store-progress/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/store-progress/index.ts",
+      "status": 200,
+      "characters": 1501
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/timeout-fallback.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/timeout-fallback.ts",
+      "status": 200,
+      "characters": 2116
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/timeouts.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/timeouts.ts",
+      "status": 200,
+      "characters": 888
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/timers/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/timers/client.ts",
+      "status": 200,
+      "characters": 407
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/timers/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/timers/index.ts",
+      "status": 200,
+      "characters": 723
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/try-step.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/try-step.ts",
+      "status": 200,
+      "characters": 826
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/actors-workflows/versioned-workflow.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/actors-workflows/versioned-workflow.ts",
+      "status": 200,
+      "characters": 584
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/ai-workflows/ai-job.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/ai-workflows/ai-job.ts",
+      "status": 200,
+      "characters": 4365
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/ai-workflows/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/ai-workflows/client.ts",
+      "status": 200,
+      "characters": 1155
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/ai-workflows/model.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/ai-workflows/model.ts",
+      "status": 200,
+      "characters": 1373
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/ai-workflows/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/ai-workflows/server.ts",
+      "status": 200,
+      "characters": 883
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/ai-workflows/tools.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/ai-workflows/tools.ts",
+      "status": 200,
+      "characters": 1197
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/handle-webhooks/customer-events.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/handle-webhooks/customer-events.ts",
+      "status": 200,
+      "characters": 2186
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/handle-webhooks/db.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/handle-webhooks/db.ts",
+      "status": 200,
+      "characters": 968
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/handle-webhooks/send-test-event.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/handle-webhooks/send-test-event.ts",
+      "status": 200,
+      "characters": 1579
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/handle-webhooks/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/handle-webhooks/server.ts",
+      "status": 200,
+      "characters": 1418
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/handle-webhooks/stripe.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/handle-webhooks/stripe.ts",
+      "status": 200,
+      "characters": 1790
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/human-in-the-loop/agent-tool.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/human-in-the-loop/agent-tool.ts",
+      "status": 200,
+      "characters": 1927
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/human-in-the-loop/approval.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/human-in-the-loop/approval.ts",
+      "status": 200,
+      "characters": 3007
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/human-in-the-loop/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/human-in-the-loop/client.ts",
+      "status": 200,
+      "characters": 304
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/human-in-the-loop/decide.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/human-in-the-loop/decide.ts",
+      "status": 200,
+      "characters": 536
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/human-in-the-loop/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/human-in-the-loop/server.ts",
+      "status": 200,
+      "characters": 1967
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/human-in-the-loop/slack.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/human-in-the-loop/slack.ts",
+      "status": 200,
+      "characters": 2494
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/human-in-the-loop/tools.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/human-in-the-loop/tools.ts",
+      "status": 200,
+      "characters": 1151
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/webhook-delivery/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/webhook-delivery/client.ts",
+      "status": 200,
+      "characters": 2156
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/webhook-delivery/endpoint.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/webhook-delivery/endpoint.ts",
+      "status": 200,
+      "characters": 4592
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/webhook-delivery/receiver.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/webhook-delivery/receiver.ts",
+      "status": 200,
+      "characters": 1296
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/webhook-delivery/server.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/webhook-delivery/server.ts",
+      "status": 200,
+      "characters": 2275
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/guides/webhook-delivery/sign.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/guides/webhook-delivery/sign.ts",
+      "status": 200,
+      "characters": 2063
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/onboarding/client.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/onboarding/client.ts",
+      "status": 200,
+      "characters": 539
+    },
+    {
+      "url": "https://github.com/rivet-dev/workflows/blob/main/examples/docs/onboarding/index.ts",
+      "raw_url": "https://raw.githubusercontent.com/rivet-dev/workflows/main/examples/docs/onboarding/index.ts",
+      "status": 200,
+      "characters": 1572
+    }
+  ]
+}

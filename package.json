@@ -1,0 +1,25 @@
+{
+  "name": "robot-buddy",
+  "private": true,
+  "packageManager": "bun@1.4.4",
+  "workspaces": [
+    "tooling/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "check": "turbo run check",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "format": "cargo fmt --all",
+    "format:check": "turbo run format:check",
+    "test:integration": "BUDDY_SIGNING_KEY=integration-test-signing-key-not-for-production AI_PROVIDER=openai_compatible AI_BASE_URL=http://127.0.0.1:19091/v1 AI_MODEL=fixture RIVETKIT_STORAGE_PATH=/tmp/robot-buddy-integration cargo test -p robot-buddy --test actors -- --ignored --nocapture",
+    "test:container": "cargo test -p robot-buddy-server --test container -- --ignored",
+    "test:lab": "bun tests/lab.mjs",
+    "dev:lab": "docker compose -f compose.local.yaml up --build -d",
+    "dev:lab:stop": "docker compose -f compose.local.yaml down"
+  },
+  "devDependencies": {
+    "playwright": "1.64.0",
+    "turbo": "2.8.20"
+  }
+}

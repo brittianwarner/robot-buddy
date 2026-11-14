@@ -1,0 +1,11 @@
+.git
+.env
+.env.*
+!.env.example
+secrets
+*.key
+*.identity.json
+target
+node_modules
+.turbo
+data

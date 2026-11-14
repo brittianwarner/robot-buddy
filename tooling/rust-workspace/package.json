@@ -1,0 +1,1 @@
+{"name":"@robot-buddy/rust","private":true,"scripts":{"build":"cargo build --workspace --locked","check":"cargo check --workspace --all-targets --all-features --locked","test":"cargo test --workspace --locked","lint":"cargo clippy --workspace --all-targets --all-features --locked -- -D warnings","format:check":"cargo fmt --all -- --check"}}

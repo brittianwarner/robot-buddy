@@ -1,0 +1,110 @@
+[
+  {
+    "url": "https://raw.githubusercontent.com/rivet-dev/rivet/v3.1.1/examples/ai-agent-rust/Cargo.toml",
+    "path": "/private/tmp/robot-buddy-research/source/examples/ai-agent-rust/Cargo.toml",
+    "bytes": 387,
+    "status": "ok"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/rivet-dev/rivet/v3.1.1/examples/ai-agent-rust/README.md",
+    "path": "/private/tmp/robot-buddy-research/source/examples/ai-agent-rust/README.md",
+    "bytes": 1718,
+    "status": "ok"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/rivet-dev/rivet/v3.1.1/examples/ai-agent-rust/src/agent.rs",
+    "path": "/private/tmp/robot-buddy-research/source/examples/ai-agent-rust/src/agent.rs",
+    "bytes": 4861,
+    "status": "ok"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/rivet-dev/rivet/v3.1.1/examples/ai-agent-rust/src/helpers.rs",
+    "path": "/private/tmp/robot-buddy-research/source/examples/ai-agent-rust/src/helpers.rs",
+    "bytes": 2694,
+    "status": "ok"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/rivet-dev/rivet/v3.1.1/examples/ai-agent-rust/src/lib.rs",
+    "path": "/private/tmp/robot-buddy-research/source/examples/ai-agent-rust/src/lib.rs",
+    "bytes": 319,
+    "status": "ok"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/rivet-dev/rivet/v3.1.1/examples/ai-agent-rust/src/main.rs",
+    "path": "/private/tmp/robot-buddy-research/source/examples/ai-agent-rust/src/main.rs",
+    "bytes": 106,
+    "status": "ok"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/rivet-dev/rivet/v3.1.1/examples/chat-room-rust/Cargo.toml",
+    "path": "/private/tmp/robot-buddy-research/source/examples/chat-room-rust/Cargo.toml",
+    "bytes": 295,
+    "status": "ok"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/rivet-dev/rivet/v3.1.1/examples/chat-room-rust/README.md",
+    "path": "/private/tmp/robot-buddy-research/source/examples/chat-room-rust/README.md",
+    "bytes": 1446,
+    "status": "ok"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/rivet-dev/rivet/v3.1.1/examples/chat-room-rust/src/lib.rs",
+    "path": "/private/tmp/robot-buddy-research/source/examples/chat-room-rust/src/lib.rs",
+    "bytes": 4197,
+    "status": "ok"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/rivet-dev/rivet/v3.1.1/examples/chat-room-rust/src/main.rs",
+    "path": "/private/tmp/robot-buddy-research/source/examples/chat-room-rust/src/main.rs",
+    "bytes": 107,
+    "status": "ok"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/rivet-dev/rivet/v3.1.1/examples/hello-world-rust/Cargo.toml",
+    "path": "/private/tmp/robot-buddy-research/source/examples/hello-world-rust/Cargo.toml",
+    "bytes": 296,
+    "status": "ok"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/rivet-dev/rivet/v3.1.1/examples/hello-world-rust/README.md",
+    "path": "/private/tmp/robot-buddy-research/source/examples/hello-world-rust/README.md",
+    "bytes": 1342,
+    "status": "ok"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/rivet-dev/rivet/v3.1.1/examples/hello-world-rust/src/lib.rs",
+    "path": "/private/tmp/robot-buddy-research/source/examples/hello-world-rust/src/lib.rs",
+    "bytes": 2281,
+    "status": "ok"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/rivet-dev/rivet/v3.1.1/examples/hello-world-rust/src/main.rs",
+    "path": "/private/tmp/robot-buddy-research/source/examples/hello-world-rust/src/main.rs",
+    "bytes": 109,
+    "status": "ok"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/rivet-dev/rivet/v3.1.1/rivetkit-rust/packages/rivetkit/src/actor.rs",
+    "path": "/private/tmp/robot-buddy-research/source/rivetkit-rust/packages/rivetkit/src/actor.rs",
+    "bytes": 4714,
+    "status": "ok"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/rivet-dev/rivet/v3.1.1/rivetkit-rust/packages/rivetkit/src/context.rs",
+    "path": "/private/tmp/robot-buddy-research/source/rivetkit-rust/packages/rivetkit/src/context.rs",
+    "bytes": 14441,
+    "status": "ok"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/rivet-dev/rivet/v3.1.1/rivetkit-rust/packages/rivetkit/src/lib.rs",
+    "path": "/private/tmp/robot-buddy-research/source/rivetkit-rust/packages/rivetkit/src/lib.rs",
+    "bytes": 1729,
+    "status": "ok"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/rivet-dev/rivet/v3.1.1/rivetkit-rust/packages/rivetkit/src/sqlite.rs",
+    "path": "/private/tmp/robot-buddy-research/source/rivetkit-rust/packages/rivetkit/src/sqlite.rs",
+    "bytes": 1374,
+    "status": "ok"
+  }
+]
