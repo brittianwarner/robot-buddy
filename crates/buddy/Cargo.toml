@@ -23,7 +23,18 @@ tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 url.workspace = true
+tokio-util = "0.7"
 [dev-dependencies]
 tracing-subscriber.workspace = true
 axum.workspace = true
-tokio-util = "0.7"
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+[[bench]]
+name = "sentences"
+harness = false
+[[bench]]
+name = "primitives"
+harness = false
+[[bench]]
+name = "history_sql"
+harness = false

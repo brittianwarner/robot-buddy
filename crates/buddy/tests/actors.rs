@@ -23,6 +23,223 @@ fn token(bot: &str, role: &str) -> Result<String> {
         },
     )
 }
+type Conversation = rivetkit::TypedActorHandle<robot_buddy::conversation::Conversation>;
+
+const LATENCY_PROMPT: &str = "Latency check";
+const LATENCY_REPLY: &str = "Sure thing. The weather today is sunny and mild. You might want a \
+light jacket later, since it cools off fast. Have a great afternoon!";
+const BARGE_PROMPT: &str = "Barge in";
+/// Gap between mock tokens of about four characters.
+const TOKEN_GAP: Duration = Duration::from_millis(20);
+/// When the mock saw the barge-in stream dropped, i.e. the provider connection closed.
+static BARGE_DROPPED: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+fn barge_reply() -> String {
+    let sentence = "The robot walked down to the corner store and bought milk. ";
+    format!("Okay, here is a long story. {}", sentence.repeat(12))
+}
+
+/// Records when the mock response stream is dropped.
+struct DropSignal(Option<&'static std::sync::Mutex<Option<std::time::Instant>>>);
+impl Drop for DropSignal {
+    fn drop(&mut self) {
+        if let Some(slot) = self.0 {
+            *slot.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::time::Instant::now());
+        }
+    }
+}
+
+fn sse_text(text: &str) -> String {
+    let delta = json!({"role":"assistant","content":text});
+    let chunk = json!({"id":"chatcmpl-tokens","object":"chat.completion.chunk","created":1,
+        "model":"fixture","choices":[{"index":0,"delta":delta,"finish_reason":null}]});
+    format!("data: {chunk}\n\n")
+}
+
+fn sse_stop() -> String {
+    let chunk = json!({"id":"chatcmpl-tokens","object":"chat.completion.chunk","created":1,
+        "model":"fixture","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],
+        "usage":{"prompt_tokens":3,"completion_tokens":30,"total_tokens":33}});
+    format!("data: {chunk}\n\ndata: [DONE]\n\n")
+}
+
+/// Streams `reply` as ~4-character SSE tokens, one every [`TOKEN_GAP`].
+fn token_stream(reply: &str, signal: DropSignal) -> axum::response::Response {
+    let chars: Vec<char> = reply.chars().collect();
+    let mut frames: Vec<String> = chars
+        .chunks(4)
+        .map(|c| sse_text(&c.iter().collect::<String>()))
+        .collect();
+    frames.push(sse_stop());
+    let stream = futures_util::stream::unfold(
+        (frames.into_iter(), signal),
+        |(mut frames, signal)| async move {
+            tokio::time::sleep(TOKEN_GAP).await;
+            let frame = frames.next()?;
+            Some((Ok::<_, std::io::Error>(frame), (frames, signal)))
+        },
+    );
+    let body = axum::body::Body::from_stream(stream);
+    ([("content-type", "text/event-stream")], body).into_response()
+}
+
+/// The scripted token streams for the latency and barge-in checks.
+fn scripted(messages: &[Value]) -> Option<axum::response::Response> {
+    let user = messages.iter().rev().find(|m| m["role"] == "user")?;
+    let direct = messages
+        .iter()
+        .any(|m| m["content"].to_string().contains("RESPONSE ROUTING:"));
+    if !direct {
+        return None;
+    }
+    if user["content"] == LATENCY_PROMPT {
+        return Some(token_stream(LATENCY_REPLY, DropSignal(None)));
+    }
+    if user["content"] == BARGE_PROMPT {
+        return Some(token_stream(
+            &barge_reply(),
+            DropSignal(Some(&BARGE_DROPPED)),
+        ));
+    }
+    None
+}
+
+async fn replay(c: &Conversation, session: &str, after: i64) -> Result<Vec<Value>> {
+    let events = c
+        .send(Call {
+            session: session.into(),
+            command: Command::Replay { after },
+        })
+        .await?;
+    Ok(events.as_array().context("events")?.clone())
+}
+
+async fn submit(c: &Conversation, session: &str, request_id: &str, text: &str) -> Result<String> {
+    let turn = c
+        .send(Call {
+            session: session.into(),
+            command: Command::Submit {
+                request_id: request_id.into(),
+                text: text.into(),
+            },
+        })
+        .await?;
+    Ok(turn["turn_id"].as_str().context("turn id")?.into())
+}
+
+/// Polls replay every 5 ms. Returns when each `speech.ready` of `turn` was seen, measured
+/// from `start`, until `stop_kind` or after `count` chunks.
+async fn watch_speech(
+    c: &Conversation,
+    session: &str,
+    turn: &str,
+    start: std::time::Instant,
+    count: Option<usize>,
+) -> Result<Vec<Duration>> {
+    let mut cursor = 0;
+    let mut ready = Vec::new();
+    let deadline = start + Duration::from_secs(15);
+    while std::time::Instant::now() < deadline {
+        for event in replay(c, session, cursor).await? {
+            cursor = cursor.max(event["sequence"].as_i64().context("sequence")?);
+            if event["turn_id"] != turn {
+                continue;
+            }
+            if event["kind"] == "speech.ready" {
+                ready.push(start.elapsed());
+            }
+            if event["kind"] == "turn.completed" {
+                return Ok(ready);
+            }
+            ensure!(event["kind"] != "turn.failed", "turn failed: {event}");
+        }
+        if count.is_some_and(|n| ready.len() >= n) {
+            return Ok(ready);
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    anyhow::bail!("speech watch timed out after {} chunks", ready.len())
+}
+
+fn millis(d: &Duration) -> u128 {
+    d.as_millis()
+}
+
+/// Submit to first `speech.ready`, and the gaps between chunks, for a token-paced reply.
+async fn latency_eval(c: &Conversation, device: &str) -> Result<()> {
+    let start = std::time::Instant::now();
+    let turn = submit(c, device, "latency", LATENCY_PROMPT).await?;
+    let ready = watch_speech(c, device, &turn, start, None).await?;
+    let first = ready.first().context("no speech.ready")?;
+    let gaps: Vec<u128> = ready.windows(2).map(|w| millis(&(w[1] - w[0]))).collect();
+    let stream_ms = LATENCY_REPLY.chars().count().div_ceil(4) as u128 * millis(&TOKEN_GAP);
+    println!(
+        "LATENCY submit_to_first_speech_ready_ms={} chunks={} gaps_ms={gaps:?} \
+         mock_stream_ms={stream_ms} submit_to_last_ready_ms={}",
+        millis(first),
+        ready.len(),
+        millis(ready.last().context("last")?)
+    );
+    ensure!(
+        ready.len() >= 4,
+        "expected one chunk per sentence: {}",
+        ready.len()
+    );
+    ensure!(
+        *first < Duration::from_millis(1500),
+        "first speech.ready took {first:?}"
+    );
+    Ok(())
+}
+
+/// Cancel mid-stream: the provider connection closes promptly and no chunk commits after.
+async fn barge_in_eval(c: &Conversation, device: &str) -> Result<()> {
+    *BARGE_DROPPED.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    let start = std::time::Instant::now();
+    let turn = submit(c, device, "barge-in", BARGE_PROMPT).await?;
+    watch_speech(c, device, &turn, start, Some(2)).await?;
+    let cancelled_at = std::time::Instant::now();
+    c.send(Call {
+        session: device.into(),
+        command: Command::Cancel {
+            turn_id: turn.clone(),
+        },
+    })
+    .await?;
+    let acked = cancelled_at.elapsed();
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    let dropped = BARGE_DROPPED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .context("provider stream was never dropped")?;
+    let close = dropped.saturating_duration_since(cancelled_at);
+    let events = replay(c, device, 0).await?;
+    let ours: Vec<&Value> = events.iter().filter(|e| e["turn_id"] == turn).collect();
+    let cancel = ours
+        .iter()
+        .find(|e| e["kind"] == "turn.cancelled")
+        .context("turn.cancelled missing")?["sequence"]
+        .as_i64()
+        .context("sequence")?;
+    let chunks = ours.iter().filter(|e| e["kind"] == "speech.ready").count();
+    let late = ours
+        .iter()
+        .filter(|e| e["sequence"].as_i64().is_some_and(|s| s > cancel))
+        .count();
+    println!(
+        "BARGE_IN cancel_ack_ms={} provider_close_after_cancel_ms={} chunks_before_cancel={chunks} \
+         events_after_cancel={late}",
+        millis(&acked),
+        millis(&close)
+    );
+    ensure!(late == 0, "{late} events committed after cancellation");
+    ensure!(
+        close < Duration::from_millis(300),
+        "provider connection closed {close:?} after cancel"
+    );
+    Ok(())
+}
+
 #[tokio::test]
 #[ignore = "starts isolated real engine; run bun run test:integration"]
 async fn registration_streaming_isolation_and_restart() -> Result<()> {
@@ -33,6 +250,7 @@ async fn registration_streaming_isolation_and_restart() -> Result<()> {
     GREETING_CALLS.store(0, std::sync::atomic::Ordering::SeqCst);
     let mock=axum::Router::new().route("/v1/chat/completions",axum::routing::post(|axum::Json(request):axum::Json<Value>|async move {
         let messages=request["messages"].as_array().expect("messages");
+        if let Some(response)=scripted(messages) { return response; }
         let greeting=messages.iter().rev().find(|m|m["role"]=="user").is_some_and(|m|m["content"]=="Hello");
         if greeting { GREETING_CALLS.fetch_add(1, std::sync::atomic::Ordering::SeqCst); }
         let direct=messages.iter().any(|m|m["content"].to_string().contains("RESPONSE ROUTING:"));
@@ -574,6 +792,8 @@ async fn registration_streaming_isolation_and_restart() -> Result<()> {
         .await
         .is_err()
     );
+    latency_eval(&c, &device).await?;
+    barge_in_eval(&c, &device).await?;
     let slow = c
         .send(Call {
             session: device.clone(),
@@ -595,7 +815,7 @@ async fn registration_streaming_isolation_and_restart() -> Result<()> {
             .as_array()
             .context("events")?
             .iter()
-            .any(|e| e["turn_id"] == slow["turn_id"] && e["kind"] == "text.delta")
+            .any(|e| e["turn_id"] == slow["turn_id"] && e["kind"] == "speech.ready")
         {
             partial = true;
             break;

@@ -62,9 +62,9 @@ Terminal status and terminal event commit in one transaction. Failed, interrupte
 
 ## Context and performance
 
-Normal prompts load the latest 12 completed turns (bounded text), up to six matching facts plus two recent facts, and the current request. Full transcript data stays in SQLite and is accessible via history pages and an FTS5 history-search tool. This provides bounded normal context cost; lexical retrieval is not semantic search or a promise that every relevant fact is automatically retrieved. Tool receipts retain tool arguments/results separately from the final spoken answer.
+Normal prompts load the latest 12 completed turns (bounded text, read through the `turns_completed` index), up to six matching facts plus two recent facts, and the current request. Full transcript data stays in SQLite and is accessible via history pages and an FTS5 history-search tool. This provides bounded normal context cost; lexical retrieval is not semantic search or a promise that every relevant fact is automatically retrieved. Tool receipts retain tool arguments/results separately from the final spoken answer.
 
-Rig uses a shared pooled HTTP transport with redirects disabled and connect/total deadlines; the web-search client is reused. Streaming uses a bounded channel and batches persisted deltas at 100 ms. Actor lookup is not performed per token. Device action authorization is checked fresh; active generation and event delivery share a one-second revocation-check cache, bounding revocation propagation while reducing cross-actor reads. A process-wide inference semaphore defaults to 16 concurrent model calls and rejects overflow; no global actor is involved. No actor is kept awake after its registered work finishes. Robot status polling currently wakes the Bot actor every three seconds while connected.
+Rig uses a shared pooled HTTP transport with redirects disabled and connect/total deadlines; the web-search client is reused. Streaming uses a bounded channel and batches persisted deltas at 100 ms between sentence boundaries. Actor lookup is not performed per token. Device action authorization is checked fresh; active generation and event delivery share a one-second revocation-check cache, bounding revocation propagation while reducing cross-actor reads. A process-wide inference semaphore defaults to 16 concurrent model calls and rejects overflow; no global actor is involved. No actor is kept awake after its registered work finishes. Robot status polling currently wakes the Bot actor every three seconds while connected.
 
 Do not claim throughput improvements without measurement. Establish release-build baselines for first-token latency, SQLite operations per turn, checkpoint bytes, event bytes, memory per active run, and idle wakeups before changing batching or context limits. Semantic memory, summarization, multi-conversation indexing and event-retention policies are future extensions.
 
@@ -79,3 +79,34 @@ Rivet documents filesystem objects for single-machine/quickstart use and recomme
 ## Early speech boundary
 
 The initial request can stream response-text dialogue directly, completing in one call. Tool/planning prose produces no user-visible text. After tools finish, Conversation pins persona and voice in a transaction and starts a tool-disabled response phase. Its deltas commit transcript text before sentence chunks. Clients react to `speech.ready` (with a snapshot fallback), then consume one authenticated PCM stream from the server. Sentence text/configuration are durable actor data; audio remains transient. See [voice delivery](voice.md).
+
+## Streaming and cancellation
+
+The provider runs on its own task. It feeds a bounded channel of 16 deltas. Storage writes never block it from reading the network.
+
+At each sentence boundary, one transaction commits the pending `text.delta`, the speech chunk and its `speech.ready`. Every insert is guarded on the running turn. Events are delivered after the commit. Replay order is unchanged: text first, then each chunk and its ready event.
+
+Each running turn has an in-process stop signal. A terminal cancel or failure fires it after its transaction commits. The stream consumer then returns at once and the provider task is aborted, which closes the provider connection. The consumer handles each wake-up after `select!` returns, so no SQLite transaction is dropped mid-flight. Durable turn status stays the source of truth. Checkpoints, tool intents and chunk writes use `RETURNING` and fail with "turn cancelled" on zero rows.
+
+Before the first model call, memory search, persona and recent history load concurrently. The `model_pending` checkpoint commits before the request is sent. The spoken phase pins the voice while context and facts load. The pinned voice holds the chosen voice only, not the voice catalog.
+
+One model call may stream 128 KiB of text and 256 KiB in total. The total counts reasoning, tool arguments and unknown provider payloads. Reasoning is counted and dropped, never forwarded.
+
+## Sentence splitting
+
+The splitter keeps a cursor and scans each byte once. A boundary is decided only when the next character arrives, so token fragmentation never changes the output. Chunks concatenate back to the exact model text. Whitespace after a boundary stays with the chunk it ends; whitespace-only chunks are not spoken.
+
+- `!` and `?` end a sentence before whitespace. CJK terminators always do.
+- Runs like `?!` and closing quotes or brackets stay with their sentence.
+- `.` and ellipses end a sentence before whitespace, unless the next word is lower case.
+- Listed abbreviations, initials, dotted abbreviations, list numbers and `3.14` or `example.com` do not split.
+- A newline ends a chunk.
+- The first chunk may end early at `,` `;` `:` or `—` plus whitespace once it holds 24 bytes.
+- Unpunctuated text breaks at whitespace after 240 bytes and anywhere after 600.
+
+If the stream stalls for 200 ms on an undecided sentence end, the harness decides it as a boundary. Only that case depends on timing.
+
+## History search storage
+
+`history_rows` maps each turn to a stable FTS row ID. The answer trigger replaces a turn's search row by that key. Version 1 deleted by the unindexed `turn_id` column, a full scan of the index for every finished turn. A one-time rebuild, recorded in `schema_migrations`, derives the index from `turns` again. The schema script is idempotent and no turn data is changed.
+

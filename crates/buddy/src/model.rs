@@ -127,12 +127,12 @@ impl Model {
             request
         };
         let mut stream = self.inner.stream(request)?;
-        let mut total = 0;
+        let mut budget = StreamBudget::default();
         while let Some(item) = stream.next().await {
-            match item? {
+            let item = item?;
+            budget.charge(&item)?;
+            match item {
                 Item::Event(StreamEvent::Text { text, .. }) => {
-                    total += text.len();
-                    ensure!(total <= 131072, "model output exceeds limit");
                     tx.send(Ok(Delta::Text(text))).await?;
                 }
                 Item::Event(StreamEvent::Start {
@@ -150,6 +150,37 @@ impl Model {
         Ok(())
     }
 }
+
+/// Answer text a single model call may stream.
+pub const MAX_TEXT_BYTES: usize = 131_072;
+/// Everything a single model call may stream: text, reasoning, tool-call arguments and
+/// unmodeled payloads. Reasoning is counted and dropped, never forwarded.
+pub const MAX_STREAM_BYTES: usize = 262_144;
+
+/// Byte accounting over every streamed part, not only the spoken text.
+#[derive(Default)]
+struct StreamBudget {
+    text: usize,
+    total: usize,
+}
+impl StreamBudget {
+    fn charge(&mut self, item: &Item<StreamEvent>) -> Result<()> {
+        let (text, other) = match item {
+            Item::Event(StreamEvent::Text { text, .. }) => (text.len(), 0),
+            Item::Event(StreamEvent::Reasoning { text, .. }) => (0, text.len()),
+            Item::Event(StreamEvent::Arguments { json, .. }) => (0, json.len()),
+            // Start and End carry names and the finalized copy of fragments already counted.
+            Item::Event(StreamEvent::Start { .. } | StreamEvent::End { .. }) => (0, 0),
+            Item::Unknown(payload) => (0, serde_json::to_vec(payload.value())?.len()),
+        };
+        self.text += text;
+        self.total += text + other;
+        ensure!(self.text <= MAX_TEXT_BYTES, "model output exceeds limit");
+        ensure!(self.total <= MAX_STREAM_BYTES, "model stream exceeds limit");
+        Ok(())
+    }
+}
+
 pub fn tools() -> Result<Vec<ToolDefinition>> {
     tool_json()
         .as_array()
@@ -218,4 +249,42 @@ pub async fn search(query: &str) -> Result<Value> {
         .map(|r| json!({"title":r["title"],"url":r["url"],"description":r["description"]}))
         .collect::<Vec<_>>();
     Ok(json!({"results":results}))
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rig::streaming::{Part, UnknownPayload};
+    fn reasoning(bytes: usize) -> Item<StreamEvent> {
+        Item::Event(StreamEvent::Reasoning {
+            part: Part::new(0),
+            text: "r".repeat(bytes),
+        })
+    }
+    #[test]
+    fn budget_counts_reasoning_arguments_and_unknown_payloads() {
+        let mut budget = StreamBudget::default();
+        budget.charge(&reasoning(MAX_STREAM_BYTES - 10)).unwrap();
+        let arguments = Item::Event(StreamEvent::Arguments {
+            part: Part::new(1),
+            json: "{}".into(),
+        });
+        budget.charge(&arguments).unwrap();
+        let unknown = Item::Unknown(UnknownPayload::new(json!({"x": "y".repeat(16)})));
+        assert!(budget.charge(&unknown).is_err());
+    }
+    #[test]
+    fn budget_limits_text_separately() {
+        let mut budget = StreamBudget::default();
+        let text = Item::Event(StreamEvent::Text {
+            part: Part::new(0),
+            text: "t".repeat(MAX_TEXT_BYTES),
+        });
+        budget.charge(&text).unwrap();
+        let more = Item::Event(StreamEvent::Text {
+            part: Part::new(0),
+            text: "t".into(),
+        });
+        assert!(budget.charge(&more).is_err());
+        assert!(budget.total <= MAX_STREAM_BYTES);
+    }
 }

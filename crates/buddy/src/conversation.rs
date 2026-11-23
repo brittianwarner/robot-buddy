@@ -21,12 +21,17 @@ use std::{
     },
     time::Duration,
 };
+use tokio_util::sync::CancellationToken;
 
 pub struct Conversation {
     signing_key: Vec<u8>,
     draining: AtomicBool,
-    model: Model,
+    /// Shared so a model stream can run on its own task.
+    model: Arc<Model>,
     last_authorized: tokio::sync::Mutex<Option<std::time::Instant>>,
+    /// In-process stop signal for the running turn. A terminal `finish_turn` fires it so
+    /// a provider stream drops at once. Durable turn status stays the source of truth.
+    running: std::sync::Mutex<Option<(String, CancellationToken)>>,
 }
 fn string(row: &[V], index: usize) -> Result<String> {
     match row.get(index) {
@@ -50,6 +55,64 @@ fn bot_key(ctx: &Ctx<Conversation>) -> Result<String> {
     }
 }
 
+/// Name of the one-time history search rebuild in `schema_migrations`.
+const HISTORY_ROWIDS_MIGRATION: &str = "history_search_rowids";
+
+/// Rebuilds the FTS index once with stable row IDs, so the terminal answer trigger deletes
+/// by key instead of scanning. The index is derived from `turns`; no history is lost.
+async fn migrate_history_search(ctx: &Ctx<Conversation>) -> Result<()> {
+    ctx.sql()
+        .transaction(
+            |tx| async move {
+                let done = tx
+                    .execute(
+                        "SELECT 1 FROM schema_migrations WHERE name=?",
+                        params(&[HISTORY_ROWIDS_MIGRATION]),
+                    )
+                    .await?;
+                if !done.rows.is_empty() {
+                    return Ok(());
+                }
+                tx.exec(include_str!("conversation/history-rowids.sql"))
+                    .await?;
+                tx.execute(
+                    "INSERT INTO schema_migrations(name,applied) VALUES(?,?)",
+                    Some(vec![
+                        P::Text(HISTORY_ROWIDS_MIGRATION.into()),
+                        P::Integer(auth::now()),
+                    ]),
+                )
+                .await?;
+                Ok(())
+            },
+            Default::default(),
+        )
+        .await
+}
+
+/// Seeds a singleton settings row and its first version; existing rows are kept.
+async fn seed_settings(
+    ctx: &Ctx<Conversation>,
+    settings: &'static str,
+    versions: &'static str,
+    value: String,
+) -> Result<()> {
+    ctx.sql()
+        .transaction(
+            |tx| async move {
+                tx.execute(
+                    settings,
+                    Some(vec![P::Text(value), P::Integer(auth::now())]),
+                )
+                .await?;
+                tx.execute(versions, None).await?;
+                Ok(())
+            },
+            Default::default(),
+        )
+        .await
+}
+
 #[async_trait]
 impl Actor for Conversation {
     type Input = ();
@@ -66,39 +129,80 @@ impl Actor for Conversation {
             "BUDDY_SIGNING_KEY must be at least 32 bytes"
         );
         ctx.sql().exec(include_str!("conversation.sql")).await?;
-        ctx.sql().transaction(|tx|async move {
-            tx.execute("INSERT OR IGNORE INTO system_prompt(singleton,revision,prompt,updated) VALUES(1,1,?,?)",Some(vec![P::Text(include_str!("prompts/persona.txt").into()),P::Integer(auth::now())])).await?;
-            tx.execute("INSERT OR IGNORE INTO prompt_versions(revision,prompt,reason,updated) SELECT revision,prompt,'Initial Buddy persona',updated FROM system_prompt WHERE singleton=1 AND revision=1",None).await?;
-            Ok(())
-        },Default::default()).await?;
-        let voice_config = serde_json::to_string(&crate::voice::VoiceConfig::default())?;
-        ctx.sql().transaction(|tx|async move {
-            tx.execute("INSERT OR IGNORE INTO voice_settings(singleton,revision,config,updated) VALUES(1,1,?,?)",Some(vec![P::Text(voice_config),P::Integer(auth::now())])).await?;
-            tx.execute("INSERT OR IGNORE INTO voice_versions(revision,config,reason,updated) SELECT revision,config,'Initial curated voice',updated FROM voice_settings WHERE singleton=1 AND revision=1",None).await?;
-            Ok(())
-        },Default::default()).await?;
+        migrate_history_search(ctx).await?;
+        seed_settings(
+            ctx,
+            "INSERT OR IGNORE INTO system_prompt(singleton,revision,prompt,updated) \
+             VALUES(1,1,?,?)",
+            "INSERT OR IGNORE INTO prompt_versions(revision,prompt,reason,updated) \
+             SELECT revision,prompt,'Initial Buddy persona',updated \
+             FROM system_prompt WHERE singleton=1 AND revision=1",
+            include_str!("prompts/persona.txt").into(),
+        )
+        .await?;
         let default_voice = serde_json::to_string(&crate::voice::VoiceConfig::default())?;
-        ctx.sql().transaction(|tx|async move {
-            tx.execute("INSERT OR IGNORE INTO personas(name,latest) VALUES('Buddy',1)",None).await?;
-            tx.execute("INSERT OR IGNORE INTO persona_versions(name,version,prompt,voice,reason,updated) SELECT 'Buddy',1,?,?,'J.P. companion on Will',? WHERE EXISTS(SELECT 1 FROM personas WHERE name='Buddy' AND latest=1)",Some(vec![P::Text(include_str!("prompts/persona.txt").into()),P::Text(default_voice),P::Integer(auth::now())])).await?;
-            Ok(())
-        },Default::default()).await?;
-        let context_config = serde_json::to_string(&crate::context::ContextConfig::default())?;
-        ctx.sql().transaction(|tx|async move {
-            tx.execute("INSERT OR IGNORE INTO context_settings(singleton,revision,config,updated) VALUES(1,1,?,?)",Some(vec![P::Text(context_config),P::Integer(auth::now())])).await?;
-            tx.execute("INSERT OR IGNORE INTO context_versions(revision,config,reason,updated) SELECT revision,config,'Initial UTC fallback',updated FROM context_settings WHERE singleton=1 AND revision=1",None).await?;
-            Ok(())
-        },Default::default()).await?;
+        seed_settings(
+            ctx,
+            "INSERT OR IGNORE INTO voice_settings(singleton,revision,config,updated) \
+             VALUES(1,1,?,?)",
+            "INSERT OR IGNORE INTO voice_versions(revision,config,reason,updated) \
+             SELECT revision,config,'Initial curated voice',updated \
+             FROM voice_settings WHERE singleton=1 AND revision=1",
+            default_voice.clone(),
+        )
+        .await?;
+        ctx.sql()
+            .transaction(
+                |tx| async move {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO personas(name,latest) VALUES('Buddy',1)",
+                        None,
+                    )
+                    .await?;
+                    tx.execute(
+                        "INSERT OR IGNORE INTO persona_versions\
+                         (name,version,prompt,voice,reason,updated) \
+                         SELECT 'Buddy',1,?,?,'J.P. companion on Will',? \
+                         WHERE EXISTS(SELECT 1 FROM personas WHERE name='Buddy' AND latest=1)",
+                        Some(vec![
+                            P::Text(include_str!("prompts/persona.txt").into()),
+                            P::Text(default_voice),
+                            P::Integer(auth::now()),
+                        ]),
+                    )
+                    .await?;
+                    Ok(())
+                },
+                Default::default(),
+            )
+            .await?;
+        seed_settings(
+            ctx,
+            "INSERT OR IGNORE INTO context_settings(singleton,revision,config,updated) \
+             VALUES(1,1,?,?)",
+            "INSERT OR IGNORE INTO context_versions(revision,config,reason,updated) \
+             SELECT revision,config,'Initial UTC fallback',updated \
+             FROM context_settings WHERE singleton=1 AND revision=1",
+            serde_json::to_string(&crate::context::ContextConfig::default())?,
+        )
+        .await?;
         Ok(Self {
             signing_key,
             draining: AtomicBool::new(false),
-            model: Model::from_env()?,
+            model: Arc::new(Model::from_env()?),
             last_authorized: tokio::sync::Mutex::new(None),
+            running: std::sync::Mutex::new(None),
         })
     }
     async fn on_start(self: Arc<Self>, ctx: Ctx<Self>) -> Result<()> {
         self.adopt_factory_companion(&ctx).await?;
-        ctx.sql().execute("UPDATE turns SET status='queued' WHERE status='running' AND id IN (SELECT turn_id FROM runs WHERE phase='ready')",None).await?;
+        ctx.sql()
+            .execute(
+                "UPDATE turns SET status='queued' WHERE status='running' \
+                 AND id IN (SELECT turn_id FROM runs WHERE phase='ready')",
+                None,
+            )
+            .await?;
         // A provider stream cannot resume after process loss. Preserve its output and make interruption explicit.
         let interrupted = ctx
             .sql()
@@ -233,8 +337,10 @@ impl Conversation {
         let inserted = ctx
             .sql()
             .execute(
-                "INSERT INTO events(turn_id,kind,payload) SELECT ?,?,? WHERE EXISTS(SELECT 1 FROM turns WHERE id=? AND status='running') RETURNING sequence",
-                params(&[turn, kind, &payload.to_string(),turn]),
+                "INSERT INTO events(turn_id,kind,payload) SELECT ?,?,? \
+                 WHERE EXISTS(SELECT 1 FROM turns WHERE id=? AND status='running') \
+                 RETURNING sequence",
+                params(&[turn, kind, &payload.to_string(), turn]),
             )
             .await?;
         let Some(row) = inserted.rows.first() else {
@@ -304,23 +410,32 @@ impl Conversation {
     }
     async fn drain(&self, ctx: &Ctx<Self>) -> Result<()> {
         loop {
-            let rows=ctx.sql().query("UPDATE turns SET status='running' WHERE id=(SELECT id FROM turns WHERE status='queued' ORDER BY created LIMIT 1) RETURNING id,text",None).await?.rows;
+            let rows = ctx
+                .sql()
+                .query(
+                    "UPDATE turns SET status='running' WHERE id=\
+                     (SELECT id FROM turns WHERE status='queued' ORDER BY created LIMIT 1) \
+                     RETURNING id,text",
+                    None,
+                )
+                .await?
+                .rows;
             let Some(row) = rows.first() else {
                 return Ok(());
             };
             let id = string(row, 0)?;
             let text = string(row, 1)?;
-            let generation = async {
-                self.event(ctx, &id, "turn.started", json!({"text":text}))
-                    .await?;
-                self.generate(ctx, &id, &text).await
-            };
-            let abort = ctx.abort_signal();
-            let result = tokio::select! {
-                _=abort.cancelled()=>return Ok(()),
-                result=tokio::time::timeout(Duration::from_secs(180),generation)=>result.context("turn deadline exceeded").and_then(|v|v),
+            let stop = self.begin_turn_signal(&id);
+            let result = self.run_turn(ctx, &id, &text, &stop).await;
+            self.end_turn_signal(&id);
+            let Some(result) = result else {
+                return Ok(());
             };
             if let Err(error) = result {
+                if stop.is_cancelled() {
+                    // Already terminal: cancellation committed its own event.
+                    continue;
+                }
                 tracing::warn!(
                     transport_error = error.is::<reqwest::Error>(),
                     "generation failed"
@@ -335,6 +450,57 @@ impl Conversation {
                 .await?;
             }
         }
+    }
+    /// Runs one admitted turn under the execution deadline. `None` means the actor is
+    /// stopping. A barge-in does not drop this future: it fires `stop`, which the model
+    /// stream observes, so no SQLite transaction is abandoned mid-flight.
+    async fn run_turn(
+        &self,
+        ctx: &Ctx<Self>,
+        id: &str,
+        text: &str,
+        stop: &CancellationToken,
+    ) -> Option<Result<()>> {
+        let generation = async {
+            self.event(ctx, id, "turn.started", json!({"text":text}))
+                .await?;
+            self.generate(ctx, id, text, stop).await
+        };
+        let abort = ctx.abort_signal();
+        tokio::select! {
+            _ = abort.cancelled() => None,
+            result = tokio::time::timeout(Duration::from_secs(180), generation) => {
+                Some(result.context("turn deadline exceeded").and_then(|v| v))
+            }
+        }
+    }
+    fn begin_turn_signal(&self, id: &str) -> CancellationToken {
+        let token = CancellationToken::new();
+        *self.running.lock().unwrap_or_else(|e| e.into_inner()) = Some((id.into(), token.clone()));
+        token
+    }
+    fn end_turn_signal(&self, id: &str) {
+        let mut running = self.running.lock().unwrap_or_else(|e| e.into_inner());
+        if running.as_ref().is_some_and(|(turn, _)| turn == id) {
+            *running = None;
+        }
+    }
+    /// Fires the stop signal of `id` if it is the running turn.
+    fn stop_turn(&self, id: &str) {
+        let running = self.running.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((turn, token)) = running.as_ref()
+            && turn == id
+        {
+            token.cancel();
+        }
+    }
+    fn ensure_not_stopped(&self, id: &str) -> Result<()> {
+        let running = self.running.lock().unwrap_or_else(|e| e.into_inner());
+        let stopped = running
+            .as_ref()
+            .is_some_and(|(turn, token)| turn == id && token.is_cancelled());
+        ensure!(!stopped, "turn cancelled");
+        Ok(())
     }
     async fn check_live(&self, ctx: &Ctx<Self>) -> Result<()> {
         let mut checked = self.last_authorized.lock().await;
@@ -356,6 +522,7 @@ impl Conversation {
         Ok(())
     }
     async fn active(&self, ctx: &Ctx<Self>, id: &str) -> Result<()> {
+        self.ensure_not_stopped(id)?;
         self.check_live(ctx).await?;
         let rows = ctx
             .sql()
@@ -378,16 +545,54 @@ impl Conversation {
     ) -> Result<()> {
         let kind = format!("turn.{status}");
         let encoded = payload.to_string();
-        let changed=ctx.sql().transaction(|tx|async move {
-            let partial = if status != "completed" {
-                tx.execute("SELECT json_extract(payload,'$.text') FROM events WHERE turn_id=? AND kind='text.delta' ORDER BY sequence", params(&[id])).await?.rows.iter().map(|r|string(r,0)).collect::<Result<Vec<_>>>()?.join("")
-            } else { answer.to_owned() };
-            let rows=tx.execute("UPDATE turns SET status=?,answer=? WHERE id=? AND status IN ('queued','running') RETURNING id",params(&[status,&partial,id])).await?.rows;
-            if rows.is_empty(){return Ok(None);}
-            let inserted=tx.execute("INSERT INTO events(turn_id,kind,payload) VALUES(?,?,?)",params(&[id,&kind,&encoded])).await?;
-            tx.execute("DELETE FROM runs WHERE turn_id=?",params(&[id])).await?;
-                Ok(inserted.last_insert_row_id)
-        },Default::default()).await?;
+        let changed = ctx
+            .sql()
+            .transaction(
+                |tx| async move {
+                    let partial = if status != "completed" {
+                        let rows = tx
+                            .execute(
+                                "SELECT json_extract(payload,'$.text') FROM events \
+                                 WHERE turn_id=? AND kind='text.delta' ORDER BY sequence",
+                                params(&[id]),
+                            )
+                            .await?
+                            .rows;
+                        rows.iter()
+                            .map(|r| string(r, 0))
+                            .collect::<Result<Vec<_>>>()?
+                            .join("")
+                    } else {
+                        answer.to_owned()
+                    };
+                    let rows = tx
+                        .execute(
+                            "UPDATE turns SET status=?,answer=? \
+                             WHERE id=? AND status IN ('queued','running') RETURNING id",
+                            params(&[status, &partial, id]),
+                        )
+                        .await?
+                        .rows;
+                    if rows.is_empty() {
+                        return Ok(None);
+                    }
+                    let inserted = tx
+                        .execute(
+                            "INSERT INTO events(turn_id,kind,payload) VALUES(?,?,?)",
+                            params(&[id, &kind, &encoded]),
+                        )
+                        .await?;
+                    tx.execute("DELETE FROM runs WHERE turn_id=?", params(&[id]))
+                        .await?;
+                    Ok(inserted.last_insert_row_id)
+                },
+                Default::default(),
+            )
+            .await?;
+        if changed.is_some() && status != "completed" {
+            // Barge-in: drop the provider stream now instead of at the next storage check.
+            self.stop_turn(id);
+        }
         if let Some(sequence) = changed {
             self.deliver(
                 ctx,
@@ -426,12 +631,17 @@ impl Conversation {
             ensure!(!value.is_empty(), "tool outcome unresolved");
             return Ok(serde_json::from_str(&value)?);
         }
-        ctx.sql()
+        // The intent commits before the effect. A cancelled turn admits no new effect.
+        let admitted = ctx
+            .sql()
             .execute(
-                "INSERT INTO tool_calls(turn_id,call_id,name,args) SELECT ?,?,?,? WHERE EXISTS(SELECT 1 FROM turns WHERE id=? AND status='running')",
-                params(&[turn, &call.id, &call.name, &call.arguments,turn]),
+                "INSERT INTO tool_calls(turn_id,call_id,name,args) SELECT ?,?,?,? \
+                 WHERE EXISTS(SELECT 1 FROM turns WHERE id=? AND status='running') \
+                 RETURNING call_id",
+                params(&[turn, &call.id, &call.name, &call.arguments, turn]),
             )
             .await?;
+        ensure!(!admitted.rows.is_empty(), "turn cancelled");
         self.event(ctx, turn, "tool.started", json!({"name":call.name}))
             .await?;
         self.active(ctx, turn).await?;
@@ -589,8 +799,187 @@ impl Conversation {
             "invalid history query"
         );
         let escaped = query.replace('"', "\"\"");
-        let rows=ctx.sql().query("SELECT t.id,t.status,substr(t.text,1,1500),substr(t.answer,1,2500) FROM history_search h JOIN turns t ON t.id=h.turn_id WHERE history_search MATCH ? ORDER BY rank LIMIT 6",params(&[&format!("\"{escaped}\"")])).await?.rows;
-        Ok(json!(rows.into_iter().map(|r|Ok(json!({"turn_id":string(&r,0)?,"status":string(&r,1)?,"user":string(&r,2)?,"assistant":string(&r,3)?}))).collect::<Result<Vec<_>>>()?))
+        let rows = ctx
+            .sql()
+            .query(
+                "SELECT t.id,t.status,substr(t.text,1,1500),substr(t.answer,1,2500) \
+                 FROM history_search h JOIN turns t ON t.id=h.turn_id \
+                 WHERE history_search MATCH ? ORDER BY rank LIMIT 6",
+                params(&[&format!("\"{escaped}\"")]),
+            )
+            .await?
+            .rows;
+        let hits = rows
+            .into_iter()
+            .map(|r| {
+                Ok(json!({
+                    "turn_id": string(&r, 0)?,
+                    "status": string(&r, 1)?,
+                    "user": string(&r, 2)?,
+                    "assistant": string(&r, 3)?,
+                }))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(json!(hits))
+    }
+}
+/// Roles that may change persona, voice and context settings.
+fn ensure_settings_role(session: &auth::Session, what: &str) -> Result<()> {
+    ensure!(
+        ["device", "agent"].contains(&session.role.as_str()),
+        "{what} update requires device or agent role"
+    );
+    Ok(())
+}
+fn turn_json(row: &[V]) -> Result<Value> {
+    Ok(json!({
+        "id": string(row, 0)?,
+        "status": string(row, 1)?,
+        "text": string(row, 2)?,
+        "answer": string(row, 3)?,
+    }))
+}
+impl Conversation {
+    async fn submit(&self, ctx: &Ctx<Self>, request_id: String, text: String) -> Result<Value> {
+        ensure!(
+            !request_id.is_empty()
+                && request_id.len() <= 128
+                && !text.trim().is_empty()
+                && text.len() <= 8192,
+            "invalid turn"
+        );
+        let id = uuid::Uuid::now_v7().to_string();
+        let created = auth::now();
+        ctx.sql()
+            .transaction(
+                |tx| async move {
+                    let prior = tx
+                        .execute(
+                            "SELECT id,text FROM turns WHERE request_id=?",
+                            params(&[&request_id]),
+                        )
+                        .await?
+                        .rows;
+                    if let Some(row) = prior.first() {
+                        ensure!(
+                            string(row, 1)? == text,
+                            "request id reused with different text"
+                        );
+                        return Ok(json!({"turn_id":string(row,0)?,"duplicate":true}));
+                    }
+                    let busy = tx
+                        .execute(
+                            "SELECT id FROM turns WHERE status IN ('queued','running') LIMIT 1",
+                            None,
+                        )
+                        .await?;
+                    ensure!(busy.rows.is_empty(), "busy");
+                    tx.execute(
+                        "INSERT INTO turns(id,request_id,text,created) VALUES(?,?,?,?)",
+                        Some(vec![
+                            P::Text(id.clone()),
+                            P::Text(request_id),
+                            P::Text(text),
+                            P::Integer(created),
+                        ]),
+                    )
+                    .await?;
+                    Ok(json!({"turn_id":id,"duplicate":false}))
+                },
+                Default::default(),
+            )
+            .await
+    }
+    async fn replay(&self, ctx: &Ctx<Self>, after: i64) -> Result<Value> {
+        let rows = ctx
+            .sql()
+            .query(
+                "SELECT sequence,turn_id,kind,payload FROM events \
+                 WHERE sequence>? ORDER BY sequence LIMIT 128",
+                Some(vec![P::Integer(after.max(0))]),
+            )
+            .await?
+            .rows;
+        let events = rows
+            .into_iter()
+            .map(|r| {
+                Ok(OutputEvent {
+                    sequence: integer(&r, 0)?,
+                    turn_id: string(&r, 1)?,
+                    kind: string(&r, 2)?,
+                    payload: serde_json::from_str(&string(&r, 3)?)?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(serde_json::to_value(events)?)
+    }
+    async fn snapshot(&self, ctx: &Ctx<Self>) -> Result<Value> {
+        ctx.sql()
+            .transaction(
+                |tx| async move {
+                    let rows = tx
+                        .execute(
+                            "SELECT id,status,text,answer,\
+                             EXISTS(SELECT 1 FROM speech_chunks c WHERE c.turn_id=turns.id) \
+                             FROM turns ORDER BY id DESC LIMIT 20",
+                            None,
+                        )
+                        .await?
+                        .rows;
+                    let turns = rows
+                        .into_iter()
+                        .map(|r| {
+                            let mut turn = turn_json(&r)?;
+                            turn["speech_ready"] = json!(integer(&r, 4)? != 0);
+                            Ok(turn)
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    let row = tx
+                        .execute("SELECT COALESCE(MAX(sequence),0) FROM events", None)
+                        .await?
+                        .rows;
+                    Ok(json!({"turns":turns,"last_sequence":integer(&row[0],0)?}))
+                },
+                Default::default(),
+            )
+            .await
+    }
+    async fn spoken_answer(&self, ctx: &Ctx<Self>, turn_id: String) -> Result<Value> {
+        ensure!(turn_id.len() <= 128, "invalid turn id");
+        let rows = ctx
+            .sql()
+            .query(
+                "SELECT answer FROM turns WHERE id=? AND status='completed'",
+                params(&[&turn_id]),
+            )
+            .await?
+            .rows;
+        let row = rows
+            .first()
+            .context("only completed answers can be spoken")?;
+        let answer = string(row, 0)?;
+        ensure!(
+            !answer.trim().is_empty() && answer.len() <= 12000,
+            "answer outside speech budget"
+        );
+        let voice = self.speech_voice(ctx, &turn_id).await?;
+        Ok(json!({"turn_id":turn_id,"text":answer,"voice":voice}))
+    }
+    async fn history_page(&self, ctx: &Ctx<Self>, before: String) -> Result<Value> {
+        let rows = ctx
+            .sql()
+            .query(
+                "SELECT id,status,text,answer FROM turns \
+                 WHERE (?='' OR id<?) ORDER BY id DESC LIMIT 20",
+                params(&[&before, &before]),
+            )
+            .await?
+            .rows;
+        let turns = rows
+            .iter()
+            .map(|r| turn_json(r))
+            .collect::<Result<Vec<_>>>()?;
+        Ok(json!(turns))
     }
 }
 impl Handler<Call> for Conversation {
@@ -599,22 +988,7 @@ impl Handler<Call> for Conversation {
         match call.command {
             Command::Submit { request_id, text } => {
                 ensure!(session.role == "device", "only device may submit");
-                ensure!(
-                    !request_id.is_empty()
-                        && request_id.len() <= 128
-                        && !text.trim().is_empty()
-                        && text.len() <= 8192,
-                    "invalid turn"
-                );
-                let id = uuid::Uuid::now_v7().to_string();
-                let created = auth::now();
-                let output=ctx.sql().transaction(|tx|async move{
-                    let prior=tx.execute("SELECT id,text FROM turns WHERE request_id=?",params(&[&request_id])).await?.rows;
-                    if let Some(row)=prior.first(){ensure!(string(row,1)?==text,"request id reused with different text");return Ok(json!({"turn_id":string(row,0)?,"duplicate":true}));}
-                    ensure!(tx.execute("SELECT id FROM turns WHERE status IN ('queued','running') LIMIT 1",None).await?.rows.is_empty(),"busy");
-                    tx.execute("INSERT INTO turns(id,request_id,text,created) VALUES(?,?,?,?)",Some(vec![P::Text(id.clone()),P::Text(request_id),P::Text(text),P::Integer(created)])).await?;
-                    Ok(json!({"turn_id":id,"duplicate":false}))
-                },Default::default()).await?;
+                let output = self.submit(&ctx, request_id, text).await?;
                 self.start_drain(ctx);
                 Ok(output)
             }
@@ -623,72 +997,65 @@ impl Handler<Call> for Conversation {
                     .await?;
                 Ok(json!({"ok":true}))
             }
-            Command::Replay { after } => {
-                let rows=ctx.sql().query("SELECT sequence,turn_id,kind,payload FROM events WHERE sequence>? ORDER BY sequence LIMIT 128",Some(vec![P::Integer(after.max(0))])).await?.rows;
-                let events = rows
-                    .into_iter()
-                    .map(|r| {
-                        Ok(OutputEvent {
-                            sequence: integer(&r, 0)?,
-                            turn_id: string(&r, 1)?,
-                            kind: string(&r, 2)?,
-                            payload: serde_json::from_str(&string(&r, 3)?)?,
-                        })
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                Ok(serde_json::to_value(events)?)
-            }
-            Command::Snapshot => {
-                ctx.sql().transaction(|tx|async move {
-                    let rows=tx.execute("SELECT id,status,text,answer,EXISTS(SELECT 1 FROM speech_chunks c WHERE c.turn_id=turns.id) FROM turns ORDER BY id DESC LIMIT 20",None).await?.rows;
-                    let turns=rows.into_iter().map(|r|Ok(json!({"id":string(&r,0)?,"status":string(&r,1)?,"text":string(&r,2)?,"answer":string(&r,3)?,"speech_ready":integer(&r,4)?!=0}))).collect::<Result<Vec<_>>>()?;
-                    let row=tx.execute("SELECT COALESCE(MAX(sequence),0) FROM events",None).await?.rows;
-                    Ok(json!({"turns":turns,"last_sequence":integer(&row[0],0)?}))
-                },Default::default()).await
-            }
+            Command::Replay { after } => self.replay(&ctx, after).await,
+            Command::Snapshot => self.snapshot(&ctx).await,
             Command::ListPersonas => self.list_personas(&ctx).await,
-            Command::GetPersona{name,version} => self.get_persona(&ctx,&name,version).await,
-            Command::SavePersona{persona} => {
-                ensure!(["device","agent"].contains(&session.role.as_str()),"persona update requires device or agent role");
-                self.save_profile(&ctx,&persona,None).await
+            Command::GetPersona { name, version } => self.get_persona(&ctx, &name, version).await,
+            Command::SavePersona { persona } => {
+                ensure_settings_role(&session, "persona")?;
+                self.save_profile(&ctx, &persona, None).await
             }
-            Command::ActivatePersona{name,version,expected_prompt_revision,expected_voice_revision} => {
-                ensure!(["device","agent"].contains(&session.role.as_str()),"persona update requires device or agent role");
-                self.activate_profile(&ctx,&name,version,(expected_prompt_revision,expected_voice_revision),None).await
+            Command::ActivatePersona {
+                name,
+                version,
+                expected_prompt_revision,
+                expected_voice_revision,
+            } => {
+                ensure_settings_role(&session, "persona")?;
+                let expected = (expected_prompt_revision, expected_voice_revision);
+                self.activate_profile(&ctx, &name, version, expected, None)
+                    .await
             }
             Command::GetContextConfig => self.context_config(&ctx).await,
-            Command::SetContextConfig {expected_revision,config,reason} => {
-                ensure!(["device","agent"].contains(&session.role.as_str()),"context update requires device or agent role");
-                self.set_context(&ctx,expected_revision,&config,&reason,None).await
+            Command::SetContextConfig {
+                expected_revision,
+                config,
+                reason,
+            } => {
+                ensure_settings_role(&session, "context")?;
+                self.set_context(&ctx, expected_revision, &config, &reason, None)
+                    .await
             }
             Command::GetVoiceConfig => self.voice_config(&ctx).await,
-            Command::SetVoiceConfig { expected_revision,config,reason } => {
-                ensure!(["device","agent"].contains(&session.role.as_str()),"voice update requires device or agent role");
-                self.set_voice(&ctx,expected_revision,&config,&reason,None).await
+            Command::SetVoiceConfig {
+                expected_revision,
+                config,
+                reason,
+            } => {
+                ensure_settings_role(&session, "voice")?;
+                self.set_voice(&ctx, expected_revision, &config, &reason, None)
+                    .await
             }
             Command::GetSystemPrompt => self.persona(&ctx).await,
             Command::SystemPromptHistory => self.persona_history(&ctx).await,
-            Command::SetSystemPrompt { expected_revision,prompt,reason } => {
-                ensure!(["device","agent"].contains(&session.role.as_str()),"prompt update requires device or agent role");
-                self.set_persona(&ctx,expected_revision,&prompt,&reason,None).await
+            Command::SetSystemPrompt {
+                expected_revision,
+                prompt,
+                reason,
+            } => {
+                ensure_settings_role(&session, "prompt")?;
+                self.set_persona(&ctx, expected_revision, &prompt, &reason, None)
+                    .await
             }
-            Command::SpeechChunk {turn_id,index} => {
-                ensure!(session.role=="device","speech requires device role");
-                self.speech_chunk(&ctx,&turn_id,index).await
+            Command::SpeechChunk { turn_id, index } => {
+                ensure!(session.role == "device", "speech requires device role");
+                self.speech_chunk(&ctx, &turn_id, index).await
             }
             Command::SpokenAnswer { turn_id } => {
                 ensure!(session.role == "device", "speech requires device role");
-                ensure!(turn_id.len() <= 128, "invalid turn id");
-                let rows=ctx.sql().query("SELECT answer FROM turns WHERE id=? AND status='completed'",params(&[&turn_id])).await?.rows;
-                let row=rows.first().context("only completed answers can be spoken")?;
-                let answer=string(row,0)?;
-                ensure!(!answer.trim().is_empty() && answer.len()<=12000,"answer outside speech budget");
-                Ok(json!({"turn_id":turn_id,"text":answer,"voice":self.speech_voice(&ctx,&turn_id).await?}))
+                self.spoken_answer(&ctx, turn_id).await
             }
-            Command::History { before } => {
-                let rows=ctx.sql().query("SELECT id,status,text,answer FROM turns WHERE (?='' OR id<?) ORDER BY id DESC LIMIT 20",params(&[&before,&before])).await?.rows;
-                Ok(json!(rows.into_iter().map(|r|Ok(json!({"id":string(&r,0)?,"status":string(&r,1)?,"text":string(&r,2)?,"answer":string(&r,3)?}))).collect::<Result<Vec<_>>>()?))
-            }
+            Command::History { before } => self.history_page(&ctx, before).await,
             Command::SearchHistory { query } => self.search_history(&ctx, &query).await,
             _ => bail!("command is not owned by conversation actor"),
         }
