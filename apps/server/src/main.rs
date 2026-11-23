@@ -236,9 +236,16 @@ async fn main() -> Result<()> {
     let mut web = tokio::spawn(async move { axum::serve(listener, router).await });
     // The registry handles SIGTERM/SIGINT and drains actors before the engine is stopped.
     let outcome = if let Some(child) = engine_process.as_mut() {
-        tokio::select! {r=&mut registry=>r.context("registry join")?,r=child.wait()=>Err(anyhow::anyhow!("engine stopped: {:?}",r)),r=&mut web=>Err(anyhow::anyhow!("HTTP server stopped: {:?}",r))}
+        tokio::select! {
+            r = &mut registry => r.context("registry join")?,
+            r = child.wait() => Err(anyhow::anyhow!("engine stopped: {:?}", r)),
+            r = &mut web => Err(anyhow::anyhow!("HTTP server stopped: {:?}", r)),
+        }
     } else {
-        tokio::select! {r=&mut registry=>r.context("registry join")?,r=&mut web=>Err(anyhow::anyhow!("HTTP server stopped: {:?}",r))}
+        tokio::select! {
+            r = &mut registry => r.context("registry join")?,
+            r = &mut web => Err(anyhow::anyhow!("HTTP server stopped: {:?}", r)),
+        }
     };
     web.abort();
     if let Some(mut child) = engine_process {
@@ -336,7 +343,27 @@ async fn enroll(
     let conversation_actor_id = conversation.inner().resolve().await?;
     let memory_actor_id = memory.inner().resolve().await?;
 
-    let token:Value=app.http.post(format!("{}/auth/tokens",app.engine.trim_end_matches('/'))).bearer_auth(&app.admin).json(&json!({"namespace":app.namespace,"duration":900,"grants":[{"resource":"actor_gateway","target":{"id":actor_id},"operations":["read"]},{"resource":"actor_gateway","target":{"id":conversation_actor_id},"operations":["read"]},{"resource":"actor_gateway","target":{"id":memory_actor_id},"operations":["read"]}]})).send().await?.error_for_status()?.json().await?;
+    let grant = |id: &str| {
+        json!({
+            "resource": "actor_gateway",
+            "target": {"id": id},
+            "operations": ["read"],
+        })
+    };
+    let token: Value = app
+        .http
+        .post(format!("{}/auth/tokens", app.engine.trim_end_matches('/')))
+        .bearer_auth(&app.admin)
+        .json(&json!({
+            "namespace": app.namespace,
+            "duration": 900,
+            "grants": [grant(&actor_id), grant(&conversation_actor_id), grant(&memory_actor_id)],
+        }))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
     Ok(Json(Bundle {
         bot_id: bot.clone(),
         actor_id,
@@ -362,7 +389,13 @@ fn escape(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 fn page(body: String) -> Response {
-    let mut r=Html(format!("<!doctype html><html><head><meta name=viewport content='width=device-width,initial-scale=1'><title>Robot Buddy</title></head><body><main><h1>Robot Buddy</h1>{body}</main></body></html>")).into_response();
+    let mut r = Html(format!(
+        "<!doctype html><html><head>\
+         <meta name=viewport content='width=device-width,initial-scale=1'>\
+         <title>Robot Buddy</title></head>\
+         <body><main><h1>Robot Buddy</h1>{body}</main></body></html>"
+    ))
+    .into_response();
     r.headers_mut()
         .insert("cache-control", HeaderValue::from_static("no-store"));
     r.headers_mut()
@@ -378,10 +411,18 @@ fn page(body: String) -> Response {
 async fn claim(State(app): State<Arc<App>>, Query(q): Query<ClaimQuery>) -> Web<Response> {
     check(q.bot.len() <= 128 && q.token.len() <= 128, "invalid claim")?;
     if app.oidc.is_none() {
-        return Ok(page("<p>The server administrator must configure sign-in before registration can finish. Your robot will retain its identity.</p>".into()));
+        return Ok(page(
+            "<p>The server administrator must configure sign-in before registration can finish. \
+             Your robot will retain its identity.</p>"
+                .into(),
+        ));
     }
     let mut response = page(format!(
-        "<p>Connect this robot to your account. Keep the robot nearby to confirm.</p><form method=post action=/login><input type=hidden name=bot value=\"{}\"><input type=hidden name=token value=\"{}\"><button>Sign in to register</button></form>",
+        "<p>Connect this robot to your account. Keep the robot nearby to confirm.</p>\
+         <form method=post action=/login>\
+         <input type=hidden name=bot value=\"{}\">\
+         <input type=hidden name=token value=\"{}\">\
+         <button>Sign in to register</button></form>",
         escape(&q.bot),
         escape(&q.token)
     ));
@@ -389,7 +430,13 @@ async fn claim(State(app): State<Arc<App>>, Query(q): Query<ClaimQuery>) -> Web<
     let authorize_origin = url::Url::parse(&app.oidc.as_ref().context("OIDC required")?.authorize)?
         .origin()
         .ascii_serialization();
-    response.headers_mut().insert("content-security-policy",HeaderValue::from_str(&format!("default-src 'none'; form-action 'self' {authorize_origin}; frame-ancestors 'none'; base-uri 'none'"))?);
+    let csp = format!(
+        "default-src 'none'; form-action 'self' {authorize_origin}; \
+         frame-ancestors 'none'; base-uri 'none'"
+    );
+    response
+        .headers_mut()
+        .insert("content-security-policy", HeaderValue::from_str(&csp)?);
     Ok(response)
 }
 #[derive(Serialize, Deserialize)]
@@ -515,7 +562,8 @@ async fn callback(
         )
         .await?;
     let mut response = page(format!(
-        "<p>Match this code on your robot and press its confirm control:</p><h2>{}</h2><p>The robot will welcome you when registration is complete.</p>",
+        "<p>Match this code on your robot and press its confirm control:</p><h2>{}</h2>\
+         <p>The robot will welcome you when registration is complete.</p>",
         escape(proposed["code"].as_str().context("code missing")?)
     ));
     response.headers_mut().insert(
@@ -563,7 +611,21 @@ async fn spawn_engine(path: &str) -> Result<tokio::process::Child> {
         .unwrap_or_else(|_| "6420".into())
         .parse()?;
     ensure!(port > 1024 && port < 65525, "invalid engine port");
-    let config = json!({"auth":{"admin_token":env("RIVET_TOKEN")?},"guard":{"host":"0.0.0.0","port":port},"api_peer":{"host":"127.0.0.1","port":port+1},"metrics":{"host":"127.0.0.1","port":port+10},"storage":{"log_directory":format!("{data}/logs"),"balancing":{"enabled":false},"auto_provision_partitions":1,"log_shard":{"max_disk_bytes":4294967296u64},"cold_store":{"disk_cache_bytes":0}},"object_storage":{"primary":object_storage},"telemetry":{"enabled":false}});
+    let config = json!({
+        "auth": {"admin_token": env("RIVET_TOKEN")?},
+        "guard": {"host": "0.0.0.0", "port": port},
+        "api_peer": {"host": "127.0.0.1", "port": port + 1},
+        "metrics": {"host": "127.0.0.1", "port": port + 10},
+        "storage": {
+            "log_directory": format!("{data}/logs"),
+            "balancing": {"enabled": false},
+            "auto_provision_partitions": 1,
+            "log_shard": {"max_disk_bytes": 4294967296u64},
+            "cold_store": {"disk_cache_bytes": 0},
+        },
+        "object_storage": {"primary": object_storage},
+        "telemetry": {"enabled": false},
+    });
     let config_path = format!("{data}/engine.json");
     let temp = format!("{config_path}.{}", auth::random());
     private_write(

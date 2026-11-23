@@ -14,7 +14,7 @@ window.BuddyVoice=(()=>{
   try{
    await prepare();if(mine!==generation)return;
    const response=await fetch('/lab/api/speech',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json','x-buddy-csrf':csrf},body:JSON.stringify({turn_id:turnId,stream}),signal:abort.signal});
-   if(!response.ok)throw new Error('Speech unavailable. Check the speech model/key or wait for the previous stream to stop.');
+   if(!response.ok)throw new Error('Speech unavailable. Check the speech model and key.');
    if(response.headers.get('x-audio-turn-id')!==turnId||response.headers.get('x-audio-encoding')!=='pcm_s16le')throw new Error('Unexpected audio contract.');
    const type=response.headers.get('content-type')||'',rate=Number(type.match(/rate=(\d+)/)?.[1]),channels=Number(type.match(/channels=(\d+)/)?.[1]);
    if(!type.startsWith('audio/pcm')||rate<8000||rate>96000||![1,2].includes(channels))throw new Error('Unsupported audio format.');

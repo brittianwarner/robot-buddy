@@ -103,7 +103,14 @@ mod tests {
             verifier: String::new(),
             expires: auth::now() + 600,
         };
-        let valid = json!({"iss":provider.issuer,"aud":"buddy","sub":"owner","nonce":"nonce","iat":auth::now(),"exp":auth::now()+300});
+        let valid = json!({
+            "iss": provider.issuer,
+            "aud": "buddy",
+            "sub": "owner",
+            "nonce": "nonce",
+            "iat": auth::now(),
+            "exp": auth::now() + 300,
+        });
         let mut header = jsonwebtoken::Header::new(Algorithm::ES256);
         header.kid = Some("test-only".into());
         use base64::Engine;
