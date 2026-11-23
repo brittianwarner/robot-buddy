@@ -1,141 +1,407 @@
 //! Linux playback for the same authenticated PCM endpoint used by the browser lab.
-use anyhow::{Context, Result, ensure};
+//!
+//! One pooled HTTP client serves every turn. Each turn spawns a shell-free
+//! `aplay`, pipes PCM into it with a progress deadline on every write, and
+//! reports the first PCM byte and the end of playback to the session. Stop
+//! drops the task, which kills the player at once instead of draining it.
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use futures_util::StreamExt;
 use robot_buddy::{audio::PcmFormat, protocol::SpeechRequest};
-use std::{process::Stdio, time::Duration};
-use tokio::io::AsyncWriteExt;
-#[derive(Default)]
-pub struct Playback {
-    task: Option<tokio::task::JoinHandle<()>>,
+use std::{future::Future, process::Stdio, sync::Arc, time::Duration};
+use tokio::{
+    io::AsyncWriteExt,
+    sync::mpsc,
+    task::JoinHandle,
+    time::{Instant, timeout},
+};
+
+const DEFAULT_BUFFER_US: u32 = 120_000;
+const WRITE_DEADLINE: Duration = Duration::from_secs(2);
+const DRAIN_DEADLINE: Duration = Duration::from_secs(10);
+const AUDIO_BUDGET: usize = 16 * 1024 * 1024;
+
+/// `aplay` options for the I2S amplifier.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlayerConfig {
+    /// ALSA PCM name passed as `-D` (for example `plughw:CARD=MAX98357A,DEV=0`).
+    pub device: Option<String>,
+    /// ALSA buffer in microseconds. Smaller stops sooner on barge-in but
+    /// risks underruns when the Pi is busy.
+    pub buffer_us: u32,
 }
+
+impl Default for PlayerConfig {
+    fn default() -> Self {
+        Self {
+            device: None,
+            buffer_us: DEFAULT_BUFFER_US,
+        }
+    }
+}
+
+impl PlayerConfig {
+    pub fn from_lookup(get: &impl Fn(&str) -> Option<String>) -> Result<Self> {
+        let buffer_us = match get("BUDDY_ALSA_BUFFER_US") {
+            Some(v) => v.parse().context("BUDDY_ALSA_BUFFER_US")?,
+            None => DEFAULT_BUFFER_US,
+        };
+        ensure!(
+            (20_000..=1_000_000).contains(&buffer_us),
+            "BUDDY_ALSA_BUFFER_US must be 20000..=1000000"
+        );
+        let device = get("BUDDY_ALSA_DEVICE").filter(|d| !d.is_empty());
+        if let Some(device) = &device {
+            let allowed = |c: char| c.is_ascii_alphanumeric() || ":,=_.-".contains(c);
+            ensure!(
+                device.len() <= 128 && !device.starts_with('-') && device.chars().all(allowed),
+                "invalid BUDDY_ALSA_DEVICE"
+            );
+        }
+        Ok(Self { device, buffer_us })
+    }
+
+    pub fn args(&self, format: PcmFormat) -> Vec<String> {
+        let mut args = vec![
+            "-q".into(),
+            "-t".into(),
+            "raw".into(),
+            "-f".into(),
+            "S16_LE".into(),
+            format!("--buffer-time={}", self.buffer_us),
+            "-r".into(),
+            format.sample_rate.to_string(),
+            "-c".into(),
+            format.channels.to_string(),
+        ];
+        if let Some(device) = &self.device {
+            args.push("-D".into());
+            args.push(device.clone());
+        }
+        args
+    }
+}
+
+pub type PlayerFactory = Arc<dyn Fn(PcmFormat) -> tokio::process::Command + Send + Sync>;
+
+/// Shared media settings and the pooled HTTP client.
+pub struct Media {
+    http: reqwest::Client,
+    server: String,
+    enabled: bool,
+    make_player: PlayerFactory,
+    write_deadline: Duration,
+}
+
+impl Media {
+    pub fn new(server: &str, enabled: bool, player: PlayerConfig) -> Result<Self> {
+        let make_player: PlayerFactory = Arc::new(move |format| {
+            let mut command = tokio::process::Command::new("aplay");
+            command.args(player.args(format)).stdout(Stdio::null());
+            command
+        });
+        Ok(Self {
+            http: client()?,
+            server: server.trim_end_matches('/').to_owned(),
+            enabled,
+            make_player,
+            write_deadline: WRITE_DEADLINE,
+        })
+    }
+
+    #[cfg(test)]
+    fn for_test(server: &str, make_player: PlayerFactory, write_deadline: Duration) -> Self {
+        Self {
+            http: client().unwrap(),
+            server: server.to_owned(),
+            enabled: true,
+            make_player,
+            write_deadline,
+        }
+    }
+
+    /// Open a pooled connection ahead of the first turn so the TLS handshake
+    /// is not on the first-audio path.
+    pub async fn prewarm(&self) {
+        let request = self.http.get(format!("{}/health", self.server)).send();
+        if let Ok(Ok(response)) = timeout(Duration::from_secs(5), request).await {
+            let _ = response.bytes().await;
+        }
+    }
+}
+
+fn client() -> Result<reqwest::Client> {
+    Ok(reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        // Server media deadline is 300 s; this bounds a single speech request.
+        .timeout(Duration::from_secs(320))
+        .pool_idle_timeout(Duration::from_secs(300))
+        .pool_max_idle_per_host(2)
+        .tcp_keepalive(Duration::from_secs(30))
+        .tcp_nodelay(true)
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlaybackEvent {
+    /// The first PCM byte reached the player.
+    Started { generation: u64 },
+    /// Playback ended. `played` is false when no audio reached the player.
+    Finished { generation: u64, played: bool },
+}
+
+/// What the conversation logic needs from playback.
+pub trait Speaker {
+    /// Start speaking `turn_id`; returns the playback generation, or `None`
+    /// when speech is disabled.
+    fn start(&mut self, turn_id: &str) -> Option<u64>;
+    /// Stop now. When this returns the player has been killed.
+    fn stop(&mut self) -> impl Future<Output = ()>;
+}
+
+/// Per-session playback. At most one turn plays at a time.
+pub struct Playback {
+    media: Arc<Media>,
+    session: String,
+    events: mpsc::Sender<PlaybackEvent>,
+    current: Option<JoinHandle<()>>,
+    generation: u64,
+}
+
 impl Playback {
-    pub fn stop(&mut self) {
-        if let Some(task) = self.task.take() {
+    pub fn new(media: Arc<Media>, session: String, events: mpsc::Sender<PlaybackEvent>) -> Self {
+        Self {
+            media,
+            session,
+            events,
+            current: None,
+            generation: 0,
+        }
+    }
+}
+
+impl Speaker for Playback {
+    fn start(&mut self, turn_id: &str) -> Option<u64> {
+        if let Some(task) = self.current.take() {
+            task.abort();
+        }
+        if !self.media.enabled {
+            return None;
+        }
+        self.generation += 1;
+        let generation = self.generation;
+        let (media, session, events) = (
+            self.media.clone(),
+            self.session.clone(),
+            self.events.clone(),
+        );
+        let turn_id = turn_id.to_owned();
+        self.current = Some(tokio::spawn(async move {
+            let mut played = false;
+            let result = play(&media, &session, &turn_id, generation, &events, &mut played).await;
+            if let Err(error) = result {
+                tracing::warn!(%error, played, "speech playback failed");
+            }
+            let _ = events.try_send(PlaybackEvent::Finished { generation, played });
+        }));
+        Some(generation)
+    }
+
+    async fn stop(&mut self) {
+        let Some(task) = self.current.take() else {
+            return;
+        };
+        let was_running = !task.is_finished();
+        task.abort();
+        // Dropping the task drops the child (`kill_on_drop`): SIGKILL, so
+        // the ALSA buffer is not drained.
+        let _ = task.await;
+        if was_running {
+            // An abandoned HTTP/1.1 stream cannot be reused; warm a new one.
+            let media = self.media.clone();
+            tokio::spawn(async move { media.prewarm().await });
+        }
+    }
+}
+
+impl Drop for Playback {
+    fn drop(&mut self) {
+        if let Some(task) = self.current.take() {
             task.abort();
         }
     }
-    pub fn start(&mut self, server: String, session: String, turn_id: String) {
-        self.stop();
-        if std::env::var("BUDDY_SPEECH").as_deref() != Ok("true") {
-            return;
-        }
-        self.task = Some(tokio::spawn(async move {
-            if play(&server, &session, turn_id).await.is_err() {
-                tracing::warn!("speech playback failed");
-            }
-        }));
-    }
 }
-impl Drop for Playback {
-    fn drop(&mut self) {
-        self.stop();
-    }
-}
-async fn play(server: &str, session: &str, turn_id: String) -> Result<()> {
-    play_using(server, session, turn_id, |format| {
-        let mut player = tokio::process::Command::new("aplay");
-        player
-            .args([
-                "-q",
-                "-t",
-                "raw",
-                "-f",
-                "S16_LE",
-                "--buffer-time=200000",
-                "-r",
-                &format.sample_rate.to_string(),
-                "-c",
-                &format.channels.to_string(),
-            ])
-            .stdout(Stdio::null());
-        player
-    })
-    .await
-}
-async fn play_using(
-    server: &str,
+
+async fn play(
+    media: &Media,
     session: &str,
-    turn_id: String,
-    make_player: impl FnOnce(PcmFormat) -> tokio::process::Command,
+    turn_id: &str,
+    generation: u64,
+    events: &mpsc::Sender<PlaybackEvent>,
+    played: &mut bool,
 ) -> Result<()> {
-    let http = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(300))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()?;
-    let response = http
-        .post(format!("{}/v1/speech", server.trim_end_matches('/')))
+    let started = Instant::now();
+    let response = media
+        .http
+        .post(format!("{}/v1/speech", media.server))
         .bearer_auth(session)
         .json(&SpeechRequest {
-            turn_id: turn_id.clone(),
+            turn_id: turn_id.to_owned(),
             stream: true,
         })
         .send()
         .await?
         .error_for_status()?;
+    let headers_ms = started.elapsed().as_millis();
+    let header = |name: &str| response.headers().get(name).and_then(|v| v.to_str().ok());
     ensure!(
-        response
-            .headers()
-            .get("x-audio-turn-id")
-            .and_then(|v| v.to_str().ok())
-            == Some(turn_id.as_str()),
+        header("x-audio-turn-id") == Some(turn_id),
         "audio turn mismatch"
     );
     ensure!(
-        response
-            .headers()
-            .get("x-audio-encoding")
-            .and_then(|v| v.to_str().ok())
-            == Some("pcm_s16le"),
+        header("x-audio-encoding") == Some("pcm_s16le"),
         "unsupported encoding"
     );
-    let format = PcmFormat::parse(
-        response
-            .headers()
-            .get("content-type")
-            .context("audio format required")?
-            .to_str()?,
-    )?;
-    let mut player = make_player(format)
+    let format = PcmFormat::parse(header("content-type").context("audio format required")?)?;
+    let mut player = (media.make_player)(format)
         .stdin(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true)
         .spawn()
         .context("install ALSA aplay to enable robot speech")?;
-    let mut input = player.stdin.take().context("audio player input")?;
-    let mut stream = response.bytes_stream();
-    let mut total = 0usize;
-    while let Some(bytes) = stream.next().await {
-        let bytes = bytes?;
-        total += bytes.len();
-        ensure!(total <= 16 * 1024 * 1024, "audio budget exceeded");
-        input.write_all(&bytes).await?;
+    let streamed = async {
+        let mut input = player.stdin.take().context("audio player input")?;
+        let mut stream = response.bytes_stream();
+        let mut total = 0usize;
+        loop {
+            let bytes = tokio::select! {
+                biased;
+                status = player.wait() => bail!("audio player exited early ({:?})", status?.code()),
+                next = stream.next() => match next {
+                    Some(bytes) => bytes?,
+                    None => break,
+                },
+            };
+            total += bytes.len();
+            ensure!(total <= AUDIO_BUDGET, "audio budget exceeded");
+            within(
+                media.write_deadline,
+                "audio player",
+                input.write_all(&bytes),
+            )
+            .await?;
+            if !*played && !bytes.is_empty() {
+                *played = true;
+                let _ = events.try_send(PlaybackEvent::Started { generation });
+                tracing::debug!(
+                    headers_ms,
+                    first_pcm_ms = started.elapsed().as_millis(),
+                    "speech first audio"
+                );
+            }
+        }
+        let frame = usize::from(format.channels) * 2;
+        ensure!(
+            total > 0 && total.is_multiple_of(frame),
+            "incomplete audio stream"
+        );
+        within(media.write_deadline, "audio player", input.shutdown()).await?;
+        drop(input);
+        let status = timeout(DRAIN_DEADLINE, player.wait())
+            .await
+            .map_err(|_| anyhow!("audio player did not finish"))??;
+        ensure!(status.success(), "audio player failed");
+        Ok(())
     }
-    ensure!(
-        total > 0 && total.is_multiple_of(usize::from(format.channels) * 2),
-        "incomplete audio stream"
-    );
-    input.shutdown().await?;
-    drop(input);
-    ensure!(
-        tokio::time::timeout(Duration::from_secs(10), player.wait())
-            .await??
-            .success(),
-        "audio player failed"
-    );
-    Ok(())
+    .await;
+    if streamed.is_err() {
+        // Kill and reap a stuck or failed player before reporting.
+        let _ = player.start_kill();
+        let _ = timeout(Duration::from_secs(1), player.wait()).await;
+    }
+    streamed
+}
+
+async fn within<T>(
+    deadline: Duration,
+    what: &str,
+    work: impl Future<Output = std::io::Result<T>>,
+) -> Result<T> {
+    match timeout(deadline, work).await {
+        Ok(result) => Ok(result?),
+        Err(_) => Err(anyhow!("{what} stopped reading for {deadline:?}")),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{Json, Router, body::Body, http::HeaderMap, routing::post};
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    };
+    use axum::{Json, Router, body::Body, http::HeaderMap, routing::post, serve::ListenerExt};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    const PCM_HEADERS: [(&str, &str); 3] = [
+        ("content-type", "audio/pcm;rate=24000;channels=1"),
+        ("x-audio-encoding", "pcm_s16le"),
+        ("x-audio-turn-id", "test-turn"),
+    ];
+
+    /// Serve `app` and count accepted TCP connections.
+    async fn serve(app: Router) -> (String, Arc<AtomicUsize>) {
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let count = accepted.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let listener = listener.tap_io(move |_| {
+            count.fetch_add(1, Ordering::SeqCst);
+        });
+        tokio::spawn(async move { axum::serve(listener, app).await });
+        (format!("http://{address}"), accepted)
+    }
+
+    fn player(program: &'static str, args: &'static [&'static str]) -> PlayerFactory {
+        Arc::new(move |_| {
+            let mut command = tokio::process::Command::new(program);
+            command.args(args).stdout(Stdio::null());
+            command
+        })
+    }
+
+    async fn next_event(rx: &mut mpsc::Receiver<PlaybackEvent>) -> PlaybackEvent {
+        timeout(Duration::from_secs(10), rx.recv())
+            .await
+            .expect("playback event")
+            .expect("playback channel")
+    }
+
+    #[test]
+    fn player_arguments_include_buffer_and_device() {
+        let get = |k: &str| match k {
+            "BUDDY_ALSA_BUFFER_US" => Some("80000".to_owned()),
+            "BUDDY_ALSA_DEVICE" => Some("plughw:CARD=sndrpihifiberry,DEV=0".to_owned()),
+            _ => None,
+        };
+        let config = PlayerConfig::from_lookup(&get).unwrap();
+        let args = config.args(PcmFormat {
+            sample_rate: 24000,
+            channels: 1,
+        });
+        assert!(args.contains(&"--buffer-time=80000".to_owned()));
+        assert_eq!(
+            args[args.len() - 2..],
+            ["-D", "plughw:CARD=sndrpihifiberry,DEV=0"]
+        );
+        assert_eq!(
+            PlayerConfig::from_lookup(&|_: &str| None).unwrap(),
+            PlayerConfig::default()
+        );
+        let bad = |k: &str| (k == "BUDDY_ALSA_DEVICE").then(|| "--help".to_owned());
+        assert!(PlayerConfig::from_lookup(&bad).is_err());
+        let tiny = |k: &str| (k == "BUDDY_ALSA_BUFFER_US").then(|| "100".to_owned());
+        assert!(PlayerConfig::from_lookup(&tiny).is_err());
+    }
+
     #[tokio::test]
-    async fn plays_incrementally_before_http_completion_and_abort_drops_stream() -> Result<()> {
+    async fn plays_incrementally_before_http_completion_and_stop_kills_the_player() {
         let finished = Arc::new(AtomicBool::new(false));
         let mark = finished.clone();
         let app = Router::new().route(
@@ -148,58 +414,165 @@ mod tests {
                     let stream = futures_util::stream::unfold(0, move |index| {
                         let mark = mark.clone();
                         async move {
-                            match index {
-                                0 => Some((Ok::<_, std::io::Error>(vec![0u8; 4096]), 1)),
-                                1 => {
-                                    tokio::time::sleep(Duration::from_secs(20)).await;
-                                    mark.store(true, Ordering::SeqCst);
-                                    None
-                                }
-                                _ => None,
+                            if index == 0 {
+                                return Some((Ok::<_, std::io::Error>(vec![0u8; 4096]), 1));
                             }
+                            tokio::time::sleep(Duration::from_secs(20)).await;
+                            mark.store(true, Ordering::SeqCst);
+                            None
                         }
                     });
-                    (
-                        [
-                            ("content-type", "audio/pcm;rate=44100;channels=1"),
-                            ("x-audio-encoding", "pcm_s16le"),
-                            ("x-audio-turn-id", "test-turn"),
-                        ],
-                        Body::from_stream(stream),
-                    )
+                    (PCM_HEADERS, Body::from_stream(stream))
                 }
             }),
         );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        let address = listener.local_addr()?;
-        let server = tokio::spawn(async move { axum::serve(listener, app).await });
+        let (server, _) = serve(app).await;
         let path = std::env::temp_dir().join(format!("buddy-audio-{}.pcm", uuid::Uuid::new_v4()));
-        let file = std::fs::File::create(&path)?;
-        let task = tokio::spawn(async move {
-            play_using(
-                &format!("http://{address}"),
-                "test-session",
-                "test-turn".into(),
-                |_| {
-                    let mut command = tokio::process::Command::new("cat");
-                    command.stdout(Stdio::from(file));
-                    command
-                },
-            )
-            .await
+        let out = path.clone();
+        let factory: PlayerFactory = Arc::new(move |_| {
+            let mut command = tokio::process::Command::new("cat");
+            command.stdout(Stdio::from(std::fs::File::create(&out).unwrap()));
+            command
         });
+        let media = Arc::new(Media::for_test(&server, factory, WRITE_DEADLINE));
+        let (tx, mut rx) = mpsc::channel(8);
+        let mut playback = Playback::new(media, "test-session".into(), tx);
+        let generation = playback.start("test-turn").unwrap();
+        assert_eq!(
+            next_event(&mut rx).await,
+            PlaybackEvent::Started { generation }
+        );
         for _ in 0..100 {
-            if std::fs::metadata(&path)?.len() > 0 {
+            if std::fs::metadata(&path).unwrap().len() == 4096 {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        assert_eq!(std::fs::metadata(&path)?.len(), 4096);
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), 4096);
         assert!(!finished.load(Ordering::SeqCst));
-        task.abort();
-        assert!(task.await.unwrap_err().is_cancelled());
-        server.abort();
-        std::fs::remove_file(path)?;
-        Ok(())
+        let stopping = Instant::now();
+        playback.stop().await;
+        assert!(stopping.elapsed() < Duration::from_millis(200));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_player_that_stops_reading_is_killed_at_the_deadline() {
+        let app = Router::new().route(
+            "/v1/speech",
+            post(|| async {
+                // 4 MiB: far more than a pipe buffer, so writes must block.
+                let chunks = (0..64).map(|_| Ok::<_, std::io::Error>(vec![0u8; 65536]));
+                (
+                    PCM_HEADERS,
+                    Body::from_stream(futures_util::stream::iter(chunks)),
+                )
+            }),
+        );
+        let (server, _) = serve(app).await;
+        // `sleep` never reads stdin.
+        let media = Media::for_test(
+            &server,
+            player("sleep", &["30"]),
+            Duration::from_millis(300),
+        );
+        let (tx, mut rx) = mpsc::channel(8);
+        let mut playback = Playback::new(Arc::new(media), "s".into(), tx);
+        let started = Instant::now();
+        let generation = playback.start("test-turn").unwrap();
+        let mut finished = None;
+        while finished.is_none() {
+            if let PlaybackEvent::Finished {
+                generation: g,
+                played,
+            } = next_event(&mut rx).await
+            {
+                finished = Some((g, played));
+            }
+        }
+        let elapsed = started.elapsed();
+        assert_eq!(finished.unwrap().0, generation);
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "stuck player released after {elapsed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn early_exit_of_the_player_ends_playback() {
+        let app = Router::new().route(
+            "/v1/speech",
+            post(|| async {
+                let stream = futures_util::stream::unfold(0, |i| async move {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    (i < 100).then(|| (Ok::<_, std::io::Error>(vec![0u8; 256]), i + 1))
+                });
+                (PCM_HEADERS, Body::from_stream(stream))
+            }),
+        );
+        let (server, _) = serve(app).await;
+        let media = Media::for_test(&server, player("true", &[]), WRITE_DEADLINE);
+        let (tx, mut rx) = mpsc::channel(8);
+        let mut playback = Playback::new(Arc::new(media), "s".into(), tx);
+        let started = Instant::now();
+        playback.start("test-turn").unwrap();
+        loop {
+            if let PlaybackEvent::Finished { .. } = next_event(&mut rx).await {
+                break;
+            }
+        }
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    /// Latency trace: headers arrive after 300 ms, then audio streams. The
+    /// first PCM byte should reach the player at about 300 ms, and the second
+    /// turn should reuse the pooled connection.
+    #[tokio::test]
+    async fn first_audio_tracks_server_latency_and_reuses_the_connection() {
+        let app = Router::new().route(
+            "/v1/speech",
+            post(|| async {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                let stream = futures_util::stream::unfold(0, |i| async move {
+                    if i > 0 {
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                    }
+                    (i < 5).then(|| (Ok::<_, std::io::Error>(vec![0u8; 4800]), i + 1))
+                });
+                (PCM_HEADERS, Body::from_stream(stream))
+            }),
+        );
+        let (server, accepted) = serve(app).await;
+        let media = Arc::new(Media::for_test(&server, player("cat", &[]), WRITE_DEADLINE));
+        let (tx, mut rx) = mpsc::channel(8);
+        let mut playback = Playback::new(media, "s".into(), tx);
+        let mut first_audio = Vec::new();
+        for _ in 0..2 {
+            let started = Instant::now();
+            let generation = playback.start("test-turn").unwrap();
+            assert_eq!(
+                next_event(&mut rx).await,
+                PlaybackEvent::Started { generation }
+            );
+            first_audio.push(started.elapsed());
+            assert_eq!(
+                next_event(&mut rx).await,
+                PlaybackEvent::Finished {
+                    generation,
+                    played: true
+                }
+            );
+        }
+        eprintln!(
+            "latency trace: first PCM byte turn 1 = {:?}, turn 2 = {:?}, tcp connections = {}",
+            first_audio[0],
+            first_audio[1],
+            accepted.load(Ordering::SeqCst)
+        );
+        for latency in &first_audio {
+            assert!(*latency >= Duration::from_millis(300));
+            assert!(*latency < Duration::from_millis(450), "{latency:?}");
+        }
+        assert_eq!(accepted.load(Ordering::SeqCst), 1, "one pooled connection");
     }
 }

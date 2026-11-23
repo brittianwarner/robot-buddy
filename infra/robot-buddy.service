@@ -2,15 +2,36 @@
 Description=Robot Buddy setup and Rivet client
 After=NetworkManager.service
 Requires=NetworkManager.service
+# Restart forever, but never faster than RestartSec.
+StartLimitIntervalSec=0
+
 [Service]
 Type=simple
 EnvironmentFile=/etc/robot-buddy/device.env
+# Optional ESP32 face on USB serial: set BUDDY_FACE_SERIAL=/dev/ttyACM0 in
+# device.env. Raw 115200 baud, no echo. The leading "-" keeps the service
+# starting when the face board is unplugged; the client reopens it later.
+ExecStartPre=-/bin/sh -c 'test -z "$$BUDDY_FACE_SERIAL" || stty -F "$$BUDDY_FACE_SERIAL" 115200 raw -echo'
 ExecStart=/usr/local/bin/robot-buddy-robot
-Restart=on-failure
-RestartSec=5
+# Control input (wake word, utterances) arrives as JSON lines on stdin.
+# Without a speech front end, stdin is /dev/null and the client keeps running.
+# To feed it from another unit, use a FIFO or socket, for example:
+#   StandardInput=socket   (with a robot-buddy.socket ListenFIFO=/run/robot-buddy/control)
+StandardInput=null
+# stdout carries compact event lines (no conversation text) to the journal.
+StandardOutput=journal
+StandardError=journal
+Restart=always
+RestartSec=3
+# Smooth audio: slightly higher CPU priority and best-effort I/O ahead of
+# background work, without real-time scheduling.
+Nice=-5
+IOSchedulingClass=best-effort
+IOSchedulingPriority=2
 StateDirectory=robot-buddy
 UMask=0077
 # NetworkManager profile management and local port 80 require device-side privileges.
 # Run only on the robot; never put this service in the backend container.
+
 [Install]
 WantedBy=multi-user.target

@@ -1,0 +1,4 @@
+# Raspberry Pi 5 (Cortex-A76). Applies only when building for this target,
+# natively on the Pi or with `--target aarch64-unknown-linux-gnu`.
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "target-cpu=cortex-a76"]

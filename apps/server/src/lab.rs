@@ -89,6 +89,9 @@ fn asset(content: &'static str, content_type: &'static str) -> Response {
     security_headers(&mut response);
     response
 }
+const LAB_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; \
+    connect-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; \
+    base-uri 'none'";
 pub(super) fn security_headers(response: &mut Response) {
     response
         .headers_mut()
@@ -100,7 +103,9 @@ pub(super) fn security_headers(response: &mut Response) {
         "x-content-type-options",
         HeaderValue::from_static("nosniff"),
     );
-    response.headers_mut().insert("content-security-policy",HeaderValue::from_static("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"));
+    response
+        .headers_mut()
+        .insert("content-security-policy", HeaderValue::from_static(LAB_CSP));
 }
 async fn index(State(app): State<Arc<App>>) -> Response {
     if app.lab_token.is_none() {
@@ -163,9 +168,16 @@ async fn state(State(app): State<Arc<App>>, headers: HeaderMap) -> Web<Json<Valu
     } else {
         None
     };
-    Ok(Json(
-        json!({"csrf":s.csrf,"bot":bot,"oidc_configured":app.oidc.is_some(),"provider":std::env::var("AI_PROVIDER").unwrap_or_else(|_|"openrouter".into()),"model":std::env::var("AI_MODEL").unwrap_or_default(),"speech_model":app.speech.as_ref().map(|s|s.model.as_str()),"reasoning_effort":std::env::var("AI_REASONING_EFFORT").unwrap_or_default(),"expires":s.expires}),
-    ))
+    Ok(Json(json!({
+        "csrf": s.csrf,
+        "bot": bot,
+        "oidc_configured": app.oidc.is_some(),
+        "provider": std::env::var("AI_PROVIDER").unwrap_or_else(|_| "openrouter".into()),
+        "model": std::env::var("AI_MODEL").unwrap_or_default(),
+        "speech_model": app.speech.as_ref().map(|s| s.model.as_str()),
+        "reasoning_effort": std::env::var("AI_REASONING_EFFORT").unwrap_or_default(),
+        "expires": s.expires,
+    })))
 }
 async fn enroll_device(
     State(app): State<Arc<App>>,
@@ -175,7 +187,13 @@ async fn enroll_device(
     let mut s = session(&app, &headers, true)?;
     let Json(bundle) = super::enroll(State(app.clone()), Json(body)).await?;
     s.bot = Some(bundle.bot_id.clone());
-    let mut response=Json(json!({"bot_id":bundle.bot_id,"actor_id":bundle.actor_id,"conversation_actor_id":bundle.conversation_actor_id,"memory_actor_id":bundle.memory_actor_id})).into_response();
+    let mut response = Json(json!({
+        "bot_id": bundle.bot_id,
+        "actor_id": bundle.actor_id,
+        "conversation_actor_id": bundle.conversation_actor_id,
+        "memory_actor_id": bundle.memory_actor_id,
+    }))
+    .into_response();
     response
         .headers_mut()
         .insert(header::SET_COOKIE, cookie(&app, &s)?);

@@ -33,7 +33,7 @@ Install the robot binary on Linux with NetworkManager and a Wi-Fi adapter suppor
 
 The robot exposes its face UI on loopback port 8090; display it in a local kiosk browser. First boot shows a Wi-Fi QR for a temporary protected hotspot. Connect, then visit `http://10.42.0.1` in the phone browser and enter home Wi-Fi credentials. After connection, the face shows a registration QR; sign in using the configured OIDC provider and confirm the matching code on the robot. No phone app is needed. Automatic captive-portal opening is not implemented; the browser URL is the fallback.
 
-For development, `cargo run -p robot-buddy-robot -- --simulate` skips NetworkManager. It accepts text on stdin and emits ordered events on stdout. The hardware team connects speech recognition to input and text/speech playback to events; actuator, camera and audio drivers are not included. HTTP server URLs are allowed only for explicit localhost simulation.
+For development, `cargo run -p robot-buddy-robot -- --simulate` skips NetworkManager. It accepts text or JSON control lines on stdin (`{"say":…}`, `{"wake":true}`, `{"listening":false}`, `{"mute":true}`) and emits ordered events on stdout: full JSON in simulation, compact lines without conversation text on hardware. Set `BUDDY_SPEECH=true` for ALSA playback and `BUDDY_FACE_SERIAL=/dev/ttyACM0` for the ESP32 face. The [robot client guide](docs/architecture/robot-client.md) has the input contract, face states, ALSA settings and the Raspberry Pi 5 build. Actuator and camera drivers are not included, and none of this has been tested on robot hardware. HTTP server URLs are allowed only for explicit localhost simulation.
 
 ## Architecture and validation
 
