@@ -193,6 +193,7 @@ pub fn mood(s: Signals) -> Mood {
 
 #[derive(Clone, PartialEq)]
 pub struct Target {
+    stopping: bool,
     mood: Mood,
     flash: Option<(Mood, Instant)>,
     expression: Option<(Expression, f32, Instant)>,
@@ -222,12 +223,17 @@ pub struct FaceRx {
 }
 
 impl Face {
+    /// Clear any physical setup credentials before the runtime drops the USB task.
+    pub fn stop(&self) {
+        self.target.send_modify(|t| t.stopping = true);
+    }
     pub fn clear_expression(&self) {
         self.target
             .send_if_modified(|s| s.expression.take().is_some());
     }
     pub fn new() -> (Self, FaceRx) {
         let (target, rx) = watch::channel(Target {
+            stopping: false,
             mood: Mood::Offline,
             flash: None,
             expression: None,
@@ -470,6 +476,9 @@ pub async fn run<O: Opener>(
 ) {
     let mut warned = false;
     loop {
+        if target.borrow().stopping {
+            return;
+        }
         let wait = match opener.open().await {
             Ok(mut port) => {
                 tracing::info!("face device open");
@@ -497,7 +506,7 @@ pub async fn run<O: Opener>(
         loop {
             tokio::select! {
                 ()=tokio::time::sleep_until(deadline)=>break,
-                changed=target.changed()=>if changed.is_err(){return},
+                changed=target.changed()=>if changed.is_err() || target.borrow().stopping {return},
                 gesture=impulses.recv()=>if gesture.is_none(){return},
             }
         }
@@ -552,6 +561,11 @@ async fn drive<S: LineSink>(
     let mut frame = Vec::with_capacity(256);
     loop {
         let wanted = target.borrow_and_update().clone();
+        if wanted.stopping {
+            let mut reset = b"{\"qr\":[]}\n".to_vec();
+            reset.extend_from_slice(Mood::Offline.frame());
+            return send(device, &reset).await;
+        }
         let now = Instant::now();
         let mood = wanted.current(now);
         let expression = wanted.expression.filter(|(_, _, until)| *until > now);
@@ -802,8 +816,8 @@ mod tests {
         face.qr("left", "right", 132).unwrap();
         assert!(face.qr(&"x".repeat(256), "", 132).is_err());
         tokio::time::sleep(Duration::from_secs(5)).await;
-        face.qr("", "", 132).unwrap();
-        tokio::time::sleep(Duration::from_millis(1)).await;
+        face.stop();
+        task.await.unwrap();
         let wire = lines(&log).concat();
         assert_eq!(wire.matches("ear_wiggle").count(), 1);
         assert_eq!(wire.matches("\"qr\":[\"left\",\"right\"]").count(), 1);
@@ -811,8 +825,7 @@ mod tests {
         assert!(wire.contains("\"look\":[-1.0,0.25]"));
         assert!(wire.contains("\"e\":\"love\",\"i\":1.0"));
         assert!(wire.rfind("happy") > wire.rfind("love"));
-        drop(face);
-        task.await.unwrap();
+        assert!(wire.ends_with(std::str::from_utf8(Mood::Offline.frame()).unwrap()));
     }
 
     #[tokio::test]

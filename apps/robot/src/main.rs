@@ -89,9 +89,6 @@ async fn robot() -> Result<()> {
         ..RobotState::default()
     };
     let (face, target) = Face::new();
-    if let Some(path) = settings.face_serial.clone() {
-        tokio::spawn(face::run(target, face::Device(path)));
-    }
     let media = Arc::new(Media::new(
         &settings.server,
         settings.speech,
@@ -107,6 +104,10 @@ async fn robot() -> Result<()> {
     let devices = hardware::Devices::start(&settings, &face, microphone)?;
     let screen = Screen::new().with_hardware(devices.panel.clone());
     screen.serve().await?;
+    let face_task = settings
+        .face_serial
+        .clone()
+        .map(|path| tokio::spawn(face::run(target, face::Device(path))));
     // Type=notify: ready once input is served. Under WatchdogSec= the device
     // loop's heartbeat gates the watchdog pings.
     let pulse = systemd::ready();
@@ -129,6 +130,15 @@ async fn robot() -> Result<()> {
     };
     let result = device::run(link, &mut input, &face, &store, &mut state, options, stop).await;
     drop(devices);
+    if let Some(task) = face_task {
+        face.stop();
+        if tokio::time::timeout(Duration::from_millis(600), task)
+            .await
+            .is_err()
+        {
+            tracing::warn!("face reset timed out during shutdown");
+        }
+    }
     // The loop silenced the speaker and closed the connection. Persist the
     // in-memory cursor and intents, not only the last coalesced checkpoint.
     tracing::info!("stopping");
