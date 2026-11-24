@@ -73,13 +73,35 @@ measure.
   (baseline 70 → 126 MB, current 74 → 112 MB). Whether that levels off needs a longer run.
 - One model call per turn in both trees.
 
-## Observed, not explained
+## Warm-up first audio (explained: harness)
 
-- Warm-up turn first audio was 4.3 s and 4.8 s in two of five current runs (1.1 to 1.4 s in
-  the others) while its `speech.ready` was normal. Only the first speech request of a fresh
-  server is affected. Worth a trace of the first `/v1/speech` on a cold server.
+Earlier runs showed warm-up first audio of 4.3 s and 4.8 s in two of five runs while
+`speech.ready` was normal. Traced on November 23, 2026 by logging, for the warm-up turn,
+when the first request reached the fake provider and when the fake `aplay` started
+(`cold_turn_ms` in `--out` now carries both):
+
+| Run | `speech.ready` | provider request | fake aplay started | first PCM |
+| --- | --- | --- | --- | --- |
+| 1 | 953 | 977 | 1634 | 1648 |
+| 2 | 712 | 725 | 4200 | 4223 |
+| 3 | 774 | 788 | 1278 | 1288 |
+| 4 | 1055 | 1079 | 1520 | 1531 |
+| 5 | 595 | 604 | 1125 | 1136 |
+
+The server sends the speech request within about 25 ms of `speech.ready` and the fake
+provider answers 300 ms later, every time. In the slow run the extra 3.2 s sits between
+the robot spawning the player and the fake player's script starting: `aplay` here is a new
+shell script in a fresh temporary directory that execs Bun to load `fake-aplay.mjs`, and
+its first launch is sometimes slow on this macOS host. Nothing on the server, engine or
+robot cold path (connection setup, actor wake, SQLite open) is involved.
+
+The bench now launches the fake player once before measuring. In six runs with that change,
+the pre-launch itself took 3236 and 3141 ms in two runs and 136 to 209 ms in the others,
+and warm-up first PCM was 881 to 1533 ms in all six. A real `aplay` is a native binary;
+its first launch on the Pi has not been measured.
 
 ## Found while benching
 
-- The current robot does not exit on SIGTERM while its stdin is open (baseline exits in
-  about 50 ms). See `tests/robot-shutdown.mjs` and the known bugs in [testing](../testing.md).
+- Fixed: the robot did not exit on SIGTERM while its stdin was open. It now exits in tens
+  of milliseconds (the bench's own check reported 52 ms); `bun run test:shutdown` gates it
+  in CI. See [testing](../testing.md).

@@ -30,6 +30,8 @@ hmac.workspace = true
 rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# Strict settings writes on otherwise additive-tolerant types (protocol::strict).
+serde_ignored = "0.1"
 sha2.workspace = true
 uuid.workspace = true
 # Secret buffers are cleared on drop; compiled for the robot too.

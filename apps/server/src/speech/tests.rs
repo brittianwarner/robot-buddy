@@ -582,6 +582,26 @@ async fn provider_error_body_is_bounded_and_not_echoed() {
         .fold(0, |sum, n| async move { sum + n })
         .await;
     assert_eq!(bytes, 4800);
+
+    // A sentence that is only model markup never reaches the provider (here it
+    // would get HTTP 400) and yields no audio.
+    let markup = Spoken {
+        text: "[laughs]".into(),
+        voice: voice(),
+    };
+    let silent = bad
+        .synthesize(&markup)
+        .await
+        .expect("no request for markup");
+    assert_eq!(synthesis_len(silent).await, 0);
+}
+
+async fn synthesis_len(synthesis: Synthesis) -> usize {
+    synthesis
+        .audio
+        .map(|item| item.unwrap().len())
+        .fold(0, |sum, n| async move { sum + n })
+        .await
 }
 
 #[test]

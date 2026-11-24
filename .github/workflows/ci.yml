@@ -19,6 +19,9 @@ jobs:
       # BUDDY_TEST_MODEL_PORT, and fails if anything still listens afterwards.
       - run: bun run test:integration
       - run: cargo build --release --workspace --locked
+      # Uses the release binaries above: the robot must stop on SIGTERM/SIGINT within
+      # 500 ms with stdin still open, and write its cache on the way out.
+      - run: bun run test:shutdown
       - run: cargo bench --workspace --locked --no-run
       # Deterministic and offline: a local Bun server feeds PCM to the lab voice player.
       - run: bunx playwright install --with-deps chromium

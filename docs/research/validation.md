@@ -35,3 +35,16 @@ Local runs on a Mac mini (Apple M4 Pro, macOS arm64) shared with other build job
 - Robot on aarch64 Linux: `cargo check --locked -p robot-buddy-robot` passed in a native `linux/arm64` `rust:1.97.1` container. CI instead cross-checks from x86_64 with `gcc-aarch64-linux-gnu`, and that path was not run locally.
 
 Not run locally: the container test and the live-provider lab scripts.
+
+## November 23, 2026: bug fixes from the test pass (wave2-robot, f712ceb + working tree)
+
+Same Mac mini, shared with other jobs.
+
+- Robot shutdown: stdin is read on a plain OS thread, runtime shutdown is bounded at 100 ms, and the in-memory cache is flushed before exit. `bun run test:shutdown` (new, in CI after the release build): 5 of 5 stops exited 0 in 12 to 33 ms with the cache written (3 SIGTERM and 1 SIGINT with stdin open, 1 SIGTERM with stdin closed). The bench's own check reported 52 ms. New unit tests cover an open input not delaying runtime shutdown, and runtime shutdown SIGKILLing an abandoned player; the second fails with `kill_on_drop(false)`.
+- Speech rules: overlaps now resolve longest first across start positions (ties leftmost), and model-authored markup is removed before rules apply. Both formerly ignored voice-rule tests pass, plus two new ones. A sentence that is only markup sends no provider request.
+- Protocol: settings types ignore additive fields on read; settings writes (commands and model tool arguments) reject unknown fields at any depth through `protocol::strict` (`serde_ignored`). The golden suite records both halves.
+- `cargo update -p url`: 2.5.8 to 2.5.9 (and `form_urlencoded` 1.2.2 to 1.2.3). `bun run deny` (new root script, `cargo deny --locked --all-features check`, cargo-deny 0.22.0): advisories, bans, licenses and sources ok; only duplicate-crate warnings.
+- `cargo fmt --all --check` and `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`: clean. `bun run lint:pedantic`: no warnings. Pedantic is already enabled in `[workspace.lints.clippy]` at this commit, so the 113 source warnings recorded above were already gone; nothing needed fixing.
+- `cargo test --workspace --locked`: 170 passed, 18 ignored (54 buddy unit, 8 history SQL, 11 protocol golden, 4 sentence, 11 voice rule, 52 robot, 30 server; ignored are the 17 engine scenarios and the container test).
+- `bun run test:integration`: 17 of 17 passed in two consecutive runs; nothing left listening on 16420, 16421, 16430 or 19091 and no run directory left. The one `rivet-engine` process still running belonged to another checkout and predated these runs.
+- `bun run bench:e2e` (short runs, 2 to 3 turns): the 4 s warm-up first audio reproduced in 1 of 5 runs and was traced to the fake player's first launch, not to backend or robot code. See [e2e latency](e2e-latency.md).

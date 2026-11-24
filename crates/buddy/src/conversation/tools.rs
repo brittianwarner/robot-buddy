@@ -102,7 +102,7 @@ impl Conversation {
                 self.get_persona(ctx, name, version).await
             }
             "save_persona" => {
-                let draft = serde_json::from_value(args.clone())?;
+                let draft = crate::protocol::strict_value(args)?;
                 self.save_profile(ctx, &draft, receipt).await
             }
             "activate_persona" => self.activate_persona_tool(ctx, args, receipt).await,
@@ -167,7 +167,7 @@ impl Conversation {
         args: &Value,
         receipt: Receipt<'_>,
     ) -> Result<Value> {
-        let config: crate::context::ContextConfig = serde_json::from_value(args["config"].clone())?;
+        let config: crate::context::ContextConfig = crate::protocol::strict_value(&args["config"])?;
         let revision = number(args, "expected_revision", "expected revision required")?;
         let reason = text(args, "reason", "reason required")?;
         self.set_context(ctx, revision, &config, reason, receipt)
@@ -180,7 +180,7 @@ impl Conversation {
         args: &Value,
         receipt: Receipt<'_>,
     ) -> Result<Value> {
-        let config: crate::voice::VoiceConfig = serde_json::from_value(args["config"].clone())?;
+        let config: crate::voice::VoiceConfig = crate::protocol::strict_value(&args["config"])?;
         let revision = number(args, "expected_revision", "revision required")?;
         let reason = text(args, "reason", "reason required")?;
         self.set_voice(ctx, revision, &config, reason, receipt)

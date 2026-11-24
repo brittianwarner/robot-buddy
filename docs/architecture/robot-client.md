@@ -22,7 +22,7 @@ The robot links `robot-buddy` with `default-features = false`: the wire types on
 
 ### Control input (stdin)
 
-One line per command, at most 8 KiB. Longer lines are discarded through their newline. Invalid lines are rejected locally with a warning that never includes the line text. A closed stdin disables input; the robot keeps running.
+One line per command, at most 8 KiB. Longer lines are discarded through their newline. Invalid lines are rejected locally with a warning that never includes the line text. A closed stdin disables input; the robot keeps running. Stdin is read on its own OS thread, so an open pipe never holds up shutdown.
 
 | Line | Meaning |
 |---|---|
@@ -40,7 +40,7 @@ Every utterance replaces the turn in progress. The order is fixed: kill the play
 
 The subscription pushes each event into a bounded channel. The next sequence (`cursor + 1`) applies directly. Already-applied sequences are ignored. A gap, a full channel, or 2 s (live turn) / 10 s (idle) without pushes triggers `Replay`, one page per loop pass so input is serviced between pages.
 
-The cursor is at least once. A single writer task coalesces checkpoints to one write per second, writes at once on a terminal turn event and on SIGTERM, and confirms the cancel/utterance record before any network call. Each write is temp file, fsync, rename, fsync of the directory. Re-applied events are deduplicated, and replayed turns never speak.
+The cursor is at least once. A single writer task coalesces checkpoints to one write per second, writes at once on a terminal turn event and on SIGTERM or SIGINT, and confirms the cancel/utterance record before any network call. Each write is temp file, fsync, rename, fsync of the directory. Re-applied events are deduplicated, and replayed turns never speak.
 
 stdout gets one line per event. In hardware mode the line is `event sequence=<n> turn=<id> kind=<kind>`, with no user or assistant text. `--simulate` or `BUDDY_EVENTS=full` prints the full event JSON.
 
@@ -51,6 +51,8 @@ The robot requests `/v1/speech` as soon as a submit is acknowledged as a new tur
 One pooled HTTP client (keepalive, HTTP/2 when the server offers it) serves all speech requests, warmed with `GET /health` at session start. Stopping speech drops an HTTP/1.1 stream, so the robot warms a new connection right after. Bootstrap uses a separate client.
 
 `aplay` gets `--buffer-time=$BUDDY_ALSA_BUFFER_US` (default 120000 µs) and `-D $BUDDY_ALSA_DEVICE` when set (for example `plughw:CARD=sndrpihifiberry,DEV=0`). A smaller buffer stops sooner on barge-in; a larger one survives CPU stalls without underruns. Measure on the device before changing it. Each write to the player and its stdin shutdown has a 2 s progress deadline; a stuck player is killed and reaped. Stop kills the player instead of letting it drain. A player that exits early ends playback. Time to first PCM byte is logged at debug level (`RUST_LOG=robot_buddy_robot=debug`). A failing playback never ends the session.
+
+On SIGTERM or SIGINT the robot drops the session (which aborts playback), writes the in-memory cache durably, then shuts the runtime down with a 100 ms limit on blocking work. Runtime shutdown drops the playback task, and `kill_on_drop` SIGKILLs `aplay`. It exits 0 in tens of milliseconds with stdin still open; `bun run test:shutdown` checks this in CI.
 
 ### ESP32 face
 
@@ -169,6 +171,6 @@ sequenceDiagram
 
 ### Compatibility and validation
 
-Golden JSON fixtures cover every action and event. Clients ignore additive unknown fields, reject unsupported major protocol versions, and recognize unknown event types without crashing. Test disconnect before acknowledgment, during streaming, after commit but before emit, and during replay. Test credential expiry/revocation while connected, duplicate requests, stale approvals, and wrong-owner actor keys.
+Golden JSON fixtures cover every action and event. Clients ignore additive unknown fields: every message, and every settings type (voice, context, synthesis, speech rule, persona draft) a client or the server reads back from storage, tolerates fields a newer peer added. Settings writes are the one strict place: the config inside `set_voice_config` and `set_context_config`, the persona inside `save_persona`, and the matching model tool arguments reject unknown fields at any depth and name them, so a typo is an error rather than a dropped setting. The command envelope itself stays additive. Clients reject unsupported major protocol versions, and recognize unknown event types without crashing. Test disconnect before acknowledgment, during streaming, after commit but before emit, and during replay. Test credential expiry/revocation while connected, duplicate requests, stale approvals, and wrong-owner actor keys.
 
 The integration demo must use the official Rivet client on the actual robot or a target-equivalent simulator. A curl-only test does not establish robot compatibility.

@@ -9,31 +9,37 @@ the repository root with Bun (`bun install` first). Results from a dated run are
 | Command | Runs in CI | Needs | Proves |
 | --- | --- | --- | --- |
 | `bun run format:check`, `bun run check`, `bun run lint` | yes | Rust toolchain | Formatting, type check of every target, Clippy with `-D warnings`. |
-| `bun run lint:pedantic` | no | Rust toolchain | Clippy pedantic (with the four noisy lints allowed). Test files under `crates/buddy/tests` are clean; source files still carry warnings, so it is not a gate yet. |
+| `bun run lint:pedantic` | via `lint` | Rust toolchain | Clippy pedantic with the four noisy lints allowed. `[workspace.lints.clippy]` already enables the same set, so `bun run lint` (`-D warnings`) gates it; this script only spells it out. |
 | `bun run test` | yes | Rust toolchain | Unit tests plus the offline integration-test crates below. Tests that need an engine are `#[ignore]`d here. |
 | `bun run test:integration` | yes | Network once (engine download), free ports | The 17 actor scenarios against a real Rivet engine. |
 | `cargo build --release`, `cargo bench --no-run` | yes | Rust toolchain | Release builds link; benches compile. |
 | `bun tests/early-player.mjs` | yes | Chromium (`bunx playwright install chromium`) | The lab voice player plays streamed PCM and stops on demand. Offline and deterministic. |
-| `bun run deny` | yes (`cargo-deny-action`) | `cargo install cargo-deny` | Advisories, licenses, crate sources and bans per `deny.toml`. |
+| `bun run deny` | yes (`cargo-deny-action`) | `cargo install cargo-deny` | Advisories, licenses, crate sources and bans per `deny.toml` (`cargo deny --locked --all-features check`). |
 | robot-aarch64 job | yes | `gcc-aarch64-linux-gnu` | The robot client type-checks for the Raspberry Pi 5 target. |
 | `bun run bench:e2e` | no (opt-in) | Release build, free ports, port 8090 | End-to-end latency with the real server, engine and robot client. See below. |
 | `bun run test:container` | no | Docker | Enrollment and stored memory across a container replacement. |
 | `bun run test:lab`, `tests/early-live.mjs`, `tests/latency-live.mjs` | no | A running lab, `BUDDY_LAB_TOKEN`, a device identity; the live scripts also need a provider key | Browser acceptance of the lab. See [lab](lab.md). |
-| `bun tests/robot-shutdown.mjs` | no | Release build of server and robot | The robot stops on SIGTERM while stdin is open. Currently fails (see Known bugs). |
+| `bun run test:shutdown` | yes, after the release build | Release build of server and robot, free port 8090 | The robot exits 0 within 500 ms of SIGTERM or SIGINT with stdin open or closed, and writes its cache file on the way out (3 SIGTERM, 1 SIGINT, 1 closed-stdin run). |
 
 ### Offline test crates (`crates/buddy/tests`)
 
 - `protocol_golden.rs` pins the wire shape of every `Command` variant (an exhaustive match
   fails to compile when a variant is added without a fixture), the action envelope,
   connection params, output events, enrollment messages and settings payloads against
-  JSON in `fixtures/protocol/`. It also checks that clients ignore additive fields on
-  messages they read and that unknown commands are rejected. After a deliberate wire
+  JSON in `fixtures/protocol/`. It records the compatibility rule: every message and every
+  settings type read back (voice, context, synthesis, speech rule, persona draft) ignores
+  additive fields, while settings writes (the config in `set_voice_config` and
+  `set_context_config`, the persona in `save_persona`, and model tool arguments, all through
+  `protocol::strict`) reject an unknown field at any depth and name it. Unknown commands
+  are rejected. After a deliberate wire
   change, regenerate with `BUDDY_UPDATE_GOLDEN=1 cargo test -p robot-buddy --test protocol_golden`
   and review the fixture diff.
 - `voice_rules.rs` runs the table in `fixtures/voice_rules.json` (34 cases) through
   `VoiceConfig::speech_input` and `speech_body`: styles, word boundaries, case, overlap,
-  validation errors, the 32-rule cap and the 24 KiB rendered-input cap. Rendering may only
-  add `[whispering] `; the canonical transcript is never changed.
+  validation errors, the 32-rule cap and the 24 KiB rendered-input cap. Overlaps resolve
+  longest first across start positions, ties leftmost. Model-authored markup (`[laughs]`,
+  `<break/>`, a stray `[whispering]`) is removed, so rule-derived `[whispering] ` is the
+  only tag that reaches the provider; the canonical transcript is never changed.
 - `sentences.rs` and `history_sql.rs` cover the sentence splitter and the history queries.
 
 ### Integration harness (`crates/buddy/tests/actors.rs`, `tests/support/mod.rs`)
@@ -102,6 +108,8 @@ server and the Rivet gateway, and starts the real `robot-buddy-robot --simulate`
   24 kHz mono s16 in real time (48 kB/s), 60 ms of audio per input character.
 - Fake `aplay` on `PATH` (`tests/lib/fake-aplay.mjs`): timestamps every PCM chunk, keeps
   playing its buffer after stdin closes like aplay, and its socket closing marks the kill.
+  It is launched once before measuring, because its first launch from the fresh work
+  directory sometimes takes 3 s on macOS (see [e2e latency](research/e2e-latency.md)).
 
 Measures: submit to `turn.started`, first `text.delta`, first `speech.ready`, first PCM byte
 at the player, `turn.completed`; silence inside a reply (a chunk arriving after the buffered
@@ -110,32 +118,30 @@ model stream closing; server and engine RSS. Percentiles are nearest-rank, so wi
 p95 is the 19th value and p99 is the maximum.
 
 Options: `--turns N` (20), `--barge N` (5), `--out file.json`, `--no-build`, `--no-speech`,
-`--keep` (keep the work directory), `--repo DIR` and `--label NAME` to measure another
-checkout. A server without `TTS_BASE_URL` is never given `TTS_MODEL`, so it cannot reach the
+`--keep` (keep the work directory, including `server.log`; `BENCH_SERVER_LOG` sets its
+`RUST_LOG`), `--repo DIR` and `--label NAME` to measure another checkout. A server without `TTS_BASE_URL` is never given `TTS_MODEL`, so it cannot reach the
 real provider; only text and `speech.ready` are measured there. The bench refuses to start
 if a port is busy and exits non-zero if a turn fails or the server, engine or a listener
 outlives shutdown. Credentials are generated per run in a temporary directory and deleted.
 
-## Known bugs pinned by tests
+## Fixed bugs pinned by tests
 
-- `voice_rules.rs::longest_overlapping_match_wins_across_start_positions` (ignored):
-  `speech_input` resolves overlapping rules leftmost-first, not longest-first as
-  `docs/architecture/voice.md` says. "New York" (emphasis) beats the longer overlapping
-  "York City Hall" (whisper).
-- `voice_rules.rs::model_authored_tags_do_not_reach_the_provider` (ignored): model-authored
-  bracket tags such as `[laughs]` reach the Eleven v4 input unchanged; only `[whispering]`
-  from saved rules should.
-- `protocol_golden.rs::settings_payloads_reject_unknown_fields` documents, as passing
-  behavior, that `VoiceConfig`, `ContextConfig`, `Synthesis`, `PersonaDraft` and `SpeechRule`
-  reject unknown fields, which contradicts "Clients ignore additive unknown fields"
-  (`docs/architecture/robot-client.md`). Decide which is intended.
-- `tests/robot-shutdown.mjs` (fails): the robot does not exit on SIGTERM while stdin is open.
-  The graceful-shutdown handler returns from `main`, but dropping the Tokio runtime waits on
-  the blocking `tokio::io::stdin` read, which never returns. Baseline 983e90f had no handler
-  and died at once. On the device systemd waits `TimeoutStopSec`, then SIGKILLs.
+Fixed on November 23, 2026; each test failed before its fix.
 
-Ignored BUG tests run with `cargo test -p robot-buddy --test voice_rules -- --include-ignored`
-and fail until fixed; remove the `#[ignore]` with the fix.
+- `voice_rules.rs::longest_overlapping_match_wins_across_start_positions`: overlapping rules
+  resolved leftmost-first; now longest-first as `docs/architecture/voice.md` says.
+- `voice_rules.rs::model_authored_tags_do_not_reach_the_provider` and
+  `model_markup_is_removed_with_tidy_spacing`: model-authored bracket tags reached the
+  Eleven v4 input. A sentence that is only markup now sends no speech request
+  (`apps/server/src/speech/tests.rs::provider_error_body_is_bounded_and_not_echoed`).
+- `protocol_golden.rs::settings_read_back_ignore_additive_fields` and
+  `settings_writes_reject_unknown_fields` replace the old test that pinned strict settings
+  types, which contradicted "Clients ignore additive unknown fields".
+- `tests/robot-shutdown.mjs`, `input.rs::an_open_input_does_not_delay_runtime_shutdown` and
+  `audio.rs::runtime_shutdown_kills_an_abandoned_player`: the robot ignored SIGTERM while
+  stdin was open, because dropping the Tokio runtime waited on the blocking
+  `tokio::io::stdin` read. Stdin is now read on a plain OS thread, runtime shutdown is
+  bounded at 100 ms, and the cache is flushed and the player killed before exit.
 
 ## Not proven here
 

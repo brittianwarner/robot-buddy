@@ -2,11 +2,12 @@
 // On the device stdin is the wake-word/speech-recognition pipe, which never closes, so
 // systemd's stop waits for TimeoutStopSec and then SIGKILLs (no final cache flush).
 //
-//   cargo build --release -p robot-buddy-robot && bun tests/robot-shutdown.mjs
+//   cargo build --release -p robot-buddy-server -p robot-buddy-robot && bun run test:shutdown
 //
-// KNOWN FAILING (2026-11-23): main() returns after the signal, but dropping the Tokio
-// runtime waits for the blocking stdin reader (tokio::io::stdin), which never returns.
-// Closing stdin first makes it exit in milliseconds. Not wired into CI until fixed.
+// Fixed 2026-11-23: stdin is read on a plain OS thread (a blocking-pool read made runtime
+// shutdown wait forever), and runtime shutdown is bounded. Each stop must also write the
+// cache file (the final cursor flush), which proves the robot stopped cleanly rather than
+// being killed.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -22,8 +23,10 @@ try {
   ]) {
     if (spawnSync(bin('robot-buddy-server'), args).status !== 0) throw new Error('server init/provision failed');
   }
-  const exitAfterTerm = (closeStdin) =>
+  const cache = path.join(work, 'cache.json');
+  const exitAfterTerm = (closeStdin, signal = 'SIGTERM') =>
     new Promise((resolve) => {
+      fs.rmSync(cache, { force: true });
       const robot = spawn(bin('robot-buddy-robot'), ['--simulate'], {
         env: {
           ...process.env,
@@ -31,29 +34,47 @@ try {
           // Nothing listens here: the robot stays in its reconnect loop.
           BUDDY_SERVER_URL: 'http://127.0.0.1:9',
           BUDDY_IDENTITY_FILE: path.join(work, 'device.json'),
-          BUDDY_CACHE_FILE: path.join(work, 'cache.json'),
+          BUDDY_CACHE_FILE: cache,
         },
         stdio: ['pipe', 'ignore', 'ignore'],
       });
       setTimeout(() => {
         if (closeStdin) robot.stdin.end();
         const t = Date.now();
-        robot.kill('SIGTERM');
+        robot.kill(signal);
         const kill = setTimeout(() => {
           robot.kill('SIGKILL');
           resolve(null);
         }, 5000);
-        robot.on('exit', () => {
+        robot.on('exit', (code) => {
           clearTimeout(kill);
-          resolve(Date.now() - t);
+          resolve({ ms: Date.now() - t, code, flushed: fs.existsSync(cache) });
         });
       }, 1500);
     });
-  const open = await exitAfterTerm(false);
-  const closed = await exitAfterTerm(true);
-  console.log(`SIGTERM with stdin open: ${open === null ? 'still running after 5000 ms' : `exited in ${open} ms`}`);
-  console.log(`SIGTERM with stdin closed: ${closed === null ? 'still running after 5000 ms' : `exited in ${closed} ms`}`);
-  process.exitCode = open !== null && open < 2000 ? 0 : 1;
+  // Well under systemd's TimeoutStopSec; a clean stop takes tens of milliseconds.
+  const LIMIT_MS = 500;
+  const runs = [
+    ['SIGTERM, stdin open', false, 'SIGTERM'],
+    ['SIGTERM, stdin open', false, 'SIGTERM'],
+    ['SIGTERM, stdin open', false, 'SIGTERM'],
+    ['SIGINT, stdin open', false, 'SIGINT'],
+    ['SIGTERM, stdin closed', true, 'SIGTERM'],
+  ];
+  let failed = false;
+  for (const [label, closeStdin, signal] of runs) {
+    const result = await exitAfterTerm(closeStdin, signal);
+    const ok = result !== null && result.ms < LIMIT_MS && result.code === 0 && result.flushed;
+    failed ||= !ok;
+    console.log(
+      `${ok ? 'ok  ' : 'FAIL'} ${label}: ${
+        result === null
+          ? 'still running after 5000 ms'
+          : `exited ${result.code} in ${result.ms} ms, cache ${result.flushed ? 'flushed' : 'NOT flushed'}`
+      }`,
+    );
+  }
+  process.exitCode = failed ? 1 : 0;
 } finally {
   fs.rmSync(work, { recursive: true, force: true });
 }

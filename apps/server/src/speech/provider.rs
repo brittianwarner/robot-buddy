@@ -55,6 +55,17 @@ impl Synthesizer for OpenRouter {
     async fn synthesize(&self, spoken: &Spoken) -> Result<Synthesis> {
         let config: VoiceConfig = serde_json::from_value(spoken.voice["config"].clone())?;
         let payload = config.speech_body(&self.model, &spoken.text)?;
+        if payload["input"].as_str().is_none_or(str::is_empty) {
+            // The sentence was only model markup (say "[laughs]"): nothing to speak,
+            // so no paid request. The format is the provider's own default.
+            return Ok(Synthesis {
+                format: PcmFormat {
+                    sample_rate: 24_000,
+                    channels: 1,
+                },
+                audio: futures_util::stream::empty().boxed(),
+            });
+        }
         let response = self
             .http
             .post(&self.endpoint)

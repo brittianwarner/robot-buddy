@@ -276,6 +276,19 @@ fs.writeFileSync(
   `#!/bin/sh\nexec "${process.execPath}" "${path.join(root, 'tests/lib/fake-aplay.mjs')}" "$@"\n`,
   { mode: 0o755 },
 );
+// Start the fake player once before measuring. Its first launch from a fresh directory
+// (sh, then Bun loading fake-aplay.mjs) took 3 to 4 s in some runs, which showed up as
+// warm-up first audio; a real aplay is a native binary already on disk.
+{
+  const t = now();
+  const warm = spawn(path.join(fakebin, 'aplay'), [], {
+    env: { ...process.env, BENCH_APLAY_SOCK: APLAY_SOCK },
+    stdio: ['pipe', 'ignore', 'ignore'],
+  });
+  warm.stdin.end();
+  await new Promise((r) => warm.on('exit', r));
+  log(`fake aplay first launch: ${Math.round(now() - t)} ms (not measured)`);
+}
 
 // ---------------------------------------------------------------------------------------
 // Server, engine and robot
@@ -318,7 +331,7 @@ const serverLog = fs.openSync(path.join(work, 'server.log'), 'w');
 serverProc = spawn(SERVER, [], {
   env: cleanEnv({
     ...secrets,
-    RUST_LOG: 'warn',
+    RUST_LOG: process.env.BENCH_SERVER_LOG ?? 'warn',
     RIVET_ENDPOINT: engineUrl,
     RIVETKIT_ENGINE_SPAWN: 'never',
     RIVET_NAMESPACE: 'default',
@@ -597,13 +610,20 @@ try {
       ready: rel(first('speech.ready')?.t),
       done: rel(done.t),
       pcm: rel(player?.chunks[0]?.[0]),
+      // Cold-path breakdown: first speech request at the fake provider, fake aplay started.
+      speech_request: rel(speech.requests.find((q) => q.t >= t0)?.t),
+      player_start: rel(player?.start),
       gaps: player ? silences(player) : [],
       audio_ms: player ? player.total / ((player.rate * player.channels * 2) / 1000) : null,
     };
   }
 
   const cold = await turn('Hello there, this is the warm-up turn.');
-  log(`warm-up: ${cold.kind}, speech.ready ${cold.ready?.toFixed(0)} ms, first pcm ${cold.pcm?.toFixed(0) ?? '-'} ms`);
+  const ms = (v) => v?.toFixed(0) ?? '-';
+  log(
+    `warm-up: ${cold.kind}, speech.ready ${ms(cold.ready)} ms, provider request ${ms(cold.speech_request)} ms, ` +
+      `fake aplay started ${ms(cold.player_start)} ms, first pcm ${ms(cold.pcm)} ms`,
+  );
   const rssStart = [rss(serverProc.pid), rss(enginePid)];
   const modelCallsBefore = model.calls;
   const speechBefore = speech.requests.length;
@@ -656,7 +676,13 @@ try {
   const engine = rssSamples.map((s) => s[2]).filter(Boolean);
   Object.assign(result, {
     failed_turns: failed.length,
-    cold_turn_ms: { speech_ready: cold.ready, first_pcm: cold.pcm, completed: cold.done },
+    cold_turn_ms: {
+      speech_ready: cold.ready,
+      speech_request: cold.speech_request,
+      player_start: cold.player_start,
+      first_pcm: cold.pcm,
+      completed: cold.done,
+    },
     metrics_ms: {
       submit_to_turn_started: stats(turns.map((r) => r.started)),
       submit_to_first_text_delta: stats(turns.map((r) => r.text)),

@@ -575,4 +575,60 @@ mod tests {
         }
         assert_eq!(accepted.load(Ordering::SeqCst), 1, "one pooled connection");
     }
+
+    /// Shutdown path in `main`: the session future (and its `Playback`) is
+    /// dropped, then the runtime shuts down. The player must be dead by the
+    /// time `shutdown_timeout` returns, so no `aplay` outlives the robot.
+    #[test]
+    fn runtime_shutdown_kills_an_abandoned_player() {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        // `sleep` stands in for aplay draining its buffer: it ignores stdin
+        // closing and holds its stdout, a pipe we read, until it dies. EOF on
+        // that pipe means the player has exited.
+        let (mut player_out, player_in) = std::io::pipe().unwrap();
+        let player_in = Arc::new(std::sync::Mutex::new(Some(player_in)));
+        let take = player_in.clone();
+        let factory: PlayerFactory = Arc::new(move |_| {
+            let mut command = tokio::process::Command::new("sleep");
+            let writer = take.lock().unwrap().take().expect("one player");
+            command.arg("30").stdout(writer);
+            command
+        });
+        runtime.block_on(async {
+            let app = Router::new().route(
+                "/v1/speech",
+                post(|| async {
+                    let stream = futures_util::stream::unfold(0, |i| async move {
+                        if i > 0 {
+                            tokio::time::sleep(Duration::from_secs(30)).await;
+                        }
+                        Some((Ok::<_, std::io::Error>(vec![0u8; 4800]), i + 1))
+                    });
+                    (PCM_HEADERS, Body::from_stream(stream))
+                }),
+            );
+            let (server, _) = serve(app).await;
+            let media = Arc::new(Media::for_test(&server, factory, WRITE_DEADLINE));
+            let (tx, mut rx) = mpsc::channel(8);
+            let mut playback = Playback::new(media, "s".into(), tx);
+            let generation = playback.start("test-turn").unwrap();
+            assert_eq!(
+                next_event(&mut rx).await,
+                PlaybackEvent::Started { generation }
+            );
+            drop(playback);
+        });
+        runtime.shutdown_timeout(Duration::from_millis(100));
+        let (done, exited) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = std::io::Read::read_to_end(&mut player_out, &mut Vec::new());
+            let _ = done.send(());
+        });
+        exited
+            .recv_timeout(Duration::from_secs(2))
+            .expect("player still running after runtime shutdown");
+    }
 }

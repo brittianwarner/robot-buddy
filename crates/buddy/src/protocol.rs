@@ -1,6 +1,35 @@
 //! Versioned application messages transported by the official Rivet client.
-use serde::{Deserialize, Serialize};
+//!
+//! Compatibility rule: every type here, and every settings type it carries,
+//! ignores fields it does not know, because robots, the lab and older or newer
+//! servers decode what a newer peer wrote (including rows read back from the
+//! actor database). Settings *writes* are the exception: [`strict`] rejects unknown
+//! fields on the values a user, the lab or a model tool submits, so a typo is
+//! an error instead of a silently dropped setting.
+use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
 use serde_json::Value;
+
+/// Deserialize `T` and fail on any field `T` would have ignored, naming its
+/// path. Use with `#[serde(deserialize_with = "strict")]` on write inputs.
+pub fn strict<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    let mut unknown = None;
+    let value = serde_ignored::deserialize(deserializer, |path| {
+        unknown.get_or_insert_with(|| path.to_string());
+    })?;
+    match unknown {
+        Some(path) => Err(serde::de::Error::custom(format!("unknown field `{path}`"))),
+        None => Ok(value),
+    }
+}
+
+/// [`strict`] for a JSON value, as model tool arguments arrive.
+pub fn strict_value<T: DeserializeOwned>(value: &Value) -> serde_json::Result<T> {
+    strict(value)
+}
 
 /// The one application action: an authenticated [`Call`]. Its output is JSON.
 pub const CALL_ACTION: &str = "call";
@@ -31,6 +60,7 @@ pub enum Command {
     GetContextConfig,
     SetContextConfig {
         expected_revision: i64,
+        #[serde(deserialize_with = "strict")]
         config: crate::context::ContextConfig,
         reason: String,
     },
@@ -40,6 +70,7 @@ pub enum Command {
         version: i64,
     },
     SavePersona {
+        #[serde(deserialize_with = "strict")]
         persona: crate::persona::PersonaDraft,
     },
     ActivatePersona {
@@ -51,6 +82,7 @@ pub enum Command {
     GetVoiceConfig,
     SetVoiceConfig {
         expected_revision: i64,
+        #[serde(deserialize_with = "strict")]
         config: crate::voice::VoiceConfig,
         reason: String,
     },

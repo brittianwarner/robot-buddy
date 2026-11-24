@@ -147,8 +147,9 @@ impl<'de> Deserialize<'de> for Voice {
         Self::from_stored(&raw).ok_or_else(|| serde::de::Error::custom("unknown voice"))
     }
 }
+/// Tolerates unknown fields on read (stored rows, clients); writes decode
+/// through `protocol::strict`.
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct VoiceConfig {
     pub voice: Voice,
     pub delivery: String,
@@ -320,7 +321,7 @@ mod tests {
 
 /// Bounded Fish provider controls. They stay on saved profiles and are not sent to Eleven.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default)]
 pub struct Synthesis {
     pub temperature: f64,
     pub top_p: f64,
@@ -476,7 +477,6 @@ pub fn schema() -> Value {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct SpeechRule {
     pub text: String,
     pub style: WordStyle,
@@ -549,12 +549,62 @@ impl SpeechRule {
         }
     }
 }
+/// Byte cap on the rendered provider input.
+const SPEECH_INPUT_BUDGET: usize = 24 * 1024;
+/// Bracketed spans up to this many bytes are treated as tags and dropped whole.
+/// Longer spans, and an opener followed by a space (`x < y`), keep their words
+/// and lose only the brackets.
+const MAX_TAG_BYTES: usize = 48;
+const MARKUP: [char; 4] = ['[', ']', '<', '>'];
+
+/// Remove markup the provider would perform instead of speak: model-authored
+/// `[...]` audio tags, `<...>` SSML-like tags and stray brackets. Borrowed when
+/// the text has none.
+fn strip_markup(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.contains(MARKUP) {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(MARKUP) {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + 1..];
+        let close = match rest.as_bytes()[at] {
+            b'[' => Some(']'),
+            b'<' => Some('>'),
+            _ => None,
+        };
+        let tag = close
+            .filter(|_| !after.starts_with(char::is_whitespace))
+            .and_then(|c| after.find(c));
+        rest = match tag {
+            Some(end) if end <= MAX_TAG_BYTES => &after[end + 1..],
+            _ => after,
+        };
+        // Keep exactly one space where the markup was, and none at the edges.
+        if out.is_empty() || out.ends_with(char::is_whitespace) {
+            rest = rest.trim_start();
+        } else if rest.starts_with(char::is_alphanumeric) {
+            out.push(' ');
+        }
+    }
+    out.push_str(rest);
+    out.truncate(out.trim_end().len());
+    std::borrow::Cow::Owned(out)
+}
+
 impl VoiceConfig {
     /// Derive provider-only markup from a completed answer; never change the transcript.
+    ///
+    /// Markup in the answer itself is removed first, so the only tag that can reach
+    /// the provider is `[whispering]` from a saved rule. Where rule matches overlap,
+    /// the longest wins; equal lengths go to the leftmost.
     pub fn speech_input(&self, text: &str) -> Result<String> {
         self.validate()?;
+        let text = strip_markup(text);
+        let text = text.as_ref();
         let mut hits = Vec::new();
-        for rule in &self.speech_rules {
+        for (index, rule) in self.speech_rules.iter().enumerate() {
             for (start, matched) in text.match_indices(&rule.text) {
                 let end = start + matched.len();
                 if text[..start]
@@ -568,23 +618,42 @@ impl VoiceConfig {
                 {
                     continue;
                 }
-                hits.push((start, end, rule));
+                hits.push((start, end, index));
             }
         }
-        hits.sort_by_key(|(start, end, _)| (*start, std::cmp::Reverse(*end)));
+        if hits.len() > 1 {
+            // Claim bytes longest first (ties leftmost); a hit touching a claimed
+            // byte loses. One bit per input byte.
+            hits.sort_unstable_by_key(|&(start, end, _)| (std::cmp::Reverse(end - start), start));
+            let mut claimed = vec![0u64; text.len().div_ceil(64)];
+            let is_claimed = |claimed: &[u64], i: usize| claimed[i / 64] >> (i % 64) & 1 == 1;
+            hits.retain(|&(start, end, _)| {
+                if (start..end).any(|i| is_claimed(&claimed, i)) {
+                    return false;
+                }
+                for i in start..end {
+                    claimed[i / 64] |= 1 << (i % 64);
+                }
+                true
+            });
+            hits.sort_unstable_by_key(|&(start, ..)| start);
+        }
         let mut out = String::with_capacity(text.len());
         let mut cursor = 0;
-        for (start, end, rule) in hits {
-            if start < cursor {
-                continue;
-            }
+        for (start, end, index) in hits {
             out.push_str(&text[cursor..start]);
-            out.push_str(&rule.annotate(&text[start..end]));
+            out.push_str(&self.speech_rules[index].annotate(&text[start..end]));
             cursor = end;
-            ensure!(out.len() <= 24576, "annotated speech exceeds budget");
+            ensure!(
+                out.len() <= SPEECH_INPUT_BUDGET,
+                "annotated speech exceeds budget"
+            );
         }
         out.push_str(&text[cursor..]);
-        ensure!(out.len() <= 24576, "annotated speech exceeds budget");
+        ensure!(
+            out.len() <= SPEECH_INPUT_BUDGET,
+            "annotated speech exceeds budget"
+        );
         Ok(out)
     }
 }

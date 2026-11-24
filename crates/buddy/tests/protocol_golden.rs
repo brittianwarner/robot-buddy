@@ -403,31 +403,74 @@ fn unknown_event_kinds_parse_and_unknown_commands_are_rejected() {
     assert!(serde_json::from_value::<Command>(json!({"type":"replay"})).is_err());
 }
 
-/// Settings payloads are strict: a field the server does not know is rejected, not
-/// silently dropped. This is deliberate input validation for writes, but it means
-/// "clients ignore additive unknown fields" does not hold for these types: a client that
-/// parses `GetVoiceConfig`'s `config` into `VoiceConfig` breaks when the server adds a
-/// field, and an older server rejects a newer client's write. Pinned so a change is a
-/// decision, not an accident.
+fn command_fixture(name: &str) -> Value {
+    serde_json::from_str(&std::fs::read_to_string(fixture_path(name)).expect("fixture"))
+        .expect("json")
+}
+
+/// Compatibility rule (docs/architecture/robot-client.md): anything decoded from a peer or
+/// from storage ignores additive fields. Settings types are read back from the actor database,
+/// by the speech service from the pinned voice, and by clients from `get_*` results, so a
+/// newer peer's field must never break them.
 #[test]
-fn settings_payloads_reject_unknown_fields() {
-    assert!(!accepts::<VoiceConfig>("voice_config"));
-    assert!(!accepts::<ContextConfig>("context_config"));
-    assert!(!accepts::<Synthesis>("synthesis.default"));
-    let draft = with_additive_field("command.save_persona")["persona"].clone();
-    let mut draft_extra = draft.clone();
-    draft_extra["added_later"] = json!(true);
+fn settings_read_back_ignore_additive_fields() {
+    assert!(accepts::<VoiceConfig>("voice_config"));
+    assert!(accepts::<ContextConfig>("context_config"));
+    assert!(accepts::<Synthesis>("synthesis.default"));
+    let mut nested = with_additive_field("voice_config");
+    nested["synthesis"]["added_later"] = json!(1);
+    nested["speech_rules"][0]["added_later"] = json!("x");
+    assert!(serde_json::from_value::<VoiceConfig>(nested).is_ok());
+    let mut draft = command_fixture("command.save_persona")["persona"].clone();
+    draft["added_later"] = json!(true);
+    draft["voice"]["added_later"] = json!(true);
     assert!(serde_json::from_value::<PersonaDraft>(draft).is_ok());
-    assert!(serde_json::from_value::<PersonaDraft>(draft_extra).is_err());
     let rule = json!({"text":"secret","style":"whisper","added_later":true});
-    assert!(serde_json::from_value::<SpeechRule>(rule).is_err());
-    // A strict nested type makes its whole command strict too.
-    let mut command: Value = serde_json::from_str(
-        &std::fs::read_to_string(fixture_path("command.set_voice_config")).expect("fixture"),
-    )
-    .expect("json");
-    command["config"]["added_later"] = json!(true);
-    assert!(serde_json::from_value::<Command>(command).is_err());
+    assert!(serde_json::from_value::<SpeechRule>(rule).is_ok());
+}
+
+/// Settings writes are the exception: a field the server does not know, at any depth of the
+/// submitted config, is rejected and named rather than silently dropped. The command
+/// envelope itself still ignores additive fields (see above).
+#[test]
+fn settings_writes_reject_unknown_fields() {
+    let rejects = |fixture: &str, field: &str, pointer: &str| {
+        let mut command = command_fixture(fixture);
+        command
+            .pointer_mut(pointer)
+            .and_then(Value::as_object_mut)
+            .expect("object at pointer")
+            .insert(field.into(), json!(true));
+        let error = serde_json::from_value::<Command>(command)
+            .err()
+            .unwrap_or_else(|| panic!("{fixture}{pointer}/{field} was accepted"));
+        assert!(
+            error.to_string().contains(field),
+            "{fixture}: error should name the field: {error}"
+        );
+    };
+    rejects("command.set_voice_config", "added_later", "/config");
+    rejects(
+        "command.set_voice_config",
+        "added_later",
+        "/config/synthesis",
+    );
+    rejects(
+        "command.set_voice_config",
+        "added_later",
+        "/config/speech_rules/0",
+    );
+    rejects("command.set_context_config", "added_later", "/config");
+    rejects("command.save_persona", "added_later", "/persona");
+    rejects("command.save_persona", "added_later", "/persona/voice");
+    // Model tool arguments decode through the same check.
+    let mut config = serde_json::to_value(voice_config()).expect("ser");
+    assert!(robot_buddy::protocol::strict_value::<VoiceConfig>(&config).is_ok());
+    config["speech_rules"][1]["typo"] = json!("x");
+    let error = robot_buddy::protocol::strict_value::<VoiceConfig>(&config)
+        .err()
+        .expect("tool argument with an unknown field");
+    assert!(error.to_string().contains("speech_rules.1.typo"), "{error}");
 }
 
 #[test]

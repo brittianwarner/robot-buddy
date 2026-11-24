@@ -203,11 +203,9 @@ fn rules_do_not_change_the_canonical_transcript() {
     assert_eq!(body["response_format"], "pcm");
 }
 
-/// docs/architecture/voice.md: "Longest overlapping matches win." The renderer instead
-/// takes the leftmost match and only prefers the longest among matches that start at the
-/// same byte, so a longer rule that starts inside a shorter one loses.
+/// docs/architecture/voice.md: "Longest overlapping matches win", across start positions,
+/// so a longer rule that starts inside a shorter one still wins.
 #[test]
-#[ignore = "BUG: speech_input resolves overlapping rules leftmost-first, not longest-first as docs/architecture/voice.md says; 'New York' (emphasis) beats the longer overlapping 'York City Hall' (whisper)"]
 fn longest_overlapping_match_wins_across_start_positions() {
     let config = config(vec![
         rule("New York", WordStyle::Emphasis),
@@ -221,11 +219,9 @@ fn longest_overlapping_match_wins_across_start_positions() {
     );
 }
 
-/// Only rule-derived markup is controlled. Bracketed text in the completed answer is
-/// passed to Eleven v4 verbatim, where `[...]` is an audio tag, so a stray "[laughs]" or
-/// "[whispering]" from the model is performed instead of spoken or removed.
+/// Only rule-derived markup reaches Eleven v4, where `[...]` is an audio tag: a stray
+/// "[laughs]" or "[whispering]" from the model is removed, not performed.
 #[test]
-#[ignore = "BUG: speech_input forwards model-authored bracket tags (e.g. [laughs], [sighs]) to the Eleven v4 provider input unchanged; only [whispering] from saved rules should reach it"]
 fn model_authored_tags_do_not_reach_the_provider() {
     let config = config(vec![]);
     for answer in [
@@ -240,4 +236,54 @@ fn model_authored_tags_do_not_reach_the_provider() {
             "provider input carries model markup: {input}"
         );
     }
+}
+
+#[test]
+fn equal_length_overlaps_go_to_the_leftmost() {
+    // Two 8-byte rules overlapping on "York": the leftmost wins.
+    let tie = config(vec![
+        rule("York Cit", WordStyle::Emphasis),
+        rule("New York", WordStyle::Whisper),
+    ]);
+    assert_eq!(
+        tie.speech_input("At New York Cit.").expect("render"),
+        "At [whispering] New York Cit."
+    );
+    // A 9-byte rule starting later beats the 8-byte leftmost one.
+    let longer = config(vec![
+        rule("York City", WordStyle::Emphasis),
+        rule("New York", WordStyle::Whisper),
+    ]);
+    assert_eq!(
+        longer.speech_input("At New York City.").expect("render"),
+        "At New York City."
+    );
+}
+
+#[test]
+fn model_markup_is_removed_with_tidy_spacing() {
+    let whisper = config(vec![rule("secret", WordStyle::Whisper)]);
+    for (answer, expect) in [
+        ("Sure [laughs] that's funny.", "Sure that's funny."),
+        ("Fine. [sighs]", "Fine."),
+        ("[whispering] The secret.", "The [whispering] secret."),
+        ("Okay <break time=\"1s\"/> next.", "Okay next."),
+        ("Ha[laughs]ha", "Ha ha"),
+        ("Done[laughs].", "Done."),
+        ("A [secret] word", "A word"),
+        ("x < y and z > w", "x y and z w"),
+        ("[laughs]", ""),
+    ] {
+        assert_eq!(
+            whisper.speech_input(answer).expect("render"),
+            expect,
+            "{answer}"
+        );
+    }
+    // Long bracketed text is not a tag: its words are kept, the brackets dropped.
+    let long = "See [this is a long aside that is clearly not an audio tag at all] ok.";
+    assert_eq!(
+        whisper.speech_input(long).expect("render"),
+        "See this is a long aside that is clearly not an audio tag at all ok."
+    );
 }

@@ -23,18 +23,38 @@ use input::Input;
 use robot_buddy::auth::Identity;
 use screen::Screen;
 use std::{sync::Arc, time::Duration};
-use tokio::{io::BufReader, time::Instant};
+use tokio::time::Instant;
 
 /// Cursor checkpoints are coalesced to at most one write per interval.
 const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(1);
 /// How long the setup hotspot stays up when reopened after a Wi-Fi loss.
 const SETUP_WINDOW: Duration = Duration::from_mins(10);
+/// After a stop signal and the final cache flush, how long runtime shutdown
+/// may wait for blocking work (a stuck serial write, a DNS lookup) before
+/// the process exits anyway.
+const SHUTDOWN_GRACE: Duration = Duration::from_millis(100);
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    let result = runtime.block_on(robot());
+    // Dropping the runtime drops every task: an aborted playback task drops
+    // its `aplay` child, which `kill_on_drop` SIGKILLs. Blocking work is not
+    // awaited past the grace period.
+    let stopping = std::time::Instant::now();
+    runtime.shutdown_timeout(SHUTDOWN_GRACE);
+    tracing::debug!(
+        shutdown_ms = stopping.elapsed().as_millis(),
+        "runtime stopped"
+    );
+    result
+}
+
+async fn robot() -> Result<()> {
     let settings = Settings::from_env()?;
     let identity: Identity = serde_json::from_slice(&std::fs::read(&settings.identity_file)?)?;
     let store = CacheStore::spawn(settings.cache_file.clone(), CHECKPOINT_INTERVAL);
@@ -58,8 +78,8 @@ async fn main() -> Result<()> {
         .timeout(Duration::from_secs(15))
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
-    let stdin = BufReader::with_capacity(input::MAX_LINE, tokio::io::stdin());
-    let mut input = Input::spawn(stdin);
+    let stdin = std::io::BufReader::with_capacity(input::MAX_LINE, std::io::stdin());
+    let mut input = Input::spawn(stdin)?;
     if !settings.simulate && !wifi::connected().await? {
         wifi::setup(&screen, None).await?;
     }
@@ -71,18 +91,29 @@ async fn main() -> Result<()> {
         media: &media,
         detail: settings.events,
     };
-    let run = reconnect(
-        &settings, &identity, &control, &shared, &mut state, &mut input,
-    );
-    tokio::select! {
-        result = run => result,
-        () = shutdown_signal() => {
-            tracing::info!("stopping");
-            face.set(Mood::Offline);
-            store.shutdown().await;
-            Ok(())
+    let stopped = {
+        let run = reconnect(
+            &settings, &identity, &control, &shared, &mut state, &mut input,
+        );
+        tokio::select! {
+            result = run => Some(result),
+            () = shutdown_signal() => None,
         }
+    };
+    // The session future is gone: its `Playback` aborted any player task.
+    if let Some(result) = stopped {
+        return result;
     }
+    tracing::info!("stopping");
+    face.set(Mood::Offline);
+    // Persist the in-memory replay cursor, not only the last coalesced checkpoint.
+    let flushing = Instant::now();
+    if let Err(error) = store.flush(&state.cache).await {
+        tracing::warn!(%error, "final cache flush failed");
+    }
+    store.shutdown().await;
+    tracing::debug!(flush_ms = flushing.elapsed().as_millis(), "cache flushed");
+    Ok(())
 }
 
 /// Connect, run a session, and reconnect with backoff for as long as the

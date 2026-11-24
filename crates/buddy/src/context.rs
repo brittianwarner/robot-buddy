@@ -4,8 +4,8 @@ use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "server")]
 use serde_json::{Value, json};
+/// Tolerates unknown fields on read; writes decode through `protocol::strict`.
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ContextConfig {
     pub timezone: String,
     pub location: Option<String>,

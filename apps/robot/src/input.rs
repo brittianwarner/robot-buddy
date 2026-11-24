@@ -1,10 +1,12 @@
 //! Line-delimited control input on stdin (from the wake word and speech
 //! recognition process). See docs/architecture/robot-client.md for the contract.
+//!
+//! The reader is a plain OS thread with blocking reads, not a Tokio task: a
+//! read on an open pipe never returns, and a blocking-pool task would make
+//! runtime shutdown wait for it (SIGTERM would then hang until SIGKILL).
 use serde_json::Value;
-use tokio::{
-    io::{AsyncBufRead, AsyncBufReadExt},
-    sync::mpsc,
-};
+use std::io::BufRead;
+use tokio::sync::mpsc;
 
 /// Longest accepted input line, in bytes, newline excluded.
 pub const MAX_LINE: usize = 8 * 1024;
@@ -96,7 +98,7 @@ pub enum Read {
 }
 
 /// Read one line into `line`, holding at most `max` bytes of it in memory.
-pub async fn read_bounded<R: AsyncBufRead + Unpin>(
+pub fn read_bounded<R: BufRead>(
     reader: &mut R,
     line: &mut Vec<u8>,
     max: usize,
@@ -104,7 +106,11 @@ pub async fn read_bounded<R: AsyncBufRead + Unpin>(
     line.clear();
     let mut overflow = false;
     loop {
-        let available = reader.fill_buf().await?;
+        let available = match reader.fill_buf() {
+            Ok(available) => available,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error),
+        };
         if available.is_empty() {
             return Ok(match (overflow, line.is_empty()) {
                 (true, _) => Read::TooLong,
@@ -130,7 +136,7 @@ pub async fn read_bounded<R: AsyncBufRead + Unpin>(
     }
 }
 
-/// Control commands from a reader task. Once the input closes, `next` never
+/// Control commands from a reader thread. Once the input closes, `next` never
 /// resolves again, so a closed stdin cannot spin the session loop.
 pub struct Input {
     commands: mpsc::Receiver<Control>,
@@ -138,12 +144,14 @@ pub struct Input {
 }
 
 impl Input {
-    pub fn spawn<R: AsyncBufRead + Unpin + Send + 'static>(mut reader: R) -> Self {
+    /// Read `reader` on a detached OS thread. The thread holds no state that
+    /// needs cleanup, so process exit may end it mid-read.
+    pub fn spawn<R: BufRead + Send + 'static>(mut reader: R) -> std::io::Result<Self> {
         let (tx, commands) = mpsc::channel(16);
-        tokio::spawn(async move {
+        let reader_thread = move || {
             let mut line = Vec::with_capacity(1024);
             loop {
-                let parsed = match read_bounded(&mut reader, &mut line, MAX_LINE).await {
+                let parsed = match read_bounded(&mut reader, &mut line, MAX_LINE) {
                     Ok(Read::Line) => parse(&line),
                     Ok(Read::TooLong) => Err(Rejected::TooLong),
                     Ok(Read::Eof) => break,
@@ -154,7 +162,7 @@ impl Input {
                 };
                 match parsed {
                     Ok(command) => {
-                        if tx.send(command).await.is_err() {
+                        if tx.blocking_send(command).is_err() {
                             break;
                         }
                     }
@@ -166,11 +174,14 @@ impl Input {
                     ),
                 }
             }
-        });
-        Self {
+        };
+        std::thread::Builder::new()
+            .name("control-input".into())
+            .spawn(reader_thread)?;
+        Ok(Self {
             commands,
             open: true,
-        }
+        })
     }
 
     pub async fn next(&mut self) -> Control {
@@ -188,8 +199,7 @@ impl Input {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
-    use tokio::io::BufReader;
+    use std::{io::BufReader, time::Duration};
 
     #[test]
     fn plain_lines_are_utterances() {
@@ -232,16 +242,14 @@ mod tests {
         assert_eq!(parse(&vec![b'a'; MAX_LINE + 1]), Err(Rejected::TooLong));
     }
 
-    #[tokio::test]
-    async fn bounded_reads_discard_oversized_lines_and_keep_going() {
+    #[test]
+    fn bounded_reads_discard_oversized_lines_and_keep_going() {
         let mut data = vec![b'x'; MAX_LINE * 3];
         data.extend_from_slice(b"\nnext\nlast");
         let mut reader = BufReader::with_capacity(512, &data[..]);
         let mut line = Vec::new();
         assert_eq!(
-            read_bounded(&mut reader, &mut line, MAX_LINE)
-                .await
-                .unwrap(),
+            read_bounded(&mut reader, &mut line, MAX_LINE).unwrap(),
             Read::TooLong
         );
         assert!(
@@ -249,23 +257,17 @@ mod tests {
             "never buffers the long line"
         );
         assert_eq!(
-            read_bounded(&mut reader, &mut line, MAX_LINE)
-                .await
-                .unwrap(),
+            read_bounded(&mut reader, &mut line, MAX_LINE).unwrap(),
             Read::Line
         );
         assert_eq!(line, b"next");
         assert_eq!(
-            read_bounded(&mut reader, &mut line, MAX_LINE)
-                .await
-                .unwrap(),
+            read_bounded(&mut reader, &mut line, MAX_LINE).unwrap(),
             Read::Line
         );
         assert_eq!(line, b"last");
         assert_eq!(
-            read_bounded(&mut reader, &mut line, MAX_LINE)
-                .await
-                .unwrap(),
+            read_bounded(&mut reader, &mut line, MAX_LINE).unwrap(),
             Read::Eof
         );
     }
@@ -275,7 +277,7 @@ mod tests {
         let mut data = b"hello\n\n{\"wake\":true}\n{oops\n".to_vec();
         data.extend_from_slice(&vec![b'z'; MAX_LINE + 10]);
         data.extend_from_slice(b"\n{\"say\":\"bye\"}\n");
-        let mut input = Input::spawn(BufReader::new(std::io::Cursor::new(data)));
+        let mut input = Input::spawn(BufReader::new(std::io::Cursor::new(data))).unwrap();
         assert_eq!(input.next().await, Control::Say("hello".into()));
         assert_eq!(input.next().await, Control::Wake);
         assert_eq!(input.next().await, Control::Say("bye".into()));
@@ -284,5 +286,26 @@ mod tests {
         assert!(after.is_err());
         let again = tokio::time::timeout(Duration::from_millis(50), input.next()).await;
         assert!(again.is_err());
+    }
+
+    /// Regression: an input that never closes (the device's speech pipe)
+    /// must not hold up runtime shutdown, or SIGTERM waits for SIGKILL.
+    #[test]
+    fn an_open_input_does_not_delay_runtime_shutdown() {
+        let (reader, mut writer) = std::io::pipe().unwrap();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let mut input = runtime
+            .block_on(async { Input::spawn(BufReader::new(reader)) })
+            .unwrap();
+        std::io::Write::write_all(&mut writer, b"hello\n").unwrap();
+        assert_eq!(runtime.block_on(input.next()), Control::Say("hello".into()));
+        let stopping = std::time::Instant::now();
+        drop(input);
+        drop(runtime);
+        assert!(stopping.elapsed() < Duration::from_millis(200));
+        drop(writer);
     }
 }
