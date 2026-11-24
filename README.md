@@ -29,9 +29,38 @@ cargo run -p robot-buddy-server -- provision secrets/issuer.key secrets/device.i
 cargo build --release -p robot-buddy-robot
 ```
 
-Install the robot binary on Linux with NetworkManager and a Wi-Fi adapter supporting AP mode. Set `BUDDY_SERVER_URL`, `BUDDY_IDENTITY_FILE`, `BUDDY_CACHE_FILE`, and optionally `BUDDY_WIFI_INTERFACE` (default `wlan0`). The example [systemd unit](infra/robot-buddy.service) runs with the privileges needed to manage NetworkManager profiles. Provision each robot a unique identity file, readable only by its service user.
+Install the robot binary on Linux with NetworkManager and a Wi-Fi adapter supporting AP mode. Set `BUDDY_SERVER_URL`, `BUDDY_IDENTITY_FILE`, `BUDDY_CACHE_FILE`, and optionally `BUDDY_WIFI_INTERFACE` (default `wlan0`). The example [systemd unit](infra/robot-buddy.service) runs as the unprivileged `robot-buddy` account; [polkit rules](infra/robot-buddy-nm.rules) let it manage its NetworkManager profiles. Provision each robot a unique identity file. As root:
 
-The robot exposes its face UI on loopback port 8090; display it in a local kiosk browser. First boot shows a Wi-Fi QR for a temporary protected hotspot. Connect, then visit `http://10.42.0.1` in the phone browser and enter home Wi-Fi credentials. After connection, the face shows a registration QR; sign in using the configured OIDC provider and confirm the matching code on the robot. No phone app is needed. Automatic captive-portal opening is not implemented; the browser URL is the fallback.
+```sh
+groupadd --system pip-control
+useradd --system --home-dir /var/lib/robot-buddy --shell /usr/sbin/nologin \
+  --groups audio,dialout,pip-control robot-buddy
+install -m 0755 robot-buddy-robot /usr/local/bin/robot-buddy-robot
+install -d -m 0750 -o root -g robot-buddy /etc/robot-buddy
+install -m 0600 -o robot-buddy -g robot-buddy device.identity.json /etc/robot-buddy/
+install -m 0600 infra/device.env.example /etc/robot-buddy/device.env   # then edit it
+install -m 0644 infra/robot-buddy-nm.rules /etc/polkit-1/rules.d/50-robot-buddy-nm.rules
+install -m 0644 infra/robot-buddy.service /etc/systemd/system/
+install -d -m 0700 -o robot-buddy -g robot-buddy /var/lib/robot-buddy
+runuser -u robot-buddy -- /usr/local/bin/robot-buddy-robot setup-card
+systemctl daemon-reload && systemctl enable --now robot-buddy
+```
+
+The unit starts beside NetworkManager and does not wait for the network to come up. Do not enable `NetworkManager-wait-online.service` for it.
+
+`setup-card` prints this robot's setup Wi-Fi name, password and a QR code, created once and kept in `/var/lib/robot-buddy/setup-wifi.json` (0600). Print it and keep it with the robot: it is the only way to reach setup on a robot without a screen. Run it as `robot-buddy` so the service can read the file. Deleting the file makes a new password at the next setup; reprint the card then.
+
+The speech process sends wake and utterance lines to `/run/robot-buddy/control.sock` (mode 0660, group `pip-control`). Put its account in `pip-control` only, never in the `robot-buddy` group, which can read `/etc/robot-buddy`. To check, with `stt` as the speech account:
+
+```sh
+id stt                                                # pip-control, not robot-buddy
+sudo -u stt cat /etc/robot-buddy/device.identity.json # Permission denied (EACCES)
+printf '{"wake":true}\n' | sudo -u stt socat - UNIX-CONNECT:/run/robot-buddy/control.sock
+```
+
+Upgrading an older install: run the `groupadd`, `usermod -aG pip-control robot-buddy`, `gpasswd -d stt robot-buddy`, then `chown robot-buddy:robot-buddy` and `chmod 0600` the identity file, install the new unit and rules, and restart.
+
+On first boot the robot opens its setup hotspot. Join it with the password or QR from the card, then visit `http://10.42.0.1` in the phone browser and enter home Wi-Fi credentials. A kiosk browser on the face UI (loopback port 8090) shows the same QR. A mistyped password leaves any working home network in place. After connection, the face shows a registration QR; sign in using the configured OIDC provider and confirm the matching code on the robot. No phone app is needed. Automatic captive-portal opening is not implemented; the browser URL is the fallback.
 
 For development, `cargo run -p robot-buddy-robot -- --simulate` skips NetworkManager. It accepts text or JSON control lines on stdin (`{"say":…}`, `{"wake":true}`, `{"listening":false}`, `{"mute":true}`) and emits ordered events on stdout: full JSON in simulation, compact lines without conversation text on hardware. Set `BUDDY_SPEECH=true` for ALSA playback and `BUDDY_FACE_SERIAL=/dev/ttyACM0` for the ESP32 face. The [robot client guide](docs/architecture/robot-client.md) has the input contract, face states, ALSA settings and the Raspberry Pi 5 build. Actuator and camera drivers are not included, and none of this has been tested on robot hardware. HTTP server URLs are allowed only for explicit localhost simulation.
 

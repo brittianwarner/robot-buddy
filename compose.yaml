@@ -8,9 +8,18 @@ services:
       - "127.0.0.1:6420:6420"
     volumes:
       - buddy-data:/data
-    # The engine config (admin token, S3 keys) is written here; tmpfs keeps it off disk.
+    # Only /data and /tmp are writable. The engine config (admin token, S3 keys)
+    # is written to /tmp; tmpfs keeps it off disk.
+    read_only: true
     tmpfs:
-      - /tmp:mode=1777,nosuid,nodev
+      - /tmp:mode=1777,nosuid,nodev,noexec,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # Measured: server about 40 MB, engine 70-125 MB RSS (docs/research/e2e-latency.md).
+    mem_limit: 1g
+    pids_limit: 512
     restart: unless-stopped
     stop_grace_period: 60s
 volumes:

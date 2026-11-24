@@ -2,25 +2,33 @@
 # robot-buddy account; NetworkManager changes go through polkit.
 #
 # Install (as root, once):
+#   groupadd --system pip-control
 #   useradd --system --home-dir /var/lib/robot-buddy --shell /usr/sbin/nologin \
-#     --groups audio,dialout robot-buddy
+#     --groups audio,dialout,pip-control robot-buddy
 #   install -m 0755 robot-buddy-robot /usr/local/bin/robot-buddy-robot
 #   install -d -m 0750 -o root -g robot-buddy /etc/robot-buddy
-#   install -m 0640 -o root -g robot-buddy device.identity.json /etc/robot-buddy/
+#   install -m 0600 -o robot-buddy -g robot-buddy device.identity.json /etc/robot-buddy/
 #   install -m 0600 device.env.example /etc/robot-buddy/device.env   # then edit it
 #   install -m 0644 robot-buddy-nm.rules /etc/polkit-1/rules.d/50-robot-buddy-nm.rules
 #   install -m 0644 robot-buddy.service /etc/systemd/system/
-#   systemctl enable NetworkManager-wait-online.service
+#   install -d -m 0700 -o robot-buddy -g robot-buddy /var/lib/robot-buddy
+#   runuser -u robot-buddy -- /usr/local/bin/robot-buddy-robot setup-card  # print it
 #   systemctl daemon-reload && systemctl enable --now robot-buddy
-# The speech process writes JSON control lines to /run/robot-buddy/control.sock:
-# add its account to the robot-buddy group (usermod -aG robot-buddy <account>).
-# Upgrading from the root unit: systemd hands /var/lib/robot-buddy to the new
-# account on start, and the next Wi-Fi setup replaces the old profiles.
+# The speech process writes JSON control lines to /run/robot-buddy/control.sock
+# (0660, group pip-control). Put its account in pip-control only, never in the
+# robot-buddy group: `usermod -aG pip-control <account>`.
+# Upgrading: run the groupadd and `usermod -aG pip-control robot-buddy`, remove
+# the speech account from robot-buddy (`gpasswd -d <account> robot-buddy`), and
+# `chown robot-buddy:robot-buddy` + `chmod 0600` the identity file. From the root
+# unit: systemd hands /var/lib/robot-buddy to the new account on start, and the
+# next Wi-Fi setup replaces the old profiles.
 
 [Unit]
 Description=Robot Buddy setup and Rivet client
-Wants=network-online.target NetworkManager.service
-After=network-online.target NetworkManager.service sound.target tailscaled.service
+# Starts beside NetworkManager, not after the network is up: without a working
+# uplink the client opens the setup hotspot itself.
+Wants=NetworkManager.service
+After=NetworkManager.service sound.target tailscaled.service
 # Restart forever, but never faster than RestartSec.
 StartLimitIntervalSec=0
 
@@ -36,7 +44,7 @@ TimeoutStartSec=60s
 TimeoutStopSec=10s
 User=robot-buddy
 Group=robot-buddy
-SupplementaryGroups=audio dialout
+SupplementaryGroups=audio dialout pip-control
 EnvironmentFile=/etc/robot-buddy/device.env
 # Optional ESP32 face on USB serial: set BUDDY_FACE_SERIAL in device.env to its
 # /dev/serial/by-id/ path (stable across re-enumeration, unlike /dev/ttyACM0).
@@ -47,7 +55,8 @@ ExecStart=/usr/local/bin/robot-buddy-robot
 ExecStopPost=-/usr/bin/nmcli connection delete id robot-buddy-setup
 # Control input (wake word, utterances) arrives as JSON lines on this socket.
 # Writers may disconnect and reconnect at will. If the path is an existing FIFO,
-# it is read instead.
+# it is read instead. The socket is given to BUDDY_CONTROL_GROUP (default
+# pip-control) with mode 0660.
 Environment=BUDDY_CONTROL_SOCKET=/run/robot-buddy/control.sock
 StandardInput=null
 # stdout carries compact event lines (no conversation text) to the journal.
@@ -61,12 +70,14 @@ RestartSec=3
 Nice=-5
 IOSchedulingClass=best-effort
 IOSchedulingPriority=2
-# /var/lib/robot-buddy (cache) and /run/robot-buddy (control socket, Wi-Fi
-# secret file), both owned by robot-buddy.
+# /var/lib/robot-buddy (cache, setup Wi-Fi password) and /run/robot-buddy
+# (control socket, short-lived 0600 Wi-Fi secret files), both owned by
+# robot-buddy. 0711 lets the speech account reach the socket without listing
+# the directory or joining the robot-buddy group.
 StateDirectory=robot-buddy
 StateDirectoryMode=0700
 RuntimeDirectory=robot-buddy
-RuntimeDirectoryMode=0750
+RuntimeDirectoryMode=0711
 UMask=0077
 # The setup page listens on 10.42.0.1:80.
 AmbientCapabilities=CAP_NET_BIND_SERVICE
@@ -86,8 +97,18 @@ RestrictNamespaces=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+ProtectProc=invisible
+# AF_NETLINK: address lookups (getaddrinfo AI_ADDRCONFIG). nmcli talks D-Bus
+# over AF_UNIX.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# Not set, on purpose: PrivateDevices/DevicePolicy=closed (ALSA and the
+# hotplugged CDC-ACM face need /dev/snd and /dev/ttyACM*), ProcSubset=pid
+# (alsa-lib reads /proc/asound).
 MemoryMax=256M
 TasksMax=128
 # Never put this service in the backend container.

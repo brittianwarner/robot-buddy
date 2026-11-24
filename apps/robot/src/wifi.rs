@@ -6,6 +6,13 @@
 //! account make exactly these calls. The home password never appears in argv:
 //! nmcli reads it from a 0600 file that is removed as soon as activation ends,
 //! and `NetworkManager` saves it with the profile.
+//!
+//! A new home network is staged as its own profile (its own UUID) and only
+//! replaces the previous one once it has joined and its password reads back
+//! from `NetworkManager`; a mistyped password leaves the old network in place.
+pub mod card;
+pub mod guard;
+
 use crate::screen::{Screen, escape, header_in, local_headers};
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use axum::{
@@ -15,7 +22,7 @@ use axum::{
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
-use robot_buddy::auth;
+use robot_buddy::auth::{self, Secret};
 use serde::Deserialize;
 use std::{
     io::Write,
@@ -29,7 +36,6 @@ use std::{
 use tokio::{
     net::TcpListener,
     sync::{Mutex, mpsc},
-    time::Instant,
 };
 
 const SETUP_ID: &str = "robot-buddy-setup";
@@ -50,9 +56,7 @@ const MAX_COPIES: usize = 8;
 /// `10.42.0.1` appears a moment after the hotspot reports up.
 const BIND_TRIES: u32 = 25;
 const BIND_RETRY: Duration = Duration::from_millis(200);
-#[cfg_attr(not(test), allow(dead_code, reason = "main.rs boot gate wiring"))]
-const CONNECTED_POLL: Duration = Duration::from_secs(1);
-/// nmcli error text kept for the log (it never contains passwords).
+/// nmcli error text kept for the log, from calls that carry no secret.
 const ERROR_CAP: usize = 300;
 
 #[derive(Clone)]
@@ -78,8 +82,8 @@ fn program() -> &'static Path {
 /// locale, so its output parses. The child is killed if it overruns the deadline.
 ///
 /// No `--` separator: nmcli does not document one for these subcommands. Every value is
-/// a constant, a path we built, an interface name that cannot start with `-`, or an
-/// SSID that [`validate`] keeps from starting with `-`.
+/// a constant, a path we built, an interface name that cannot start with `-`, a UUID
+/// nmcli printed, or an SSID that [`validate`] keeps from starting with `-`.
 async fn run(args: &[&str]) -> Result<Output> {
     let mut command = tokio::process::Command::new(program());
     command
@@ -93,12 +97,27 @@ async fn run(args: &[&str]) -> Result<Output> {
         .context("nmcli could not start")
 }
 
+/// What nmcli's exit status means (`nmcli(1)`, "Exit status").
+fn meaning(code: Option<i32>) -> &'static str {
+    match code {
+        Some(2) => "invalid input",
+        Some(3) => "timed out",
+        Some(4) => "activation failed",
+        Some(5) => "deactivation failed",
+        Some(7) => "deletion failed",
+        Some(8) => "NetworkManager is not running",
+        Some(NOT_FOUND) => "no such connection",
+        _ => "error",
+    }
+}
+
 fn failure(output: &Output) -> anyhow::Error {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let detail: String = stderr.trim().chars().take(ERROR_CAP).collect();
     anyhow!(
-        "NetworkManager operation failed (exit {:?}): {}",
+        "NetworkManager operation failed (exit {:?}, {}): {}",
         output.status.code(),
+        meaning(output.status.code()),
         detail.replace('\n', " | ")
     )
 }
@@ -109,6 +128,29 @@ async fn nm(args: &[&str]) -> Result<String> {
         return Err(failure(&output));
     }
     Ok(String::from_utf8(output.stdout)?)
+}
+
+/// For calls that carry a secret in argv, in a passwd-file or in their output:
+/// stdout and stderr are wiped, and a failure reports the exit status only.
+async fn nm_secret(args: &[&str]) -> Result<Secret<String>> {
+    let output = run(args).await?;
+    let code = output.status.code();
+    let success = output.status.success();
+    drop(Secret::new(output.stderr));
+    if !success {
+        drop(Secret::new(output.stdout));
+        bail!(
+            "NetworkManager operation failed (exit {code:?}, {})",
+            meaning(code)
+        );
+    }
+    match String::from_utf8(output.stdout) {
+        Ok(text) => Ok(Secret::new(text)),
+        Err(error) => {
+            drop(Secret::new(error.into_bytes()));
+            bail!("NetworkManager output is not UTF-8")
+        }
+    }
 }
 
 /// Delete every profile named `id`. nmcli deletes one match per call on some
@@ -154,23 +196,6 @@ pub async fn connected() -> Result<bool> {
     Ok(uplink(&nm(&["-t", "-f", "STATE", "general"]).await?))
 }
 
-/// Poll [`connected`] for up to `grace`. At boot, Wi-Fi takes a few seconds to
-/// associate after `NetworkManager` starts; this keeps a routine reboot from
-/// dropping straight into setup.
-#[cfg_attr(not(test), allow(dead_code, reason = "main.rs boot gate wiring"))]
-pub async fn wait_connected(grace: Duration) -> Result<bool> {
-    let deadline = Instant::now() + grace;
-    loop {
-        if connected().await? {
-            return Ok(true);
-        }
-        if Instant::now() + CONNECTED_POLL > deadline {
-            return Ok(false);
-        }
-        tokio::time::sleep(CONNECTED_POLL).await;
-    }
-}
-
 /// The setup hotspot, held in `NetworkManager` memory only (`save no`). Dropping
 /// it without [`Hotspot::remove`] (an error, or SIGTERM cancelling setup)
 /// still deletes it from a detached nmcli; the unit's `ExecStopPost` is the
@@ -183,9 +208,11 @@ impl Hotspot {
     async fn start(interface: &str, ssid: &str, password: &str) -> Result<Self> {
         delete_profiles(SETUP_ID).await?;
         let hotspot = Self { armed: true };
-        // The hotspot password is random, single-use and shown on the screen
-        // as a QR code, so it may ride in argv.
-        nm(&[
+        // The hotspot password is printed on the robot's setup card and only
+        // admits a phone to the setup page, so it rides in argv (visible to local
+        // accounts for the moment nmcli runs). The call's output is still treated
+        // as secret.
+        nm_secret(&[
             "connection",
             "add",
             "save",
@@ -262,6 +289,18 @@ async fn bind_retrying(address: SocketAddr, tries: u32, delay: Duration) -> Resu
     }
 }
 
+/// The robot's own setup network: the one on its card, or a one-time one
+/// (panel QR only) when the card file cannot be read or made.
+fn setup_network() -> card::SetupWifi {
+    match card::load_or_create(&card::path()) {
+        Ok(setup) => setup,
+        Err(error) => {
+            tracing::warn!(%error, "setup card credentials unavailable; using a one-time network");
+            card::SetupWifi::generate()
+        }
+    }
+}
+
 /// Host the setup hotspot and form until home Wi-Fi connects. With a
 /// `window`, give up after it and remove the hotspot so `NetworkManager` can
 /// rejoin a known network.
@@ -271,17 +310,16 @@ pub async fn setup(screen: &Screen, window: Option<Duration>) -> Result<()> {
         "Wi-Fi setup requires Linux with NetworkManager; use --simulate elsewhere"
     );
     let interface = interface()?;
-    let ssid = format!("RobotBuddy-{}", &auth::random()[..8]);
-    let password = auth::random().replace('-', "");
-    let hotspot = Hotspot::start(&interface, &ssid, &password).await?;
+    let network = setup_network();
+    let hotspot = Hotspot::start(&interface, &network.ssid, network.password.expose()).await?;
     let listener = bind_retrying(SETUP_ADDRESS, BIND_TRIES, BIND_RETRY).await?;
-    let join = format!("WIFI:T:WPA;S:{ssid};P:{password};;");
     screen
         .show(
-            "Scan to join setup Wi-Fi. Then open http://10.42.0.1",
-            &join,
+            "Join the setup Wi-Fi on the robot's card, or scan this. Then open http://10.42.0.1",
+            network.join_payload().expose(),
         )
         .await?;
+    drop(network);
     let (done, mut finished) = mpsc::channel(1);
     let app = Router::new()
         .route("/", get(form))
@@ -295,6 +333,7 @@ pub async fn setup(screen: &Screen, window: Option<Duration>) -> Result<()> {
             lock: Arc::new(Mutex::new(())),
             screen: screen.clone(),
         });
+    let listener = guard::guard(listener, guard::Limits::PAGE);
     let server = tokio::spawn(async move { axum::serve(listener, app).await });
     let joined = match window {
         Some(window) => tokio::time::timeout(window, finished.recv())
@@ -355,7 +394,7 @@ fn reply(status: StatusCode, body: &'static str) -> Response {
 struct WifiForm {
     csrf: String,
     ssid: String,
-    password: String,
+    password: Secret<String>,
 }
 
 async fn apply(State(s): State<Setup>, headers: HeaderMap, Form(f): Form<WifiForm>) -> Response {
@@ -366,7 +405,7 @@ async fn apply(State(s): State<Setup>, headers: HeaderMap, Form(f): Form<WifiFor
     if !same_origin || !auth::ct_eq(f.csrf.as_bytes(), s.csrf.as_bytes()) {
         return reply(StatusCode::FORBIDDEN, "Invalid setup session");
     }
-    if validate(&f.ssid, &f.password).is_err() {
+    if validate(&f.ssid, f.password.expose()).is_err() {
         let message = "Enter a valid network name and WPA password.";
         return reply(StatusCode::BAD_REQUEST, message);
     }
@@ -427,8 +466,10 @@ impl Drop for SecretFile {
 /// One nmcli `passwd-file` line. nmcli strips unescaped leading and trailing
 /// white space and decodes backslash escapes, so `\` and spaces are escaped.
 /// [`validate`] already limits the password to printable ASCII.
-fn passwd_line(password: &str) -> String {
-    let mut line = String::from("802-11-wireless-security.psk:");
+fn passwd_line(password: &str) -> Secret<String> {
+    // Sized up front so the buffer never reallocates and leaves a copy behind.
+    let mut line = String::with_capacity(32 + 2 * password.len());
+    line.push_str("802-11-wireless-security.psk:");
     for c in password.chars() {
         match c {
             '\\' => line.push_str("\\\\"),
@@ -437,19 +478,34 @@ fn passwd_line(password: &str) -> String {
         }
     }
     line.push('\n');
-    line
+    Secret::new(line)
 }
 
 /// Terse (`-g`) nmcli output escapes `\` and `:`.
-fn terse(value: &str) -> String {
-    value.replace('\\', "\\\\").replace(':', "\\:")
+fn terse(value: &str) -> Secret<String> {
+    Secret::new(value.replace('\\', "\\\\").replace(':', "\\:"))
+}
+
+/// `Connection 'robot-buddy-home' (<uuid>) successfully added.` (C locale).
+fn added_uuid(stdout: &str) -> Result<String> {
+    let uuid = stdout
+        .rsplit_once(") successfully added")
+        .and_then(|(head, _)| head.rsplit_once(" ("))
+        .map(|(_, uuid)| uuid)
+        .context("nmcli did not report the new profile")?;
+    Ok(uuid::Uuid::parse_str(uuid)
+        .context("nmcli reported an invalid profile UUID")?
+        .hyphenated()
+        .to_string())
 }
 
 async fn join_home(interface: &str, f: &WifiForm) -> Result<()> {
-    validate(&f.ssid, &f.password)?;
+    let password = f.password.expose();
+    validate(&f.ssid, password)?;
     ensure!(valid_interface(interface), "invalid interface");
-    delete_profiles(HOME_ID).await?;
-    nm(&[
+    // Staged beside the current home profile, without autoconnect, so it never
+    // competes for the radio until it has proved itself.
+    let added = nm(&[
         "connection",
         "add",
         "type",
@@ -459,7 +515,7 @@ async fn join_home(interface: &str, f: &WifiForm) -> Result<()> {
         "ifname",
         interface,
         "autoconnect",
-        "yes",
+        "no",
         "ssid",
         &f.ssid,
         "wifi-sec.key-mgmt",
@@ -470,55 +526,99 @@ async fn join_home(interface: &str, f: &WifiForm) -> Result<()> {
         "disabled",
     ])
     .await?;
-    let secret = SecretFile::create(&passwd_line(&f.password))?;
-    let up = nm(&[
+    let candidate = added_uuid(&added)?;
+    if let Err(error) = prove(&candidate, password).await {
+        // The previous home profile is untouched and keeps its autoconnect.
+        if let Err(cleanup) = delete_uuid(&candidate).await {
+            tracing::warn!(error = %cleanup, "could not remove the failed home profile");
+        }
+        return Err(error);
+    }
+    retire_others(&candidate).await;
+    Ok(())
+}
+
+/// Join with the candidate, require `NetworkManager` to have saved the password
+/// (otherwise the robot would be lost after a restart), then let it autoconnect.
+async fn prove(candidate: &str, password: &str) -> Result<()> {
+    let secret = SecretFile::create(passwd_line(password).expose())?;
+    let up = nm_secret(&[
         "--wait",
         "30",
         "connection",
         "up",
-        "id",
-        HOME_ID,
+        "uuid",
+        candidate,
         "passwd-file",
         secret.path()?,
     ])
     .await;
     drop(secret);
-    if let Err(error) = up {
-        // No password was saved, and an autoconnect profile that cannot join
-        // would fight the hotspot for the radio.
-        if let Err(cleanup) = delete_profiles(HOME_ID).await {
-            tracing::warn!(error = %cleanup, "could not remove the failed home profile");
-        }
-        return Err(error);
-    }
-    check_saved(&f.password).await;
-    Ok(())
-}
-
-/// `NetworkManager` saves a password nmcli supplied during activation to the
-/// system profile. If it did not, the robot is online now but will need setup
-/// again after a restart, so say so (without the value).
-async fn check_saved(password: &str) {
-    let shown = nm(&[
+    up?;
+    let stored = nm_secret(&[
         "-s",
         "-g",
         "802-11-wireless-security.psk",
         "connection",
         "show",
-        "id",
-        HOME_ID,
+        "uuid",
+        candidate,
     ])
-    .await;
-    match shown {
-        Ok(stored) => {
-            let stored = stored.strip_suffix('\n').unwrap_or(&stored);
-            if !auth::ct_eq(stored.as_bytes(), terse(password).as_bytes()) {
-                tracing::warn!(
-                    "home Wi-Fi password was not saved; setup will be needed after a restart"
-                );
-            }
+    .await?;
+    let stored = stored.expose();
+    let stored = stored.strip_suffix('\n').unwrap_or(stored);
+    ensure!(
+        auth::ct_eq(stored.as_bytes(), terse(password).expose().as_bytes()),
+        "NetworkManager did not save the home Wi-Fi password"
+    );
+    nm(&[
+        "connection",
+        "modify",
+        "uuid",
+        candidate,
+        "connection.autoconnect",
+        "yes",
+    ])
+    .await?;
+    Ok(())
+}
+
+async fn delete_uuid(uuid: &str) -> Result<()> {
+    let output = run(&["connection", "delete", "uuid", uuid]).await?;
+    match output.status.code() {
+        Some(0 | NOT_FOUND) => Ok(()),
+        _ => Err(failure(&output)),
+    }
+}
+
+/// Remove every other home profile: the one the candidate replaces, copies
+/// from older releases, and candidates a crash left without autoconnect. A
+/// failure here leaves a spare profile behind, never the robot offline.
+async fn retire_others(candidate: &str) {
+    let listed = run(&["-g", "connection.uuid", "connection", "show", "id", HOME_ID]).await;
+    let uuids = match listed {
+        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| uuid::Uuid::parse_str(line.trim()).ok())
+            .map(|uuid| uuid.hyphenated().to_string())
+            .collect::<Vec<_>>(),
+        Ok(output) => {
+            tracing::warn!(error = %failure(&output), "could not list old home profiles");
+            return;
         }
-        Err(error) => tracing::warn!(%error, "could not check the saved home Wi-Fi password"),
+        Err(error) => {
+            tracing::warn!(%error, "could not list old home profiles");
+            return;
+        }
+    };
+    for uuid in uuids
+        .iter()
+        .filter(|uuid| *uuid != candidate)
+        .take(MAX_COPIES)
+    {
+        if let Err(error) = delete_uuid(uuid).await {
+            tracing::warn!(%error, "could not remove an old home profile");
+        }
     }
 }
 
@@ -555,8 +655,8 @@ mod tests {
     use super::*;
     use std::sync::OnceLock;
 
-    /// A stand-in `nmcli` that records its argv and the passwd-file it was
-    /// given, and keeps a count of profiles per name. One test at a time.
+    /// A stand-in `nmcli` that records its argv and the passwd-file it was given,
+    /// and keeps profiles as `p/<uuid>.name` and `p/<uuid>.auto`. One test at a time.
     pub(super) fn fake_nmcli() -> &'static Path {
         static SCRIPT: OnceLock<PathBuf> = OnceLock::new();
         SCRIPT.get_or_init(|| {
@@ -573,26 +673,41 @@ mod tests {
     const FAKE_NMCLI: &str = r#"#!/bin/sh
 dir=$(dirname "$0")
 printf '%s\n' "$*" >> "$dir/log"
-prev=""; con=""; id=""
+mkdir -p "$dir/p"
+prev=""; con=""; id=""; uuid=""; auto=""; secret=""
 for a in "$@"; do
   case "$prev" in
     passwd-file)
       if [ -n "$(find "$a" -perm 600)" ]; then echo 600 > "$dir/mode"; else echo other > "$dir/mode"; fi
-      cat "$a" > "$dir/secret"; echo "$a" > "$dir/secret-path";;
+      cat "$a" > "$dir/secret"; echo "$a" > "$dir/secret-path"; secret=$a;;
     con-name) con=$a;;
     id) id=$a;;
+    uuid) uuid=$a;;
+    autoconnect|connection.autoconnect) auto=$a;;
   esac
   prev=$a
 done
-count() { cat "$dir/have-$1" 2>/dev/null || echo 0; }
+named() { for f in "$dir"/p/*.name; do [ -e "$f" ] && [ "$(cat "$f")" = "$1" ] && basename "$f" .name; done; }
+missing() { echo "Error: unknown connection '$1'." >&2; exit 10; }
 case " $* " in
-  *" connection add "*) echo $(( $(count "$con") + 1 )) > "$dir/have-$con";;
+  *" connection add "*)
+    n=$(( $(cat "$dir/next" 2>/dev/null || echo 0) + 1 )); echo $n > "$dir/next"
+    u=$(printf '00000000-0000-4000-8000-%012d' "$n")
+    echo "$con" > "$dir/p/$u.name"; echo "$auto" > "$dir/p/$u.auto"
+    echo "Connection '$con' ($u) successfully added.";;
   *" connection delete "*)
-    n=$(count "$id"); [ "$n" -gt 0 ] || { echo "Error: unknown connection '$id'." >&2; exit 10; }
-    echo $(( n - 1 )) > "$dir/have-$id";;
+    if [ -n "$uuid" ]; then u=$uuid; else u=$(named "$id" | head -n 1); fi
+    [ -n "$u" ] && [ -e "$dir/p/$u.name" ] || missing "$uuid$id"
+    rm "$dir/p/$u.name" "$dir/p/$u.auto";;
   *" connection up "*)
-    [ -e "$dir/fail-up" ] && { echo "Error: Connection activation failed: Secrets were required" >&2; exit 4; };;
-  *" connection show "*) cat "$dir/stored" 2>/dev/null;;
+    if [ -e "$dir/fail-up" ]; then
+      [ -n "$secret" ] && cat "$secret" >&2
+      echo "Error: Connection activation failed: Secrets were required" >&2; exit 4
+    fi;;
+  *" connection modify "*) [ -e "$dir/p/$uuid.name" ] || missing "$uuid"; echo "$auto" > "$dir/p/$uuid.auto";;
+  *" connection show "*)
+    if [ -n "$uuid" ]; then [ -e "$dir/p/$uuid.name" ] || missing "$uuid"; cat "$dir/stored" 2>/dev/null
+    else us=$(named "$id"); [ -n "$us" ] || missing "$id"; echo "$us"; fi;;
   *" general "*) cat "$dir/state";;
 esac
 exit 0
@@ -608,10 +723,13 @@ exit 0
             let dir = fake_nmcli().parent().unwrap().to_owned();
             for entry in std::fs::read_dir(&dir).unwrap() {
                 let path = entry.unwrap().path();
-                if path.file_name().unwrap() != "nmcli" {
+                if path.is_dir() {
+                    std::fs::remove_dir_all(path).unwrap();
+                } else if path.file_name().unwrap() != "nmcli" {
                     std::fs::remove_file(path).unwrap();
                 }
             }
+            std::fs::create_dir(dir.join("p")).unwrap();
             Self(dir)
         }
 
@@ -626,7 +744,37 @@ exit 0
         fn log(&self) -> Vec<String> {
             self.read("log").lines().map(str::to_owned).collect()
         }
+
+        /// A profile that exists before the test, like a working home network.
+        fn profile(&self, uuid: &str, name: &str, autoconnect: &str) {
+            self.set(&format!("p/{uuid}.name"), &format!("{name}\n"));
+            self.set(&format!("p/{uuid}.auto"), &format!("{autoconnect}\n"));
+        }
+
+        /// `(uuid, autoconnect)` of every profile named `name`, sorted.
+        fn profiles(&self, name: &str) -> Vec<(String, String)> {
+            let mut found: Vec<_> = std::fs::read_dir(self.0.join("p"))
+                .unwrap()
+                .filter_map(|entry| {
+                    let path = entry.unwrap().path();
+                    let uuid = path
+                        .file_name()?
+                        .to_str()?
+                        .strip_suffix(".name")?
+                        .to_owned();
+                    (std::fs::read_to_string(&path).ok()?.trim() == name).then(|| {
+                        let auto = self.read(&format!("p/{uuid}.auto")).trim().to_owned();
+                        (uuid, auto)
+                    })
+                })
+                .collect();
+            found.sort();
+            found
+        }
     }
+
+    const OLD_HOME: &str = "aaaaaaaa-0000-4000-8000-000000000001";
+    const CANDIDATE: &str = "00000000-0000-4000-8000-000000000001";
 
     #[test]
     fn rejects_keyfile_injection() {
@@ -685,7 +833,7 @@ exit 0
         let form = WifiForm {
             csrf: csrf.into(),
             ssid: ssid.into(),
-            password: "password123".into(),
+            password: Secret::new("password123".into()),
         };
         apply(State(setup()), headers, Form(form)).await
     }
@@ -730,78 +878,165 @@ exit 0
         }
     }
 
+    #[tokio::test]
+    async fn connected_reads_the_general_state() {
+        let _serial = SERIAL.lock().await;
+        let fake = Fake::reset();
+        fake.set("state", "connected\n");
+        assert!(connected().await.unwrap());
+        fake.set("state", "connected (local only)\n");
+        assert!(!connected().await.unwrap());
+        assert_eq!(fake.log(), ["-t -f STATE general", "-t -f STATE general"]);
+    }
+
     #[test]
     fn passwords_are_escaped_for_passwd_file_and_terse_output() {
         assert_eq!(
-            passwd_line(" a\\b c "),
+            passwd_line(" a\\b c ").expose(),
             "802-11-wireless-security.psk:\\ a\\\\b\\ c\\ \n"
         );
         assert_eq!(
-            passwd_line("p:a#s;s"),
+            passwd_line("p:a#s;s").expose(),
             "802-11-wireless-security.psk:p:a#s;s\n"
         );
-        assert_eq!(terse("a:b\\c"), "a\\:b\\\\c");
+        assert_eq!(terse("a:b\\c").expose(), "a\\:b\\\\c");
+    }
+
+    #[test]
+    fn the_new_profile_uuid_comes_from_nmcli() {
+        assert_eq!(
+            added_uuid(
+                "Connection 'robot-buddy-home' (5D3F2C9A-1B2E-4C3D-8E4F-5A6B7C8D9E0F) successfully added.\n"
+            )
+            .unwrap(),
+            "5d3f2c9a-1b2e-4c3d-8e4f-5a6b7c8d9e0f"
+        );
+        assert!(added_uuid("Connection 'x' (--help) successfully added.").is_err());
+        assert!(added_uuid("").is_err());
     }
 
     fn home(password: &str) -> WifiForm {
         WifiForm {
             csrf: String::new(),
             ssid: "My Net".into(),
-            password: password.into(),
+            password: Secret::new(password.into()),
         }
     }
 
     #[tokio::test]
-    async fn joining_home_replaces_old_profiles_and_keeps_the_password_out_of_argv() {
+    async fn joining_home_proves_the_new_profile_before_retiring_the_old() {
         let _serial = SERIAL.lock().await;
         let fake = Fake::reset();
-        fake.set("have-robot-buddy-home", "3");
+        fake.profile(OLD_HOME, HOME_ID, "yes");
         let password = "correct horse\\9";
-        fake.set("stored", &format!("{}\n", terse(password)));
+        fake.set("stored", &format!("{}\n", terse(password).expose()));
         join_home("wlan0", &home(password)).await.unwrap();
 
         let log = fake.log();
-        let deletes = log
-            .iter()
-            .take_while(|l| l.starts_with("connection delete id robot-buddy-home"))
-            .count();
-        assert_eq!(deletes, 4, "three copies removed, then not found: {log:?}");
         assert!(
-            log[4].starts_with("connection add type wifi con-name robot-buddy-home ifname wlan0")
+            log[0].starts_with("connection add type wifi con-name robot-buddy-home ifname wlan0")
         );
-        assert!(log[4].contains("ssid My Net wifi-sec.key-mgmt wpa-psk"));
-        assert!(log[5].starts_with("--wait 30 connection up id robot-buddy-home passwd-file "));
-        assert!(log[6].starts_with("-s -g 802-11-wireless-security.psk connection show"));
+        assert!(log[0].contains("autoconnect no ssid My Net wifi-sec.key-mgmt wpa-psk"));
+        assert!(log[1].starts_with(&format!(
+            "--wait 30 connection up uuid {CANDIDATE} passwd-file "
+        )));
+        assert_eq!(
+            log[2],
+            format!("-s -g 802-11-wireless-security.psk connection show uuid {CANDIDATE}")
+        );
+        assert_eq!(
+            log[3],
+            format!("connection modify uuid {CANDIDATE} connection.autoconnect yes")
+        );
+        assert_eq!(
+            log[4],
+            "-g connection.uuid connection show id robot-buddy-home"
+        );
+        // The old profile goes only after the new one joined and saved its password.
+        assert_eq!(log[5], format!("connection delete uuid {OLD_HOME}"));
+        assert_eq!(log.len(), 6, "{log:?}");
         assert!(log.iter().all(|line| !line.contains("horse")), "{log:?}");
-        assert_eq!(fake.read("have-robot-buddy-home"), "1\n");
+        assert_eq!(
+            fake.profiles(HOME_ID),
+            [(CANDIDATE.to_owned(), "yes".to_owned())]
+        );
         assert_eq!(fake.read("mode"), "600\n");
-        assert_eq!(fake.read("secret"), passwd_line(password));
+        assert_eq!(fake.read("secret"), *passwd_line(password).expose());
         let secret = PathBuf::from(fake.read("secret-path").trim());
         assert!(!secret.exists(), "the secret file is removed");
     }
 
+    /// Regression: the old home profile was deleted before its replacement was
+    /// tried, so one mistyped password left the robot with no way home.
     #[tokio::test]
-    async fn a_failed_join_removes_its_profile_and_secret() {
+    async fn a_mistyped_password_keeps_the_working_home_network() {
         let _serial = SERIAL.lock().await;
         let fake = Fake::reset();
+        fake.profile(OLD_HOME, HOME_ID, "yes");
         fake.set("fail-up", "");
-        let error = join_home("wlan0", &home("password123")).await.unwrap_err();
-        assert!(
-            error.to_string().contains("Secrets were required"),
-            "{error}"
-        );
+        let error = join_home("wlan0", &home("mistyped-password"))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("activation failed"), "{error}");
+        // nmcli's stderr from a secret-bearing call never reaches the log.
+        assert!(!error.contains("mistyped"), "{error}");
+        assert!(!error.contains("Secrets were required"), "{error}");
         let log = fake.log();
-        assert_eq!(log.last().unwrap(), "connection delete id robot-buddy-home");
-        assert_eq!(fake.read("have-robot-buddy-home"), "0\n");
+        assert_eq!(
+            log.last().unwrap(),
+            &format!("connection delete uuid {CANDIDATE}")
+        );
+        assert!(log.iter().all(|line| !line.contains(OLD_HOME)), "{log:?}");
+        assert_eq!(
+            fake.profiles(HOME_ID),
+            [(OLD_HOME.to_owned(), "yes".to_owned())]
+        );
         let secret = PathBuf::from(fake.read("secret-path").trim());
         assert!(!secret.exists());
+    }
+
+    /// A join whose password was not saved would be lost at the next boot:
+    /// it fails, and the old profile stays.
+    #[tokio::test]
+    async fn an_unsaved_password_fails_the_join_and_keeps_the_old_profile() {
+        let _serial = SERIAL.lock().await;
+        let fake = Fake::reset();
+        fake.profile(OLD_HOME, HOME_ID, "yes");
+        fake.set("stored", "\n");
+        let error = join_home("wlan0", &home("password123")).await.unwrap_err();
+        assert!(error.to_string().contains("did not save"), "{error}");
+        assert_eq!(
+            fake.profiles(HOME_ID),
+            [(OLD_HOME.to_owned(), "yes".to_owned())]
+        );
+        assert!(fake.log().iter().all(|l| !l.contains("autoconnect yes")));
+    }
+
+    /// Copies from older releases and candidates a crash left behind (never
+    /// autoconnecting) are cleared once a new network is proven.
+    #[tokio::test]
+    async fn a_proven_join_clears_stale_home_profiles() {
+        let _serial = SERIAL.lock().await;
+        let fake = Fake::reset();
+        fake.profile(OLD_HOME, HOME_ID, "yes");
+        fake.profile("bbbbbbbb-0000-4000-8000-000000000002", HOME_ID, "yes");
+        fake.profile("cccccccc-0000-4000-8000-000000000003", HOME_ID, "no");
+        fake.profile("dddddddd-0000-4000-8000-000000000004", SETUP_ID, "no");
+        fake.set("stored", "password123\n");
+        join_home("wlan0", &home("password123")).await.unwrap();
+        assert_eq!(
+            fake.profiles(HOME_ID),
+            [(CANDIDATE.to_owned(), "yes".to_owned())]
+        );
+        assert_eq!(fake.profiles(SETUP_ID).len(), 1, "other profiles are kept");
     }
 
     #[tokio::test]
     async fn the_hotspot_is_deleted_when_setup_is_abandoned() {
         let _serial = SERIAL.lock().await;
         let fake = Fake::reset();
-        fake.set("have-robot-buddy-setup", "1");
+        fake.profile("dddddddd-0000-4000-8000-000000000004", SETUP_ID, "no");
         let hotspot = Hotspot::start("wlan0", "RobotBuddy-x", "hotspotpass")
             .await
             .unwrap();
@@ -810,11 +1045,11 @@ exit 0
         assert_eq!(log[1], "connection delete id robot-buddy-setup");
         assert!(log[2].starts_with("connection add save no type wifi con-name robot-buddy-setup"));
         assert_eq!(log[3], "connection up id robot-buddy-setup");
-        assert_eq!(fake.read("have-robot-buddy-setup"), "1\n");
+        assert_eq!(fake.profiles(SETUP_ID).len(), 1);
         // SIGTERM or an error drops the setup future with the hotspot up.
         drop(hotspot);
-        let deadline = std::time::Instant::now() + Duration::from_secs(3);
-        while fake.read("have-robot-buddy-setup") != "0\n" {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !fake.profiles(SETUP_ID).is_empty() {
             assert!(std::time::Instant::now() < deadline, "{:?}", fake.log());
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
@@ -837,7 +1072,7 @@ exit 0
             tokio::time::sleep(Duration::from_millis(150)).await;
             drop(held);
         });
-        let listener = bind_retrying(address, 25, Duration::from_millis(20)).await;
+        let listener = bind_retrying(address, 250, Duration::from_millis(20)).await;
         assert_eq!(listener.unwrap().local_addr().unwrap(), address);
         release.await.unwrap();
 
@@ -847,16 +1082,5 @@ exit 0
             .await
             .unwrap_err();
         assert!(error.to_string().contains("cannot listen"), "{error}");
-    }
-
-    #[tokio::test]
-    async fn the_boot_gate_reports_the_uplink() {
-        let _serial = SERIAL.lock().await;
-        let fake = Fake::reset();
-        fake.set("state", "connected\n");
-        assert!(wait_connected(Duration::from_secs(30)).await.unwrap());
-        fake.set("state", "connected (local only)\n");
-        assert!(!wait_connected(Duration::ZERO).await.unwrap());
-        assert_eq!(fake.log(), ["-t -f STATE general", "-t -f STATE general"]);
     }
 }

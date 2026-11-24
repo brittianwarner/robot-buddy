@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1
 FROM rivetdev/engine:3.1.1@sha256:55cdfe9a92c0ee2f7d3ce5f388dab2ef8e0be1bab8e3f1adb7ba972f862e25d4 AS engine
-FROM rust:1.97.1-slim-bookworm AS build
+FROM rust:1.97.1-slim-bookworm@sha256:2775a09d208ff0d7c1f50490c45b62db929e87ba1dcbc3f2132ac71a704bcdd3 AS build
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates ./crates
 COPY apps ./apps
 RUN --mount=type=cache,id=robot-buddy-registry,target=/usr/local/cargo/registry,sharing=locked --mount=type=cache,id=robot-buddy-target,target=/build/target,sharing=locked cargo build --locked --release --package robot-buddy-server && cp /build/target/release/robot-buddy-server /robot-buddy-server
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:e67eeead736ff7bbe258ef088bff683635c561b1fcfefad0806c1df4ab49ce0e
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tini && rm -rf /var/lib/apt/lists/* && useradd --uid 10001 --create-home buddy && mkdir -p /data && chown buddy:buddy /data
 COPY --from=engine /usr/bin/rivet-engine /usr/local/bin/rivet-engine
 COPY --from=build /robot-buddy-server /usr/local/bin/robot-buddy-server
