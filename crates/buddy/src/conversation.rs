@@ -2,6 +2,7 @@
 mod context;
 mod delivery;
 mod harness;
+pub mod history;
 mod persona;
 mod profiles;
 mod speech;
@@ -30,7 +31,9 @@ use std::{
 use tokio_util::sync::CancellationToken;
 
 pub struct Conversation {
-    signing_key: Vec<u8>,
+    signing_key: auth::Secret<Vec<u8>>,
+    /// Batches of the history search rebuild remain; see [`history`].
+    history_backfill: bool,
     draining: AtomicBool,
     /// Shared so a model stream can run on its own task.
     model: Arc<Model>,
@@ -55,10 +58,13 @@ const AGENT_SESSION_SECONDS: i64 = 60;
 const KEPT_VERSIONS: i64 = 15;
 const MAX_SPOKEN_ANSWER_BYTES: usize = 12_000;
 
-/// Name of the one-time history search rebuild in `schema_migrations`.
-const HISTORY_ROWIDS_MIGRATION: &str = "history_search_rowids";
-const MIGRATION_DONE_SQL: &str = "SELECT 1 FROM schema_migrations WHERE name = ?";
-const MIGRATION_MARK_SQL: &str = "INSERT INTO schema_migrations(name, applied) VALUES (?, ?)";
+/// Transaction options with a static name, which Rivet reports in errors and profiles.
+const fn named(name: &'static str) -> TxOptions<'static> {
+    TxOptions {
+        name: Some(name),
+        timeout: None,
+    }
+}
 
 const SEED_PROMPT_SQL: &str = r"
     INSERT OR IGNORE INTO system_prompt(singleton, revision, prompt, updated)
@@ -98,9 +104,12 @@ const FACTORY_VOICE_SQL: &str = "SELECT revision, config FROM voice_settings WHE
 const BUDDY_LATEST_SQL: &str = "SELECT latest FROM personas WHERE name = 'Buddy'";
 const BUDDY_FIRST_SQL: &str =
     "SELECT prompt, voice FROM persona_versions WHERE name = 'Buddy' AND version = 1";
+/// Compare-and-set on the factory text read just before, so a save that lands between the
+/// read and this write is kept.
 const ADOPT_BUDDY_SQL: &str = r"
     UPDATE persona_versions SET prompt = ?, voice = ?, reason = ?, updated = ?
-    WHERE name = 'Buddy' AND version = 1";
+    WHERE name = 'Buddy' AND version = 1 AND prompt = ? AND voice = ?
+        AND EXISTS(SELECT 1 FROM personas WHERE name = 'Buddy' AND latest = 1)";
 
 const INSERT_EVENT_SQL: &str = r"
     INSERT INTO events(turn_id, kind, payload) SELECT ?, ?, ?
@@ -123,10 +132,6 @@ const FINISH_SQL: &str = r"
     RETURNING id";
 const TERMINAL_EVENT_SQL: &str = "INSERT INTO events(turn_id, kind, payload) VALUES (?, ?, ?)";
 const DELETE_RUN_SQL: &str = "DELETE FROM runs WHERE turn_id = ?";
-const SEARCH_SQL: &str = r"
-    SELECT t.id, t.status, substr(t.text, 1, 1500), substr(t.answer, 1, 2500)
-    FROM history_search h JOIN turns t ON t.id = h.turn_id
-    WHERE history_search MATCH ? ORDER BY rank LIMIT 6";
 
 const PRIOR_REQUEST_SQL: &str = "SELECT id, text FROM turns WHERE request_id = ?";
 const BUSY_SQL: &str = "SELECT id FROM turns WHERE status IN ('queued', 'running') LIMIT 1";
@@ -145,26 +150,80 @@ const HISTORY_PAGE_SQL: &str = r"
     SELECT id, status, text, answer FROM turns
     WHERE (? = '' OR id < ?) ORDER BY id DESC LIMIT 20";
 
-/// Rebuilds the FTS index once with stable row IDs, so the terminal answer trigger deletes
-/// by key instead of scanning. The index is derived from `turns`; no history is lost.
-async fn migrate_history_search(ctx: &Ctx<Conversation>) -> Result<()> {
-    let migrate = |tx: SqliteTransaction| async move {
-        let done = tx
-            .execute(MIGRATION_DONE_SQL, params(&[HISTORY_ROWIDS_MIGRATION]))
-            .await?;
-        if !done.rows.is_empty() {
-            return Ok(());
+/// Starts, resumes or restarts the history search rebuild, or marks it done. Returns
+/// whether batches remain. Runs in `create`, before any action.
+async fn begin_history_backfill(ctx: &Ctx<Conversation>) -> Result<bool> {
+    let begin = |tx: SqliteTransaction| async move {
+        let rows = tx.execute(history::STATUS_SQL, None).await?.rows;
+        let row = rows.first().context("history status missing")?;
+        let flag = |index| integer(row, index).map(|value| value != 0);
+        let decision = history::Begin::decide([flag(0)?, flag(1)?, flag(2)?, flag(3)?]);
+        match decision {
+            history::Begin::Done | history::Begin::Resume => {}
+            history::Begin::Mark => {
+                tx.execute(history::MARK_SQL, Some(vec![P::Integer(auth::now())]))
+                    .await?;
+            }
+            history::Begin::Reset => {
+                tx.exec(history::RESET_SQL).await?;
+                tx.exec(history::START_SQL).await?;
+            }
+            history::Begin::Start => {
+                tx.exec(history::START_SQL).await?;
+            }
         }
-        tx.exec(include_str!("conversation/history-rowids.sql"))
-            .await?;
-        let mark = vec![
-            P::Text(HISTORY_ROWIDS_MIGRATION.into()),
-            P::Integer(auth::now()),
-        ];
-        tx.execute(MIGRATION_MARK_SQL, Some(mark)).await?;
-        Ok(())
+        Ok(decision.pending())
     };
-    ctx.sql().transaction(migrate, TxOptions::default()).await
+    let options = named("conversation.history_backfill_begin");
+    ctx.sql().transaction(begin, options).await
+}
+
+/// One rebuild batch in one transaction. Returns whether batches remain.
+async fn history_backfill_step(ctx: &Ctx<Conversation>) -> Result<bool> {
+    let step = |tx: SqliteTransaction| async move {
+        let rows = tx.execute(history::STATE_SQL, None).await?.rows;
+        let Some(row) = rows.first() else {
+            return Ok(false);
+        };
+        let floor = P::Integer(integer(row, 0)?);
+        let cursor = string(row, 1)?;
+        if integer(row, 2)? == 0 {
+            let end = tx
+                .execute(history::WINDOW_END_SQL, params(&[&cursor]))
+                .await?
+                .rows;
+            let Some(end) = end.first().map(|row| string(row, 0)).transpose()? else {
+                tx.execute(history::SWEEP_START_SQL, None).await?;
+                return Ok(true);
+            };
+            let window = || vec![P::Text(cursor.clone()), P::Text(end.clone())];
+            let mut unmap = window();
+            unmap.push(floor);
+            tx.execute(history::UNMAP_SQL, Some(unmap)).await?;
+            tx.execute(history::MAP_SQL, Some(window())).await?;
+            tx.execute(history::INDEX_SQL, Some(window())).await?;
+            tx.execute(history::ADVANCE_SQL, params(&[&end])).await?;
+            return Ok(true);
+        }
+        let swept = tx
+            .execute(history::SWEEP_SEARCH_SQL, Some(vec![floor.clone()]))
+            .await?
+            .changes;
+        let orphans = tx
+            .execute(history::SWEEP_ROWS_SQL, Some(vec![floor]))
+            .await?
+            .changes;
+        if swept + orphans > 0 {
+            return Ok(true);
+        }
+        tx.exec(history::FINISH_SQL).await?;
+        tx.execute(history::MARK_SQL, Some(vec![P::Integer(auth::now())]))
+            .await?;
+        Ok(false)
+    };
+    ctx.sql()
+        .transaction(step, named("conversation.history_backfill"))
+        .await
 }
 
 /// Seeds a singleton settings row and its first version; existing rows are kept.
@@ -180,7 +239,9 @@ async fn seed_settings(
         tx.execute(versions, None).await?;
         Ok(())
     };
-    ctx.sql().transaction(seed, TxOptions::default()).await
+    ctx.sql()
+        .transaction(seed, named("conversation.seed_settings"))
+        .await
 }
 
 /// Seeds the Buddy persona at version 1 with the default prompt and voice.
@@ -195,7 +256,9 @@ async fn seed_buddy(ctx: &Ctx<Conversation>, voice: String) -> Result<()> {
         tx.execute(SEED_BUDDY_VERSION_SQL, Some(version)).await?;
         Ok(())
     };
-    ctx.sql().transaction(seed, TxOptions::default()).await
+    ctx.sql()
+        .transaction(seed, named("conversation.seed_buddy"))
+        .await
 }
 
 /// Fails a settings write made by a tool once its turn has stopped running.
@@ -224,6 +287,32 @@ async fn trim_versions(tx: &SqliteTransaction, sql: &str, revision: i64) -> Resu
     Ok(())
 }
 
+/// Runs the history search rebuild one batch at a time beside turns and actions. A stop
+/// between batches loses nothing: the next start resumes from the cursor.
+fn start_history_backfill(ctx: &Ctx<Conversation>) {
+    let task_ctx = ctx.clone();
+    ctx.register_task(async move {
+        let _awake = task_ctx.keep_awake_region();
+        let mut batches = 0_u32;
+        while !task_ctx.aborted() {
+            match history_backfill_step(&task_ctx).await {
+                Ok(true) => batches += 1,
+                Ok(false) => {
+                    tracing::info!(batches, "history search rebuild finished");
+                    return;
+                }
+                Err(error) => {
+                    // The next start resumes from the committed cursor.
+                    tracing::warn!(batches, %error, "history search rebuild paused");
+                    return;
+                }
+            }
+            // Queued actions and turn writes run between batches.
+            tokio::task::yield_now().await;
+        }
+    });
+}
+
 /// Clears the drain flag when dropped, including during a panic, then runs `recheck`.
 struct DrainGuard<'a, F: FnOnce()> {
     draining: &'a AtomicBool,
@@ -249,7 +338,7 @@ impl Actor for Conversation {
     async fn create(ctx: &Ctx<Self>) -> Result<Self> {
         let signing_key = crate::config::signing_key()?;
         ctx.sql().exec(include_str!("conversation.sql")).await?;
-        migrate_history_search(ctx).await?;
+        let history_backfill = begin_history_backfill(ctx).await?;
         let prompt = include_str!("prompts/persona.txt").to_owned();
         seed_settings(ctx, SEED_PROMPT_SQL, SEED_PROMPT_VERSION_SQL, prompt).await?;
         let default_voice = serde_json::to_string(&crate::voice::VoiceConfig::default())?;
@@ -260,6 +349,7 @@ impl Actor for Conversation {
         seed_settings(ctx, SEED_CONTEXT_SQL, SEED_CONTEXT_VERSION_SQL, context).await?;
         Ok(Self {
             signing_key,
+            history_backfill,
             draining: AtomicBool::new(false),
             model: Arc::new(Model::from_env()?),
             last_authorized: tokio::sync::Mutex::new(None),
@@ -280,6 +370,9 @@ impl Actor for Conversation {
                 .await?;
         }
         self.start_drain(&ctx);
+        if self.history_backfill {
+            start_history_backfill(&ctx);
+        }
         Ok(())
     }
     async fn on_before_connect(self: Arc<Self>, ctx: Ctx<Self>, p: &Connection) -> Result<()> {
@@ -334,7 +427,8 @@ impl Conversation {
             return Ok(());
         };
         let prompt = string(row, 0)?;
-        let voice: crate::voice::VoiceConfig = serde_json::from_str(&string(row, 1)?)?;
+        let stored_voice = string(row, 1)?;
+        let voice: crate::voice::VoiceConfig = serde_json::from_str(&stored_voice)?;
         if prompt == factory_prompt && voice.is_factory_v1() {
             let encoded = serde_json::to_string(&crate::voice::VoiceConfig::default())?;
             let values = vec![
@@ -342,6 +436,8 @@ impl Conversation {
                 P::Text(encoded),
                 P::Text("J.P. companion on Will".into()),
                 P::Integer(auth::now()),
+                P::Text(prompt),
+                P::Text(stored_voice),
             ];
             ctx.sql().execute(ADOPT_BUDDY_SQL, Some(values)).await?;
         }
@@ -581,7 +677,10 @@ impl Conversation {
             tx.execute(DELETE_RUN_SQL, params(&[id])).await?;
             Ok(inserted.last_insert_row_id)
         };
-        let changed = ctx.sql().transaction(finish, TxOptions::default()).await?;
+        let changed = ctx
+            .sql()
+            .transaction(finish, named("conversation.finish_turn"))
+            .await?;
         let Some(sequence) = changed else {
             return Ok(());
         };
@@ -612,7 +711,11 @@ impl Conversation {
         );
         let escaped = query.replace('"', "\"\"");
         let phrase = format!("\"{escaped}\"");
-        let rows = ctx.sql().query(SEARCH_SQL, params(&[&phrase])).await?.rows;
+        let rows = ctx
+            .sql()
+            .query(history::SEARCH_SQL, params(&[&phrase]))
+            .await?
+            .rows;
         let hits = rows
             .into_iter()
             .map(|r| {
@@ -680,7 +783,9 @@ impl Conversation {
             tx.execute(INSERT_TURN_SQL, Some(turn)).await?;
             Ok(json!({ "turn_id": id, "duplicate": false }))
         };
-        ctx.sql().transaction(submit, TxOptions::default()).await
+        ctx.sql()
+            .transaction(submit, named("conversation.submit"))
+            .await
     }
 
     async fn replay(&self, ctx: &Ctx<Self>, after: i64) -> Result<Value> {
@@ -715,7 +820,9 @@ impl Conversation {
             let last = integer(rows.first().context("sequence missing")?, 0)?;
             Ok(json!({ "turns": turns, "last_sequence": last }))
         };
-        ctx.sql().transaction(read, TxOptions::default()).await
+        ctx.sql()
+            .transaction(read, named("conversation.snapshot"))
+            .await
     }
 
     async fn spoken_answer(&self, ctx: &Ctx<Self>, turn_id: String) -> Result<Value> {
@@ -843,6 +950,41 @@ mod tests {
         assert!(unwound.is_err());
         assert!(!draining.load(Ordering::Acquire));
         assert!(rechecked.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn factory_adoption_keeps_a_persona_saved_after_the_read() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(include_str!("conversation.sql")).unwrap();
+        db.execute(SEED_BUDDY_SQL, []).unwrap();
+        let seed = rusqlite::params!["factory prompt", "factory voice", 0];
+        db.execute(SEED_BUDDY_VERSION_SQL, seed).unwrap();
+        let adopt = |old_prompt: &str| {
+            let values =
+                rusqlite::params!["companion", "will", "adopt", 1, old_prompt, "factory voice"];
+            db.execute(ADOPT_BUDDY_SQL, values).unwrap()
+        };
+        // A save landed after the factory text was read: the stale adoption writes nothing.
+        db.execute(
+            "UPDATE persona_versions SET prompt='saved by owner' WHERE name='Buddy'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(adopt("factory prompt"), 0);
+        db.execute(
+            "UPDATE persona_versions SET prompt='factory prompt' WHERE name='Buddy'",
+            [],
+        )
+        .unwrap();
+        // A newer version made the seed inactive: also untouched.
+        db.execute("UPDATE personas SET latest=2 WHERE name='Buddy'", [])
+            .unwrap();
+        assert_eq!(adopt("factory prompt"), 0);
+        db.execute("UPDATE personas SET latest=1 WHERE name='Buddy'", [])
+            .unwrap();
+        assert_eq!(adopt("factory prompt"), 1);
+        let prompt: String = db.query_row(BUDDY_FIRST_SQL, [], |r| r.get(0)).unwrap();
+        assert_eq!(prompt, "companion");
     }
 
     #[test]

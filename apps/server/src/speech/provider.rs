@@ -3,7 +3,7 @@ use super::pipeline::{Spoken, Synthesis, Synthesizer};
 use anyhow::{Context, Result, bail, ensure};
 use axum::http::header;
 use futures_util::StreamExt;
-use robot_buddy::{audio::PcmFormat, voice::VoiceConfig};
+use robot_buddy::{audio::PcmFormat, auth::Secret, voice::VoiceConfig};
 use std::time::Duration;
 
 pub const DEFAULT_BASE_URL: &str = "https://openrouter.ai/api/v1";
@@ -31,13 +31,13 @@ pub fn base_url(raw: Option<&str>) -> Result<String> {
 
 pub struct OpenRouter {
     http: reqwest::Client,
-    key: String,
+    key: Secret<String>,
     model: String,
     endpoint: String,
 }
 
 impl OpenRouter {
-    pub fn new(key: String, model: String, base_url: &str) -> Result<Self> {
+    pub fn new(key: Secret<String>, model: String, base_url: &str) -> Result<Self> {
         Ok(Self {
             http: reqwest::Client::builder()
                 .connect_timeout(Duration::from_secs(10))
@@ -58,7 +58,7 @@ impl Synthesizer for OpenRouter {
         let response = self
             .http
             .post(&self.endpoint)
-            .bearer_auth(&self.key)
+            .bearer_auth(self.key.expose())
             .json(&payload)
             .send()
             .await?;

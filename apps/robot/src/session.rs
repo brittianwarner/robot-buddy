@@ -285,9 +285,9 @@ async fn registration(
         return Ok(owner.is_some_and(|o| !o.is_empty()));
     }
     let now = auth::now();
-    let claim_lapsed = snapshot["pending_owner"].as_str() == Some("")
-        || snapshot["claim_expires"].as_i64().unwrap_or(0) <= now;
-    if now >= cache.claim_expires && claim_lapsed {
+    let actor_expires = snapshot["claim_expires"].as_i64().unwrap_or(0);
+    let claim_lapsed = snapshot["pending_owner"].as_str() == Some("") || actor_expires <= now;
+    if now >= shown_claim_expiry(cache.claim_expires, actor_expires) && claim_lapsed {
         let claim = timeout(CALL_DEADLINE, send(bot, &call(Command::BeginClaim)))
             .await
             .context("claim timed out")??;
@@ -316,9 +316,27 @@ async fn registration(
     Ok(false)
 }
 
+/// The expiry of the claim the screen shows, as far as the bot still knows it. The bot
+/// clears a claim after five wrong codes (expiry 0), and a different expiry means the
+/// cached QR is not the bot's claim: both read as expired, so a new claim starts at once.
+fn shown_claim_expiry(cached: i64, actor: i64) -> i64 {
+    if cached == actor { cached } else { 0 }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_cleared_claim_is_replaced_at_once() {
+        // The claim on screen is still live in the bot.
+        assert_eq!(shown_claim_expiry(1_000, 1_000), 1_000);
+        // Five wrong codes cleared it; the cached QR is dead.
+        assert_eq!(shown_claim_expiry(1_000, 0), 0);
+        // The bot holds a claim this cache never saw.
+        assert_eq!(shown_claim_expiry(1_000, 2_000), 0);
+        assert_eq!(shown_claim_expiry(0, 0), 0);
+    }
 
     #[test]
     fn calls_keep_the_typed_wire_shape() {

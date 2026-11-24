@@ -101,7 +101,7 @@ impl App {
             .await
     }
     async fn from_env() -> Result<Self> {
-        let key = auth::signing_key_from_env()?;
+        let key = robot_buddy::config::signing_key()?;
         let engine = env("RIVET_ENDPOINT")?;
         let admin = Secret::new(env("RIVET_TOKEN")?);
         ensure!(

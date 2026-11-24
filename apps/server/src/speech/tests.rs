@@ -10,7 +10,7 @@ use super::{
 use anyhow::{Result, bail};
 use axum::body::Bytes;
 use futures_util::{StreamExt, stream};
-use robot_buddy::audio::PcmFormat;
+use robot_buddy::{audio::PcmFormat, auth::Secret};
 use serde_json::json;
 use std::{
     pin::pin,
@@ -556,7 +556,12 @@ async fn provider_error_body_is_bounded_and_not_echoed() {
         voice: voice(),
     };
     let model = robot_buddy::voice::SPEECH_MODEL.to_owned();
-    let bad = OpenRouter::new("test-key".into(), model.clone(), &format!("{base}/bad")).unwrap();
+    let bad = OpenRouter::new(
+        Secret::new("test-key".into()),
+        model.clone(),
+        &format!("{base}/bad"),
+    )
+    .unwrap();
     let begun = Instant::now();
     let error = match bad.synthesize(&spoken).await {
         Ok(_) => panic!("rejected request must fail"),
@@ -568,7 +573,7 @@ async fn provider_error_body_is_bounded_and_not_echoed() {
         "{error}"
     );
 
-    let ok = OpenRouter::new("test-key".into(), model, &format!("{base}/ok")).unwrap();
+    let ok = OpenRouter::new(Secret::new("test-key".into()), model, &format!("{base}/ok")).unwrap();
     let synthesis = ok.synthesize(&spoken).await.unwrap();
     assert_eq!(synthesis.format.sample_rate, 24_000);
     let bytes: usize = synthesis

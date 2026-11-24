@@ -54,7 +54,46 @@ Local in-memory SQLite (rusqlite, bundled), with the real schema files. `v1` is 
 | Latest 12 completed turns | [6.79 7.67 8.66] ms | [10.8 13.4 16.3] µs |
 | Finish a turn (answer trigger) | [1.74 2.05 2.42] ms | [37.0 44.9 54.6] µs |
 
-`tests/history_sql.rs` checks the plans. The recent-turns read searches `turns_completed`. The trigger's delete plans as `VIRTUAL TABLE INDEX 0:=` (rowid lookup), where v1 planned `INDEX 0:` (full scan).
+`tests/history_sql.rs` checks the plans. The recent-turns read searches `turns_completed`. The trigger's keyed row access plans as `VIRTUAL TABLE INDEX 0:=` (rowid lookup), where v1 planned `INDEX 0:` (full scan).
+
+## Rebuild batches at 5,000 turns
+
+`cargo test -p robot-buddy --test history_sql -- --nocapture five_thousand` prints this. It rebuilds a version 1 database with 5,000 turns on a WAL file with automatic checkpoints off. Pages are the WAL frames one commit wrote, after a truncating checkpoint.
+
+| Measure | Value |
+|---|---|
+| Batches (index, then sweep) | 42 |
+| Largest batch | 84 pages |
+| Start transaction | 59 pages |
+| One-shot rebuild it replaced | 260 pages in one transaction |
+| Rivet limit per transaction | 32,768 pages |
+
+Batch size depends on the batch, not on history. The one-shot rebuild grows with every turn stored.
+
+## SQL per direct spoken turn
+
+Counted from the code, not measured: profiling is not compiled into this build (see "SQLite practices" in `docs/architecture/backend.md`). The path is submit, drain, `generate`, one direct model round, `finish_turn`. Counts are statements on the conversation actor's SQLite. Each auto-commit statement is its own implicit transaction. Trigger statements run inside their statement and cost no extra round trip.
+
+| Step | Statements | Transaction |
+|---|---|---|
+| `submit`: prior request, busy check, insert turn (+2 trigger statements) | 3 | `conversation.submit` |
+| Drain claims the turn | 1 | auto-commit |
+| `turn.started` event | 1 | auto-commit |
+| Saved run, persona prompt, recent 12 turns | 3 | auto-commit each |
+| `model_pending` checkpoint, context config, completed effects | 3 | auto-commit each |
+| Text already emitted | 1 | auto-commit |
+| `begin_speech`: speech settings, running check, pin voice | 3 | `conversation.begin_speech` |
+| Each stream commit: text delta, plus chunk and `speech.ready` per chunk | 1 + 2 per chunk | `conversation.commit_stream` |
+| `finish_turn`: finish (+2 trigger statements), terminal event, delete run | 3 | `conversation.finish_turn` |
+| Drain finds no next turn; recheck for queued turns | 2 | auto-commit each |
+
+Total for a turn with S stream commits and C speech chunks:
+
+- Statements: 20 + S + 2C.
+- Named transactions: 3 + S.
+- Auto-commit statements: 11.
+
+Stream commits happen at each sentence boundary, on each 100 ms tick with uncommitted text, and once at the end. With the integration mock (680 ms, 4 chunks), S is at most about 12, so a turn is about 40 statements and 15 named transactions. Memory search adds 2 reads on the memory actor's SQLite. Live access checks call the bot actor at most once per second.
 
 ## Turn latency (integration)
 

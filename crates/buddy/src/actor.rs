@@ -1,6 +1,7 @@
 //! Bot identity, ownership and configuration. Conversation and memory have separate actors.
 use crate::{
     auth,
+    db::{bot_key, params, string},
     protocol::{Call, Command, Connection, OutputEvent},
 };
 use anyhow::{Context, Result, bail, ensure};
@@ -74,26 +75,6 @@ async fn migrate(ctx: &Ctx<Bot>) -> Result<()> {
     }
     Ok(())
 }
-fn string(row: &[V], index: usize) -> Result<String> {
-    match row.get(index) {
-        Some(V::Text(v)) => Ok(v.clone()),
-        _ => bail!("invalid stored text"),
-    }
-}
-#[allow(
-    clippy::unnecessary_wraps,
-    reason = "rivetkit SQL takes Option<Vec<P>>"
-)]
-fn params(values: &[&str]) -> Option<Vec<P>> {
-    Some(values.iter().map(|v| P::Text((*v).to_owned())).collect())
-}
-fn bot_key(ctx: &Ctx<Bot>) -> Result<String> {
-    match ctx.key().first() {
-        Some(rivetkit::ActorKeySegment::String(s)) => Ok(s.clone()),
-        _ => bail!("bot requires a string key"),
-    }
-}
-
 #[async_trait]
 impl Actor for Bot {
     type Input = ();
@@ -102,7 +83,7 @@ impl Actor for Bot {
     type ConnParams = Connection;
     type Action = action::Raw;
     async fn create(ctx: &Ctx<Self>) -> Result<Self> {
-        let signing_key = auth::signing_key_from_env()?;
+        let signing_key = crate::config::signing_key()?;
         ctx.sql().exec(include_str!("schema.sql")).await?;
         migrate(ctx).await?;
         Ok(Self { signing_key })

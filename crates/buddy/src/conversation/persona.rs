@@ -1,8 +1,7 @@
 //! The conversation owns its bounded, versioned harness configuration.
 use super::{
-    Context, Conversation, Ctx, P, Receipt, Result, SqliteDbExt, SqliteTransaction, TxOptions,
-    Value, auth, ensure, ensure_receipt_running, integer, json, string, trim_versions,
-    write_receipt,
+    Context, Conversation, Ctx, P, Receipt, Result, SqliteDbExt, SqliteTransaction, Value, auth,
+    ensure, ensure_receipt_running, integer, json, named, string, trim_versions, write_receipt,
 };
 
 const PROMPT_SQL: &str = "SELECT revision, prompt, updated FROM system_prompt WHERE singleton = 1";
@@ -70,7 +69,9 @@ impl Conversation {
             write_receipt(&tx, receipt, &result).await?;
             Ok(result)
         };
-        ctx.sql().transaction(write, TxOptions::default()).await
+        ctx.sql()
+            .transaction(write, named("conversation.set_persona"))
+            .await
     }
 
     pub(super) async fn persona_history(&self, ctx: &Ctx<Self>) -> Result<Value> {

@@ -109,5 +109,36 @@ If the stream stalls for 200 ms on an undecided sentence end, the harness decide
 
 ## History search storage
 
-`history_rows` maps each turn to a stable FTS row ID. The answer trigger replaces a turn's search row by that key. Version 1 deleted by the unindexed `turn_id` column, a full scan of the index for every finished turn. A one-time rebuild, recorded in `schema_migrations`, derives the index from `turns` again. The schema script is idempotent and no turn data is changed.
+`history_rows` maps each turn to a stable FTS row ID. The insert and answer triggers write a turn's search row at that ID with `INSERT OR REPLACE`, a keyed write. Version 1 deleted by the unindexed `turn_id` column, a full scan of the index for every finished turn. The schema script is idempotent and never changes `turns`.
 
+A version 1 database is rebuilt in batches by `conversation/history.rs`:
+
+1. `create` runs one start transaction. It drops the version 1 triggers, records a floor (the highest FTS row ID in use) in `history_backfill` and places a sentinel mapping at floor + 1, so every new row ID lands above the floor.
+2. A background task started in `on_start` runs one transaction per batch of 256 turns, in turn ID order. Each batch maps its turns above the floor, writes their search rows and advances the cursor.
+3. When every turn is mapped, sweep batches delete 256 leftover rows at or below the floor per transaction. The last one removes the progress row and the sentinel and writes the `history_search_rowids` marker.
+
+A stop between or inside batches loses nothing. An uncommitted batch rolls back, and the next start resumes from the committed cursor. Replaying a committed batch writes nothing.
+
+Search stays exact during the rebuild. It reads a turn's mapped row, or its version 1 row below the floor while the turn is still unmapped, so each turn appears once. A turn that finishes mid-rebuild is mapped by its trigger at once.
+
+Rolling deploys. Version 1 code that opens the database again recreates its triggers. Its writes still succeed, since the current triggers use `INSERT OR IGNORE` and `INSERT OR REPLACE`. Its own search can show a turn twice: once for the version 1 row and once for the mapped row. The current search hides rows written by version 1. The next start of the current code finds the version 1 triggers and restarts the rebuild above a new floor, which sweeps those rows too.
+
+At 5,000 turns, `tests/history_sql.rs` measured 42 batches. The largest wrote 84 pages, against Rivet's limit of 32,768 pages per transaction. The one-shot rebuild it replaced wrote 260 pages at that size, and its size grows with history. Method: a WAL file with automatic checkpoints off. The test truncates the WAL before each batch, and after the commit counts the WAL frames, one per 4 KiB page written.
+
+## SQLite practices
+
+Rivet references: [SQLite](https://rivet.dev/actors/docs/sqlite/), [Limits](https://rivet.dev/actors/docs/limits/), [SQLite profiling](https://rivet.dev/actors/docs/sqlite-profiling/).
+
+- Every transaction has a static name, such as `conversation.finish_turn` or `conversation.history_backfill`. Names appear in Rivet errors and profiles.
+- Transaction callbacks await only the transaction handle. Actor calls, provider requests and event delivery happen before or after the commit.
+- A read followed by a write either runs in one transaction or is one guarded statement. Examples are the claim failure counter, the facts cap, settings revisions and the factory persona adoption.
+- Work that grows with history runs in bounded batches, never in one transaction. Limits: 32,768 pages (128 MiB) per transaction, a 60 s default timeout, and a queue of 128 transactions.
+- Schema changes run in `create`, before any action. The claim failures column is added only after a check that it is missing, and the check runs again if the add fails.
+
+Profiling needs rivetkit's `sqlite-local` feature. This build uses the default `sqlite` feature (`sqlite-remote`), so `RIVETKIT_SQLITE_PROFILING` and the `rivet_rivetkit_sqlite_*` metrics do nothing here. To profile locally:
+
+1. Build `rivetkit` with `default-features = false, features = ["sqlite-local"]`.
+2. Set `RIVETKIT_SQLITE_PROFILING='{}'`. An empty object profiles every query. `filterQueries` and `filterQueryFingerprints` narrow it.
+3. Read the "sampled SQLite operation profile" and "sqlite fingerprint catalog" log lines, and the `rivet_rivetkit_sqlite_*` Prometheus series.
+
+The fingerprint catalog keeps 512 statements but only 8 transactions per process. Profile one actor type at a time, through `ActorConfig.sqlite_profiling`. Until then, `docs/research/benchmarks.md` counts statements per turn from the code.

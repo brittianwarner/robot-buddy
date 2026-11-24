@@ -6,7 +6,6 @@ use std::hint::black_box;
 
 const SCHEMA: &str = include_str!("../src/conversation.sql");
 const SCHEMA_V1: &str = include_str!("../tests/fixtures/conversation-v1.sql");
-const REBUILD: &str = include_str!("../src/conversation/history-rowids.sql");
 /// Copy of the prompt-context read in `conversation/harness.rs`.
 const RECENT_TURNS: &str = "SELECT text,answer FROM (SELECT id,substr(text,1,4000) AS text,\
     substr(answer,1,6000) AS answer FROM turns WHERE status='completed' \
@@ -15,11 +14,9 @@ const TURNS: usize = 10_000;
 
 fn database(current: bool) -> Connection {
     let db = Connection::open_in_memory().expect("open");
+    // A fresh current database needs no rebuild: its triggers map every turn.
     db.execute_batch(if current { SCHEMA } else { SCHEMA_V1 })
         .expect("schema");
-    if current {
-        db.execute_batch(REBUILD).expect("rebuild");
-    }
     db.execute_batch("BEGIN").expect("begin");
     for i in 0..TURNS {
         let id = format!("turn-{i:06}");

@@ -10,7 +10,10 @@ mod source;
 #[cfg(test)]
 mod tests;
 
-use super::{App, Web};
+use super::{
+    App,
+    web::{Kind, Reject, Web, require},
+};
 use admission::Admission;
 use anyhow::{Context, Result, ensure};
 use axum::{
@@ -60,6 +63,19 @@ impl Speech {
             limits: Limits::default(),
         })))
     }
+    /// A configured service with no stream capacity, for status tests. Never dials out.
+    #[cfg(test)]
+    pub fn without_capacity() -> Arc<Self> {
+        let model = robot_buddy::voice::SPEECH_MODEL.to_owned();
+        let key = auth::Secret::new("test-key".to_owned());
+        Arc::new(Self {
+            synth: Arc::new(OpenRouter::new(key, model.clone(), "http://127.0.0.1:9").unwrap()),
+            model,
+            admission: Admission::new(0),
+            upstream: Arc::new(Semaphore::new(1)),
+            limits: Limits::default(),
+        })
+    }
 }
 
 fn non_empty_env(name: &str) -> Option<String> {
@@ -68,9 +84,9 @@ fn non_empty_env(name: &str) -> Option<String> {
 
 /// The `OpenRouter` inference key is reused only for the default `OpenRouter` host, so a
 /// custom `TTS_BASE_URL` never receives it implicitly.
-fn speech_key(custom_base: bool) -> Result<String> {
+fn speech_key(custom_base: bool) -> Result<auth::Secret<String>> {
     if let Some(key) = non_empty_env("TTS_API_KEY") {
-        return Ok(key);
+        return Ok(auth::Secret::new(key));
     }
     ensure!(!custom_base, "TTS_API_KEY required with TTS_BASE_URL");
     let provider = std::env::var("AI_PROVIDER").unwrap_or_else(|_| "openrouter".into());
@@ -78,9 +94,13 @@ fn speech_key(custom_base: bool) -> Result<String> {
         provider == "openrouter",
         "TTS_API_KEY or OpenRouter AI_API_KEY required"
     );
-    non_empty_env("AI_API_KEY").context("TTS_API_KEY or OpenRouter AI_API_KEY required")
+    non_empty_env("AI_API_KEY")
+        .map(auth::Secret::new)
+        .context("TTS_API_KEY or OpenRouter AI_API_KEY required")
 }
 
+/// `POST /v1/speech`. A bad or missing session is 401, unconfigured speech 503, a full
+/// stream cap 429 and anything else 400.
 pub async fn device(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
@@ -88,23 +108,30 @@ pub async fn device(
 ) -> Web<Response> {
     let bearer = headers
         .get(header::AUTHORIZATION)
-        .context("session required")?
-        .to_str()?
-        .strip_prefix("Bearer ")
-        .context("bearer session required")?;
-    let session: auth::Session = auth::verify(&app.key, "session", bearer)?;
-    session.validate(&session.bot_id, Some("device"))?;
-    Ok(stream(&app, &session.bot_id, bearer, body).await?)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .reject(Kind::Unauthorized)?;
+    let session: auth::Session =
+        auth::verify(app.key.expose(), "session", bearer).reject(Kind::Unauthorized)?;
+    session
+        .validate(&session.bot_id, Some("device"))
+        .reject(Kind::Unauthorized)?;
+    stream(&app, &session.bot_id, bearer, body).await
 }
 
 /// Starts one speech stream. The newest request for a bot replaces any older stream.
-pub async fn stream(app: &App, bot: &str, session: &str, body: SpeechRequest) -> Result<Response> {
-    ensure!(
+/// Unconfigured speech is 503 and a full stream cap 429; every other failure is 400.
+pub async fn stream(app: &App, bot: &str, session: &str, body: SpeechRequest) -> Web<Response> {
+    require(
         !body.turn_id.is_empty() && body.turn_id.len() <= 128,
-        "invalid turn id"
-    );
-    let service = app.speech.as_ref().context("speech is not configured")?;
-    let lease = service.admission.lease(bot).await?;
+        Kind::BadRequest,
+    )?;
+    let service = app.speech.as_ref().reject(Kind::Unavailable)?;
+    let lease = service
+        .admission
+        .lease(bot)
+        .await
+        .reject(Kind::TooManyRequests)?;
     let source = ActorSource::open(&app.client, bot, session, &body.turn_id, body.stream).await?;
     let (head, audio) = pipeline::spawn(Job {
         source,
@@ -114,7 +141,11 @@ pub async fn stream(app: &App, bot: &str, session: &str, body: SpeechRequest) ->
         limits: service.limits,
     });
     let head = head.await.context("speech stream stopped")??;
-    response(&head, &body.turn_id, Body::from_stream(audio.into_stream()))
+    Ok(response(
+        &head,
+        &body.turn_id,
+        Body::from_stream(audio.into_stream()),
+    )?)
 }
 
 fn response(head: &Head, turn_id: &str, body: Body) -> Result<Response> {

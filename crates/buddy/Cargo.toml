@@ -32,6 +32,8 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 uuid.workspace = true
+# Secret buffers are cleared on drop; compiled for the robot too.
+zeroize = "1"
 async-trait = { workspace = true, optional = true }
 chrono = { version = "0.4", optional = true }
 chrono-tz = { version = "0.10", optional = true }
@@ -55,6 +57,10 @@ workspace = true
 
 [[test]]
 name = "actors"
+required-features = ["server"]
+
+[[test]]
+name = "history_sql"
 required-features = ["server"]
 
 [[bench]]

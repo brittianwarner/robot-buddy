@@ -44,7 +44,7 @@ Residual risk: a person who opens an attacker's claim link and chooses to sign i
 |---|---|---|
 | Certificates are issuer-signed; proofs sign a short-lived challenge; the Bot actor consumes each nonce once. | Forged devices, replayed proofs. | `auth::tests::certificate_and_proof_bind_device_key`, integration suite |
 | Signing keys must be at least 32 bytes, in `sign`, `verify`, `Bot::create` and `Memory::create`. | A short key that makes every session forgeable. | `auth::tests::short_keys_are_rejected_for_sign_and_verify` |
-| Signing keys, the engine token, the lab token, the OIDC client secret and the device private key are `Secret<T>`: `Debug` prints `[redacted]` and bytes are wiped on drop. | Secrets in logs, panics and debug output. | `auth::tests::secrets_are_redacted_and_round_trip_identity_files` |
+| Signing keys, the engine token, the lab token, the OIDC client secret and the device private key are `Secret<T>`: `Debug` prints `[redacted]` and the buffer is zeroized on drop (`zeroize`). Copies a library makes, such as Rig's API key, are outside this guarantee. | Secrets in logs, panics and debug output. | `auth::tests::secrets_are_redacted_and_round_trip_identity_files` |
 
 ### HTTP surface
 
@@ -83,7 +83,7 @@ Direct Rivet callers skip the server's body limit, so actors check their own inp
 | The engine config (admin token, S3 keys) is written to `$XDG_RUNTIME_DIR` or the temp directory, never `/data`. The file is new, `0600`, uniquely named and removed on shutdown. A config left in `/data` by an older release is deleted at start. | Secrets in volume backups. | `http_tests::engine_config_is_private_ephemeral_and_removed` |
 | The engine stops with a direct `SIGTERM`; the image no longer ships `procps`. | Spawning `kill(1)`; a smaller image. | build only |
 
-Mount a `tmpfs` on `/tmp` in production so the engine config never touches disk.
+`compose.yaml` and `compose.local.yaml` mount a `tmpfs` on `/tmp`, so the engine config never touches disk. Do the same in any other production runtime.
 
 ### Robot local pages
 

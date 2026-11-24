@@ -9,6 +9,9 @@ services:
       - "127.0.0.1:17420:6420"
     volumes:
       - buddy-local-data:/data
+    # The engine config (admin token, S3 keys) is written here; tmpfs keeps it off disk.
+    tmpfs:
+      - /tmp:mode=1777,nosuid,nodev
     restart: unless-stopped
     stop_grace_period: 60s
 volumes:

@@ -404,3 +404,41 @@ fn engine_config_is_private_ephemeral_and_removed() -> Result<()> {
     assert!(!runtime_dir().starts_with("/data"));
     Ok(())
 }
+
+fn speech_request(bearer: Option<&str>) -> Request<Body> {
+    let mut request = Request::post("/v1/speech").header(header::CONTENT_TYPE, "application/json");
+    if let Some(bearer) = bearer {
+        request = request.header(header::AUTHORIZATION, format!("Bearer {bearer}"));
+    }
+    request.body(Body::from(r#"{"turn_id":"turn-1"}"#)).unwrap()
+}
+
+#[tokio::test]
+async fn speech_statuses_name_the_failure() {
+    let app = app(false, false);
+    let router = service(&app, [192, 0, 2, 1]);
+    for bearer in [None, Some("not-a-session")] {
+        let reply = send(&router, speech_request(bearer)).await;
+        assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+    }
+    let admin = app.session("bot-1", "admin").unwrap();
+    let reply = send(&router, speech_request(Some(&admin))).await;
+    assert_eq!(
+        reply.status,
+        StatusCode::UNAUTHORIZED,
+        "device role required"
+    );
+    let device = app.session("bot-1", "device").unwrap();
+    let reply = send(&router, speech_request(Some(&device))).await;
+    assert_eq!(reply.status, StatusCode::SERVICE_UNAVAILABLE);
+
+    // The router holds the only other reference to the app.
+    drop(router);
+    let mut full = Arc::into_inner(app).unwrap();
+    full.speech = Some(speech::Speech::without_capacity());
+    let full = Arc::new(full);
+    let router = service(&full, [192, 0, 2, 1]);
+    let device = full.session("bot-1", "device").unwrap();
+    let reply = send(&router, speech_request(Some(&device))).await;
+    assert_eq!(reply.status, StatusCode::TOO_MANY_REQUESTS);
+}

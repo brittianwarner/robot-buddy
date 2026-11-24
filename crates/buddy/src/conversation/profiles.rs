@@ -1,7 +1,7 @@
 //! Bounded persona library; selecting a profile updates prompt and voice atomically.
 use super::{
-    Context, Conversation, Ctx, P, Receipt, Result, SqliteDbExt, SqliteTransaction, TxOptions, V,
-    Value, auth, ensure, ensure_receipt_running, integer, json, params,
+    Context, Conversation, Ctx, P, Receipt, Result, SqliteDbExt, SqliteTransaction, V, Value, auth,
+    ensure, ensure_receipt_running, integer, json, named, params,
     persona::{INSERT_PROMPT_VERSION_SQL, TRIM_PROMPT_VERSIONS_SQL, UPDATE_PROMPT_SQL},
     string, trim_versions,
     voice::{INSERT_VOICE_VERSION_SQL, TRIM_VOICE_VERSIONS_SQL, UPDATE_VOICE_SQL},
@@ -97,7 +97,9 @@ impl Conversation {
                 "versions": versions,
             }))
         };
-        ctx.sql().transaction(read, TxOptions::default()).await
+        ctx.sql()
+            .transaction(read, named("conversation.get_persona"))
+            .await
     }
 
     pub(super) async fn save_profile(
@@ -150,7 +152,9 @@ impl Conversation {
             write_receipt(&tx, receipt, &result).await?;
             Ok(result)
         };
-        ctx.sql().transaction(write, TxOptions::default()).await
+        ctx.sql()
+            .transaction(write, named("conversation.save_persona"))
+            .await
     }
 
     pub(super) async fn activate_profile(
@@ -221,6 +225,8 @@ impl Conversation {
             write_receipt(&tx, receipt, &result).await?;
             Ok(result)
         };
-        ctx.sql().transaction(write, TxOptions::default()).await
+        ctx.sql()
+            .transaction(write, named("conversation.activate_persona"))
+            .await
     }
 }

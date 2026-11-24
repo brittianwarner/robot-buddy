@@ -1,12 +1,13 @@
 //! Bot-scoped durable facts, independently addressable from conversation history.
 use crate::{
     auth,
+    db::{bot_key, string},
     protocol::{Call, Command, Connection},
 };
 use anyhow::{Result, bail, ensure};
 use async_trait::async_trait;
 use rivetkit::TypedClientExt;
-use rivetkit::{BindParam as P, ColumnValue as V, action, prelude::*};
+use rivetkit::{BindParam as P, action, prelude::*};
 use serde_json::{Value, json};
 use std::sync::Arc;
 pub struct Memory {
@@ -43,18 +44,6 @@ fn search_terms(query: &str) -> String {
         .collect::<Vec<_>>()
         .join(" OR ")
 }
-fn key(ctx: &Ctx<Memory>) -> Result<String> {
-    match ctx.key().first() {
-        Some(rivetkit::ActorKeySegment::String(s)) => Ok(s.clone()),
-        _ => bail!("memory requires bot key"),
-    }
-}
-fn text(row: &[V], i: usize) -> Result<String> {
-    match row.get(i) {
-        Some(V::Text(s)) => Ok(s.clone()),
-        _ => bail!("invalid memory row"),
-    }
-}
 #[async_trait]
 impl Actor for Memory {
     type Input = ();
@@ -65,7 +54,7 @@ impl Actor for Memory {
     async fn create(ctx: &Ctx<Self>) -> Result<Self> {
         ctx.sql().exec("CREATE TABLE IF NOT EXISTS facts(key TEXT PRIMARY KEY,value TEXT NOT NULL,updated INTEGER NOT NULL); CREATE VIRTUAL TABLE IF NOT EXISTS facts_search USING fts5(key,value); CREATE TRIGGER IF NOT EXISTS facts_insert AFTER INSERT ON facts BEGIN INSERT INTO facts_search(key,value) VALUES(new.key,new.value); END; CREATE TRIGGER IF NOT EXISTS facts_delete AFTER DELETE ON facts BEGIN DELETE FROM facts_search WHERE key=old.key; END; CREATE TRIGGER IF NOT EXISTS facts_update AFTER UPDATE ON facts BEGIN DELETE FROM facts_search WHERE key=old.key; INSERT INTO facts_search(key,value) VALUES(new.key,new.value); END;").await?;
         Ok(Self {
-            signing_key: auth::signing_key_from_env()?,
+            signing_key: crate::config::signing_key()?,
         })
     }
     async fn on_before_connect(self: Arc<Self>, ctx: Ctx<Self>, p: &Connection) -> Result<()> {
@@ -75,8 +64,8 @@ impl Actor for Memory {
 impl Memory {
     async fn authorize(&self, ctx: &Ctx<Self>, token: &str) -> Result<()> {
         let session: auth::Session = auth::verify(self.signing_key.expose(), "session", token)?;
-        session.validate(&key(ctx)?, None)?;
-        crate::actor::check_access(ctx.client()?, &key(ctx)?, token).await
+        session.validate(&bot_key(ctx)?, None)?;
+        crate::actor::check_access(ctx.client()?, &bot_key(ctx)?, token).await
     }
 }
 impl Handler<Call> for Memory {
@@ -116,7 +105,7 @@ impl Handler<Call> for Memory {
                     .rows;
                 Ok(json!(
                     rows.into_iter()
-                        .map(|r| Ok(json!({"key":text(&r,0)?,"value":text(&r,1)?})))
+                        .map(|r| Ok(json!({"key":string(&r,0)?,"value":string(&r,1)?})))
                         .collect::<Result<Vec<_>>>()?
                 ))
             }
@@ -141,9 +130,9 @@ impl Handler<Call> for Memory {
                 let mut seen = std::collections::HashSet::new();
                 let mut out = Vec::new();
                 for r in rows {
-                    let key = text(&r, 0)?;
+                    let key = string(&r, 0)?;
                     if seen.insert(key.clone()) {
-                        out.push(json!({"key":key,"value":text(&r,1)?}));
+                        out.push(json!({"key":key,"value":string(&r,1)?}));
                     }
                 }
                 Ok(json!(out))

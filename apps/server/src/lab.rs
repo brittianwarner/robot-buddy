@@ -319,8 +319,8 @@ async fn speech(
     let bot = s.bot.reject(Kind::BadRequest)?;
     require(app.speech.is_some(), Kind::Unavailable)?;
     let device = app.session(&bot, "device").reject(Kind::Internal)?;
-    // Stream errors (unknown turn, stream capacity) keep the default 400.
-    Ok(super::speech::stream(&app, &bot, &device, body).await?)
+    // Speech maps its own errors: 429 at the stream cap, 400 for an unknown turn.
+    super::speech::stream(&app, &bot, &device, body).await
 }
 
 async fn voice_js(State(app): State<Arc<App>>) -> Response {

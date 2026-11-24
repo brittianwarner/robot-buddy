@@ -1,7 +1,7 @@
 //! Durable speech admission: only a running turn can commit chunks.
 use super::{
     Context, Conversation, Ctx, OutputEvent, P, RUNNING_TURN_SQL, Result, SqliteDbExt,
-    SqliteTransaction, TxOptions, Value, ensure, integer, json, params, string,
+    SqliteTransaction, Value, ensure, integer, json, named, params, string,
 };
 
 const SPEECH_SETTINGS_SQL: &str = r"
@@ -65,7 +65,9 @@ impl Conversation {
                 .await?;
             string(row, 0)
         };
-        ctx.sql().transaction(pin, TxOptions::default()).await
+        ctx.sql()
+            .transaction(pin, named("conversation.begin_speech"))
+            .await
     }
 
     pub(super) async fn speech_voice(&self, ctx: &Ctx<Self>, id: &str) -> Result<Value> {
@@ -120,7 +122,10 @@ impl Conversation {
             }
             Ok(sequences)
         };
-        let sequences = ctx.sql().transaction(write, TxOptions::default()).await?;
+        let sequences = ctx
+            .sql()
+            .transaction(write, named("conversation.commit_stream"))
+            .await?;
         let ready = chunks
             .iter()
             .map(|(index, _)| ("speech.ready", json!({ "index": index })));
@@ -173,7 +178,9 @@ impl Conversation {
             };
             Ok(json!({ "state": state }))
         };
-        ctx.sql().transaction(read, TxOptions::default()).await
+        ctx.sql()
+            .transaction(read, named("conversation.speech_chunk"))
+            .await
     }
 }
 

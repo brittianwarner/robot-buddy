@@ -53,10 +53,10 @@ impl Model {
                 && url.password().is_none(),
             "invalid model URL"
         );
-        let key = std::env::var("AI_API_KEY").unwrap_or_default();
+        let key = crate::auth::Secret::new(std::env::var("AI_API_KEY").unwrap_or_default());
         if provider == "openrouter" {
             ensure!(
-                !key.is_empty() && url.scheme() == "https",
+                !key.expose().is_empty() && url.scheme() == "https",
                 "OpenRouter requires HTTPS and AI_API_KEY"
             );
         }
@@ -104,7 +104,8 @@ impl Model {
             capacity: CAPACITY
                 .get_or_init(|| std::sync::Arc::new(tokio::sync::Semaphore::new(limit)))
                 .clone(),
-            inner: OpenAIConfig::with_key(dialect, key)
+            // Rig keeps its own copy of the key for request signing.
+            inner: OpenAIConfig::with_key(dialect, key.expose().clone())
                 .with_base_url(base)
                 .connect(http)
                 .chat(name),
@@ -218,7 +219,9 @@ pub async fn search(query: &str) -> Result<Value> {
         !query.is_empty() && query.len() <= 500,
         "invalid search query"
     );
-    let key = std::env::var("BRAVE_SEARCH_API_KEY").context("web search is not configured")?;
+    let key = crate::auth::Secret::new(
+        std::env::var("BRAVE_SEARCH_API_KEY").context("web search is not configured")?,
+    );
     let http = HTTP
         .get_or_try_init(|| async {
             reqwest::Client::builder()
@@ -228,9 +231,11 @@ pub async fn search(query: &str) -> Result<Value> {
                 .build()
         })
         .await?;
+    let mut token = reqwest::header::HeaderValue::from_str(key.expose())?;
+    token.set_sensitive(true);
     let response = http
         .get("https://api.search.brave.com/res/v1/web/search")
-        .header("X-Subscription-Token", key)
+        .header("X-Subscription-Token", token)
         .query(&[("q", query), ("count", "5")])
         .send()
         .await?

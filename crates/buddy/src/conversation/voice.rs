@@ -1,8 +1,7 @@
 //! Versioned voice settings: the curated voice and delivery every speech request uses.
 use super::{
-    Context, Conversation, Ctx, P, Receipt, Result, SqliteDbExt, SqliteTransaction, TxOptions,
-    Value, auth, ensure, ensure_receipt_running, integer, json, string, trim_versions,
-    write_receipt,
+    Context, Conversation, Ctx, P, Receipt, Result, SqliteDbExt, SqliteTransaction, Value, auth,
+    ensure, ensure_receipt_running, integer, json, named, string, trim_versions, write_receipt,
 };
 use crate::voice::VoiceConfig;
 
@@ -75,6 +74,8 @@ impl Conversation {
             write_receipt(&tx, receipt, &result).await?;
             Ok(result)
         };
-        ctx.sql().transaction(write, TxOptions::default()).await
+        ctx.sql()
+            .transaction(write, named("conversation.set_voice"))
+            .await
     }
 }

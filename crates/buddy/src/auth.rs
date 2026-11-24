@@ -9,33 +9,19 @@ use std::{
     fmt,
     time::{SystemTime, UNIX_EPOCH},
 };
+use zeroize::Zeroize;
 
 /// Minimum length of the HMAC key that signs sessions, challenges and cookies.
 pub const MIN_KEY_BYTES: usize = 32;
 /// Domain separation for [`ct_eq`]. Not a secret: it only fixes the HMAC used to compare.
 const CT_EQ_KEY: &[u8] = b"robot-buddy/ct-eq/v1";
 
-/// Secret material whose `Debug` output is redacted and whose bytes are wiped on drop.
+/// Secret material whose `Debug` output is redacted and whose bytes are zeroized on drop.
 ///
-/// There is deliberately no `Display`. Wiping is best effort: it clears the live buffer,
-/// not earlier copies made by reallocation.
-pub struct Secret<T: Wipe>(T);
-/// Values that can overwrite their own bytes.
-pub trait Wipe {
-    fn wipe(&mut self);
-}
-impl Wipe for Vec<u8> {
-    fn wipe(&mut self) {
-        self.fill(0);
-        std::hint::black_box(&self);
-    }
-}
-impl Wipe for String {
-    fn wipe(&mut self) {
-        std::mem::take(self).into_bytes().wipe();
-    }
-}
-impl<T: Wipe> Secret<T> {
+/// There is deliberately no `Display`. Zeroizing clears the live buffer and its spare
+/// capacity, not earlier copies made by reallocation.
+pub struct Secret<T: Zeroize>(T);
+impl<T: Zeroize> Secret<T> {
     pub fn new(value: T) -> Self {
         Self(value)
     }
@@ -50,19 +36,19 @@ impl AsRef<[u8]> for Secret<Vec<u8>> {
         &self.0
     }
 }
-impl<T: Wipe + Clone> Clone for Secret<T> {
+impl<T: Zeroize + Clone> Clone for Secret<T> {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
-impl<T: Wipe> fmt::Debug for Secret<T> {
+impl<T: Zeroize> fmt::Debug for Secret<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("Secret([redacted])")
     }
 }
-impl<T: Wipe> Drop for Secret<T> {
+impl<T: Zeroize> Drop for Secret<T> {
     fn drop(&mut self) {
-        self.0.wipe();
+        self.0.zeroize();
     }
 }
 /// The identity file stores the device key as plain base64; serde is transparent.
@@ -75,20 +61,6 @@ impl<'de> Deserialize<'de> for Secret<String> {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
         String::deserialize(d).map(Self)
     }
-}
-
-/// Reads `BUDDY_SIGNING_KEY` and rejects keys shorter than [`MIN_KEY_BYTES`].
-pub fn signing_key_from_env() -> Result<Secret<Vec<u8>>> {
-    let key = Secret::new(
-        std::env::var("BUDDY_SIGNING_KEY")
-            .context("BUDDY_SIGNING_KEY required")?
-            .into_bytes(),
-    );
-    ensure!(
-        key.expose().len() >= MIN_KEY_BYTES,
-        "BUDDY_SIGNING_KEY must be at least 32 bytes"
-    );
-    Ok(key)
 }
 
 /// Constant-time equality for CSRF tokens, OAuth state/nonce and similar secrets.
@@ -296,9 +268,6 @@ mod tests {
             "\"private_key\":\"{}\"",
             identity.private_key.expose()
         )));
-        let mut wiped = b"key".to_vec();
-        wiped.wipe();
-        assert_eq!(wiped, [0, 0, 0]);
         Ok(())
     }
 }
