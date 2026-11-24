@@ -42,20 +42,22 @@ impl SpeechError {
         error.downcast_ref::<Self>().copied()
     }
 
-    /// Classifies a Rivet client error. `rivetkit-client` 3.1 reports an actor's error
-    /// as `action failed ({group}/{code}): ...`, and a gateway reply without an error
-    /// body as `action failed: {status}`. An actor's own `bail!` reaches the client
-    /// masked as `internal_error`. Anything else never reached an actor.
+    /// Classifies a Rivet client error. `rivetkit-client` 3.1 reports a stateless actor
+    /// error as `action failed ({group}/{code}): ...`, a connection RPC error as
+    /// `RPC Error({group}/{code}): ...`, and a gateway reply without an error body as
+    /// `action failed: {status}`. An actor's own `bail!` reaches the client masked as
+    /// `internal_error`. Anything else never reached an actor.
     pub fn from_client(error: &anyhow::Error) -> Self {
         let Some(message) = error
             .chain()
             .map(ToString::to_string)
-            .find(|m| m.starts_with("action failed"))
+            .find(|m| m.starts_with("action failed") || m.starts_with("RPC Error("))
         else {
             return Self::EngineUnavailable;
         };
         let code = message
             .strip_prefix("action failed (")
+            .or_else(|| message.strip_prefix("RPC Error("))
             .and_then(|rest| rest.split_once(')'))
             .map(|(code, _)| code);
         match code {
@@ -103,6 +105,15 @@ mod tests {
             (
                 "action failed (user/busy): busy, metadata=None",
                 SpeechError::Refused,
+            ),
+            (
+                "RPC Error(core/internal_error): speech turn stopped, null",
+                SpeechError::Refused,
+            ),
+            ("RPC Error(user/busy): busy, null", SpeechError::Refused),
+            (
+                "RPC Error(actor/not_found): not found, null",
+                SpeechError::Engine,
             ),
             (
                 "action failed (actor/not_found): x, metadata=None",

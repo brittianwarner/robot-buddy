@@ -77,15 +77,6 @@ impl Kind {
 #[derive(Debug)]
 pub struct ApiError(pub Kind);
 
-/// Bare `?` keeps the historical 400 so unannotated callers do not change behavior.
-/// Annotate with [`Reject::reject`] wherever another status is meant.
-impl<E: Into<anyhow::Error>> From<E> for ApiError {
-    fn from(error: E) -> Self {
-        drop(error.into());
-        Self(Kind::BadRequest)
-    }
-}
-
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = self.0.status();
@@ -368,7 +359,10 @@ mod tests {
 
     #[test]
     fn server_errors_hide_details() {
-        let response = ApiError::from(anyhow::anyhow!("secret detail")).into_response();
+        let response = Err::<(), _>(anyhow::anyhow!("secret detail"))
+            .reject(Kind::BadRequest)
+            .unwrap_err()
+            .into_response();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         for kind in [
             Kind::BadGateway,

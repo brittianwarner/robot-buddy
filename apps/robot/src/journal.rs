@@ -92,17 +92,34 @@ impl Journal {
         })
     }
 
-    /// Queue the line for `event`. Never blocks.
-    pub fn record(&self, event: &OutputEvent) {
-        let Some(line) = line(event, self.detail) else {
-            return;
-        };
+    fn send(&self, line: String) {
         match self.queue.try_send(line) {
             Ok(()) | Err(TrySendError::Disconnected(_)) => {}
             Err(TrySendError::Full(_)) => {
                 self.dropped.fetch_add(1, Ordering::Relaxed);
             }
         }
+    }
+
+    /// Queue the line for `event`. Never blocks.
+    pub fn record(&self, event: &OutputEvent) {
+        let Some(line) = line(event, self.detail) else {
+            return;
+        };
+        self.send(line);
+    }
+
+    /// Emit the active onboarding claim URL once so headless robots can be
+    /// claimed from stdout/journald without the local panel. Never blocks.
+    pub fn claim(&self, url: &str) {
+        if url.is_empty()
+            || url
+                .bytes()
+                .any(|b| b.is_ascii_control() || b.is_ascii_whitespace())
+        {
+            return;
+        }
+        self.send(format!("claim url={url}"));
     }
 }
 
@@ -213,5 +230,21 @@ mod tests {
             ..event
         };
         assert!(line(&odd, EventDetail::Compact).unwrap().contains("turn=?"));
+    }
+
+    #[test]
+    fn claim_lines_emit_clean_urls_and_ignore_unsafe_values() {
+        let (reader, writer) = std::io::pipe().unwrap();
+        let journal = Journal::to(EventDetail::Compact, writer).unwrap();
+        journal.claim("");
+        journal.claim("https://buddy.example/claim?bot=b&token=t\nevil");
+        journal.claim("https://buddy.example/claim?bot=b&token=has space");
+        journal.claim("https://buddy.example/claim?bot=b&token=t1");
+        drop(journal);
+        let lines: Vec<String> = BufReader::new(reader).lines().map(Result::unwrap).collect();
+        assert_eq!(
+            lines,
+            ["claim url=https://buddy.example/claim?bot=b&token=t1"]
+        );
     }
 }

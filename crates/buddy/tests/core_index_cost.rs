@@ -4,7 +4,9 @@
 //!
 //! `cargo test --release -p robot-buddy --test core_index_cost -- --ignored --nocapture`
 use rusqlite::Connection;
-use std::time::{Duration, Instant};
+#[cfg(feature = "server")]
+use std::time::Duration;
+use std::time::Instant;
 
 const TURNS_SQL: &str = "CREATE TABLE turns(id TEXT PRIMARY KEY,request_id TEXT NOT NULL UNIQUE,\
     text TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'queued',answer TEXT NOT NULL DEFAULT '',\

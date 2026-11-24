@@ -117,7 +117,8 @@ impl Settings {
                 .context("BUDDY_IDENTITY_FILE required")?
                 .into(),
             cache_file: get("BUDDY_CACHE_FILE")
-                .unwrap_or_else(|| "/var/lib/robot-buddy/cache.json".into())
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| crate::cache::DEFAULT_CACHE_FILE.into())
                 .into(),
             events,
             speech: get("BUDDY_SPEECH").as_deref() == Some("true"),

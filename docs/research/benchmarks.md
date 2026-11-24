@@ -1,6 +1,6 @@
 # Backend benchmarks
 
-Measured 2026-11-23 on branch `perf/core`.
+Measured 2026-11-23 on branch `perf/core` (Criterion sections below were measured under load average 39 to 52 on `perf/core`; `SQL per turn` counts are updated to HEAD).
 
 ## Machine
 
@@ -86,14 +86,14 @@ Run with the environment of `bun run test:integration`.
 
 | Measure | Statements before | after | Auto-commit before | after | Transactions before | after |
 |---|---|---|---|---|---|---|
-| Direct spoken turn (2 sentences) | 37 | 31 | 23 | 11 | 5 | 6 |
-| One tool turn (`memory_remember`, then a spoken answer) | 63 | 52 | 51 | 34 | 4 | 5 |
-| Enroll plus first turn (new database) | 76 | 60 | 54 | 31 | 9 | 11 |
-| Wake after an engine restart plus a direct turn | not measured | 32 | not measured | 14 | not measured | 5 |
-| PCM speech chunk read (per chunk) | not measured | 1 conversation + 2 Bot access-check | not measured | 3 | not measured | 0 |
+| Direct spoken turn (2 sentences) | 37 | 28 | 23 | 8 | 5 | 6 |
+| One tool turn (`memory_remember`, then a spoken answer) | 63 | 44 | 51 | 26 | 4 | 5 |
+| Enroll plus first turn (new database) | 76 | 57 | 54 | 28 | 9 | 11 |
+| Wake after an engine restart plus a direct turn | not measured | 29 | not measured | 11 | not measured | 5 |
+| PCM speech chunk read (per chunk) | not measured | 1 conversation + 2 Bot access-check (stateless test client) | not measured | 3 | not measured | 0 |
 | Pending speech chunk poll | not measured | 3 | not measured | 3 | not measured | 0 |
 
-Before is one run. After counts are netted: harness `Replay` polls are counted and subtracted so only actor work remains, and speech reads are included in the wrapper counts.
+Before is one run. After counts are netted: harness `Replay` polls are counted and subtracted so only actor work remains, and speech reads are included in the wrapper counts. In the server's speech path, `PCM speech chunk read` now uses a persistent actor connection, so cached access checks avoid repeated Bot RPCs once connected (only the stateless `core_sql_counts` test client pays the 2 Bot statements per read).
 
 What changed on the turn path:
 

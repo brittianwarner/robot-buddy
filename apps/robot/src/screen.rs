@@ -191,6 +191,11 @@ impl Screen {
         panel.code.clear();
     }
 
+    #[cfg(test)]
+    pub(crate) async fn message(&self) -> String {
+        self.panel.read().await.message.clone()
+    }
+
     /// Display the owner confirmation code. Returns whether the owner pressed
     /// Confirm for this code since the last call. A new code (a new pending claim) gets a
     /// fresh CSRF token and drops a press made for the previous one.

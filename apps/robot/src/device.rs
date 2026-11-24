@@ -249,6 +249,8 @@ struct Device<'a, C: Connector> {
     setup: Slot<()>,
     /// Disconnects and panel updates nothing waits for.
     background: FuturesUnordered<LocalBoxFuture<'static, ()>>,
+    /// Claim URL last emitted to the journal, so 3 s polls do not repeat it.
+    announced_claim: Option<String>,
 }
 
 impl<'a, C: Connector> Device<'a, C> {
@@ -276,6 +278,7 @@ impl<'a, C: Connector> Device<'a, C> {
             checking: None,
             setup: None,
             background: FuturesUnordered::new(),
+            announced_claim: None,
         }
     }
 
@@ -592,6 +595,17 @@ impl<'a, C: Connector> Device<'a, C> {
                 cache.claim_url.clear();
                 cache.claim_expires = 0;
             });
+        }
+        let active_claim = (!registration.owned)
+            .then(|| self.controller.cache().claim_url.as_str())
+            .filter(|url| !url.is_empty());
+        match active_claim {
+            Some(url) if self.announced_claim.as_deref() != Some(url) => {
+                self.options.journal.claim(url);
+                self.announced_claim = Some(url.to_owned());
+            }
+            Some(_) => {}
+            None => self.announced_claim = None,
         }
         self.controller.set_claiming(registration.confirming);
         if let Some(live) = self.live.as_mut() {
@@ -1695,5 +1709,134 @@ mod tests {
             now + MIN_SESSION
         );
         let _ = Cache::default();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn claim_url_is_emitted_once_per_new_url_and_reset_when_owned() {
+        use std::io::{BufRead, BufReader};
+        let (reader, writer) = std::io::pipe().unwrap();
+        let journal = Journal::to(crate::config::EventDetail::Compact, writer).unwrap();
+        let mut rig = Rig::quick();
+        *rig.world.owned.lock().unwrap() = false;
+        *rig.world.claim.lock().unwrap() = Some(Claim {
+            url: "https://buddy.example/claim?bot=b&token=t1".into(),
+            expires: 99,
+        });
+        let world = rig.world.clone();
+        let options = Options {
+            journal,
+            ..options()
+        };
+        run_with!(rig, options, async {
+            // Multiple 3 s polls with the same claim URL emit it once.
+            until("first poll", SOON, || world.entered.count("register") == 1).await;
+            tokio::time::sleep(REGISTER_UNOWNED * 2 + Duration::from_secs(1)).await;
+            assert!(world.entered.count("register") >= 3);
+            // A newly issued claim URL is emitted once.
+            *world.claim.lock().unwrap() = Some(Claim {
+                url: "https://buddy.example/claim?bot=b&token=t2".into(),
+                expires: 199,
+            });
+            let before = world.entered.count("register");
+            until("new claim polled", Duration::from_secs(10), || {
+                world.entered.count("register") >= before + 2
+            })
+            .await;
+            // Becoming owned clears the dedup state; a subsequent claim re-emits.
+            *world.owned.lock().unwrap() = true;
+            let before = world.entered.count("register");
+            until("owned polled", Duration::from_secs(10), || {
+                world.entered.count("register") > before
+            })
+            .await;
+            *world.owned.lock().unwrap() = false;
+            *world.claim.lock().unwrap() = Some(Claim {
+                url: "https://buddy.example/claim?bot=b&token=t2".into(),
+                expires: 299,
+            });
+            let before = world.entered.count("register");
+            until("revoked claim polled", REGISTER_OWNED + SOON, || {
+                world.entered.count("register") > before
+            })
+            .await;
+        });
+        let lines: Vec<String> = BufReader::new(reader).lines().map(Result::unwrap).collect();
+        assert_eq!(
+            lines,
+            [
+                "claim url=https://buddy.example/claim?bot=b&token=t1",
+                "claim url=https://buddy.example/claim?bot=b&token=t2",
+                "claim url=https://buddy.example/claim?bot=b&token=t2",
+            ]
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn wake_then_replacement_say_submits_before_a_held_replay_releases() {
+        let mut rig = Rig::quick();
+        let world = rig.world.clone();
+        let (face, controls) = (rig.face.clone(), rig.controls.clone());
+        run_with!(rig, async {
+            until("online", SOON, || world.entered.count("register") == 1).await;
+            controls.send(Control::Say("first".into())).await.unwrap();
+            until("first speech", SOON, || {
+                world.log.count("start turn-first on 0") == 1
+            })
+            .await;
+            world
+                .playback(0)
+                .send(PlaybackEvent::Started { generation: 1 })
+                .await
+                .unwrap();
+            until("speaking", SOON, || face.steady() == Mood::Speaking).await;
+
+            // Hold an in-flight replay on the main lane.
+            let replays = world.log.count("replay");
+            let entered = world.entered.count("replay");
+            world.replays_held.send_replace(true);
+            world
+                .push(0)
+                .send(event(9, "turn-first", "text.delta"))
+                .await
+                .unwrap();
+            until("held replay", SOON, || {
+                world.entered.count("replay") > entered
+            })
+            .await;
+
+            // Wake cancels the live turn alongside the held replay, then a
+            // replacement Say preempts the held replay and submits immediately.
+            controls.send(Control::Wake).await.unwrap();
+            until("cancelled", SOON, || {
+                world.log.count("cancel turn-first") == 1
+            })
+            .await;
+            controls
+                .send(Control::Say("replacement".into()))
+                .await
+                .unwrap();
+            until("replacement submitted", SOON, || {
+                world.log.count("submit replacement") == 1
+            })
+            .await;
+            until("replacement speech", SOON, || {
+                world.log.count("start turn-replacement on 0") == 1
+            })
+            .await;
+            assert_eq!(
+                world.log.count("replay"),
+                replays,
+                "replacement submitted before the held replay was released"
+            );
+
+            world.replays_held.send_replace(false);
+            until("replayed after", SOON, || {
+                world.log.count("replay") > replays
+            })
+            .await;
+        });
+        let log = &rig.world.log;
+        assert!(log.position("cancel turn-first") < log.position("submit replacement"));
+        assert!(log.position("submit replacement") < log.last_position("replay"));
     }
 }

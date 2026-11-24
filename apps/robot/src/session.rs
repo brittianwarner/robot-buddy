@@ -371,6 +371,19 @@ impl Conversation {
     }
 }
 
+fn parse_submitted(result: &Value) -> Result<Submitted, CallError> {
+    // An answer without a turn ID proves nothing either way.
+    let turn_id = result["turn_id"]
+        .as_str()
+        .ok_or_else(|| CallError::Uncertain("turn id missing".into()))?;
+    Ok(Submitted {
+        turn_id: turn_id.into(),
+        // Anything but an explicit `false` is treated as a replay: silent.
+        duplicate: result["duplicate"] != false,
+        cancelled: result["cancelled"] == true,
+    })
+}
+
 impl Remote for Conversation {
     async fn submit(&self, request_id: &str, text: &str) -> Result<Submitted, CallError> {
         let command = Command::Submit {
@@ -378,15 +391,7 @@ impl Remote for Conversation {
             text: text.into(),
         };
         let result = self.call(command).await?;
-        // An answer without a turn ID proves nothing either way.
-        let turn_id = result["turn_id"]
-            .as_str()
-            .ok_or_else(|| CallError::Uncertain("turn id missing".into()))?;
-        Ok(Submitted {
-            turn_id: turn_id.into(),
-            // Anything but an explicit `false` is treated as a replay: silent.
-            duplicate: result["duplicate"] != false,
-        })
+        parse_submitted(&result)
     }
 
     async fn cancel(&self, turn_id: &str) -> Result<(), CallError> {
@@ -628,5 +633,32 @@ mod tests {
                 "{message}"
             );
         }
+    }
+
+    #[test]
+    fn submit_reply_honors_cancelled_and_duplicate_flags() {
+        let normal = parse_submitted(&json!({ "turn_id": "t1", "duplicate": false })).unwrap();
+        assert_eq!(normal.turn_id, "t1");
+        assert!(!normal.duplicate);
+        assert!(!normal.cancelled);
+
+        let cancelled = parse_submitted(&json!({
+            "turn_id": "t2",
+            "duplicate": false,
+            "cancelled": true
+        }))
+        .unwrap();
+        assert_eq!(cancelled.turn_id, "t2");
+        assert!(!cancelled.duplicate);
+        assert!(cancelled.cancelled);
+
+        let missing_dup = parse_submitted(&json!({ "turn_id": "t3" })).unwrap();
+        assert!(missing_dup.duplicate);
+        assert!(!missing_dup.cancelled);
+
+        assert!(matches!(
+            parse_submitted(&json!({ "duplicate": false })),
+            Err(CallError::Uncertain(_))
+        ));
     }
 }

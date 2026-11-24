@@ -59,6 +59,7 @@ const TERMINAL: [&str; 4] = [
 pub struct Submitted {
     pub turn_id: String,
     pub duplicate: bool,
+    pub cancelled: bool,
 }
 
 /// Why an actor call did not succeed.
@@ -775,19 +776,26 @@ impl<'a, S: Speaker> Controller<'a, S> {
             self.pending_born = None;
             self.busy = None;
             self.attempted = None;
-            cache.active_turn = Some(submitted.turn_id.clone());
-            if !submitted.duplicate {
-                self.live_turn = Some(submitted.turn_id.clone());
-                self.voice = Some(Voice {
-                    turn: submitted.turn_id.clone(),
-                    ready: false,
-                    heard: false,
-                    retried: false,
-                    first_audio_by: None,
-                });
-                // The server waits for the first chunk, so ask for audio now.
-                self.speak(&submitted.turn_id);
+            if submitted.cancelled {
+                tracing::info!("submit already cancelled");
+            } else {
+                cache.active_turn = Some(submitted.turn_id.clone());
+                if !submitted.duplicate {
+                    self.live_turn = Some(submitted.turn_id.clone());
+                    self.voice = Some(Voice {
+                        turn: submitted.turn_id.clone(),
+                        ready: false,
+                        heard: false,
+                        retried: false,
+                        first_audio_by: None,
+                    });
+                    // The server waits for the first chunk, so ask for audio now.
+                    self.speak(&submitted.turn_id);
+                }
             }
+        } else if submitted.cancelled {
+            // A prior CancelRequest already cancelled this turn on the server.
+            cache.cancelled_request(&sent.request_id);
         } else {
             // Wake or a newer utterance replaced this one while it was in
             // flight: its answer must not play. Cancelled by turn ID when that
@@ -1053,6 +1061,7 @@ pub mod tests {
         pub replies: Mutex<VecDeque<Result<(), CallError>>>,
         pub pages: Mutex<VecDeque<Vec<OutputEvent>>>,
         pub drop_next_ack: Mutex<bool>,
+        pub cancel_next_submit: Mutex<bool>,
     }
 
     impl Server {
@@ -1078,6 +1087,14 @@ pub mod tests {
                 return Ok(Submitted {
                     turn_id: turn.clone(),
                     duplicate: true,
+                    cancelled: false,
+                });
+            }
+            if std::mem::take(&mut *self.cancel_next_submit.lock().unwrap()) {
+                return Ok(Submitted {
+                    turn_id: format!("turn-{text}"),
+                    duplicate: false,
+                    cancelled: true,
                 });
             }
             if let Some(open) = self.turns.lock().unwrap().iter().find(|t| t.1) {
@@ -1095,6 +1112,7 @@ pub mod tests {
             Ok(Submitted {
                 turn_id: turn,
                 duplicate: false,
+                cancelled: false,
             })
         }
         pub fn cancel(&self, turn_id: &str) -> Result<(), CallError> {
@@ -2092,5 +2110,47 @@ pub mod tests {
         assert_eq!(log.count("stop"), 1);
         drop(c);
         drop(reader);
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_submit_reply_does_not_start_speech_or_live_turn() {
+        let mut rig = Rig::new();
+        *rig.server.0.cancel_next_submit.lock().unwrap() = true;
+        let remote = rig.server.clone();
+        let shown = rig.face.clone();
+        let mut c = rig.controller();
+        c.control(Control::Say("already cancelled".into())).await;
+        drive(&mut c, &remote).await.unwrap();
+        assert!(!c.is_live(), "must not be tracked as a live turn");
+        assert!(c.playing.is_none(), "must not start speech");
+        assert!(c.voice.is_none(), "must not await audio");
+        assert!(c.cache().pending.is_none());
+        assert!(c.cache().active_turn.is_none());
+        assert_eq!(shown.steady(), Mood::Idle);
+        drop(c);
+        assert_eq!(starts(&rig.log, "turn-already cancelled"), 0);
+        assert_eq!(rig.log.count("cancel "), 0);
+    }
+
+    #[tokio::test]
+    async fn a_superseded_cancelled_submit_needs_no_followup_cancel() {
+        let mut rig = Rig::new();
+        *rig.server.0.cancel_next_submit.lock().unwrap() = true;
+        let remote = rig.server.clone();
+        let mut c = rig.controller();
+        c.control(Control::Say("first".into())).await;
+        let write = c.take_persist(Instant::now()).unwrap();
+        c.persisted(write.await, Instant::now());
+        let submit = c.next_main(true).unwrap();
+        c.control(Control::Wake).await;
+        let done = submit.run(remote.clone()).await;
+        c.finish(done).await.unwrap();
+        assert!(c.cache().cancel.is_none());
+        assert!(c.cache().cancel_requests.is_empty());
+        drive(&mut c, &remote).await.unwrap();
+        drop(c);
+        assert_eq!(rig.log.count("start"), 0);
+        assert_eq!(rig.log.count("cancel "), 0);
+        assert_eq!(rig.log.count("cancel_request"), 0);
     }
 }

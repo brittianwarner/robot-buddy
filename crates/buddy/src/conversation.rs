@@ -55,6 +55,8 @@ pub struct Conversation {
     orphaned: AtomicBool,
     /// Turns finished since the last retention pass.
     since_prune: AtomicU32,
+    /// A retention pass is running. Overlapping passes skip rather than contend.
+    pruning: Arc<AtomicBool>,
     /// The schema, seeds and factory adoption are current; `on_start` skips adoption.
     schema_current: bool,
     /// `PRAGMA user_version` is below [`SCHEMA_VERSION`]; `on_start` raises it.
@@ -369,6 +371,7 @@ impl Actor for Conversation {
             drain_failures: AtomicU32::new(0),
             orphaned: AtomicBool::new(false),
             since_prune: AtomicU32::new(0),
+            pruning: Arc::new(AtomicBool::new(false)),
             schema_current,
             mark_schema: version < SCHEMA_VERSION,
         })
@@ -395,7 +398,7 @@ impl Actor for Conversation {
         if self.history_backfill {
             start_history_backfill(&ctx);
         }
-        retention::prune_if_overdue(&ctx);
+        self.prune_if_overdue(&ctx);
         Ok(())
     }
     async fn on_before_connect(self: Arc<Self>, ctx: Ctx<Self>, p: &Connection) -> Result<()> {
@@ -1367,6 +1370,40 @@ mod tests {
             MARK_SCHEMA_SQL,
             format!("PRAGMA user_version = {SCHEMA_VERSION}")
         );
+    }
+
+    #[test]
+    fn schema_state_tracks_version_and_legacy_triggers() {
+        let read = |db: &rusqlite::Connection| -> (i64, i64) {
+            db.query_row(SCHEMA_STATE_SQL, [], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+        };
+
+        // Fresh database before any table exists: user_version = 0, no legacy triggers.
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        assert_eq!(read(&db), (0, 0));
+
+        // Current schema marked at SCHEMA_VERSION (2): current, no legacy triggers.
+        db.execute_batch(include_str!("conversation.sql")).unwrap();
+        db.execute_batch(MARK_SCHEMA_SQL).unwrap();
+        assert_eq!(read(&db), (SCHEMA_VERSION, 0));
+
+        // Any legacy v1 trigger present at user_version = 2 forces the full schema path.
+        for trigger in [
+            "turns_history_insert",
+            "turns_history_update",
+            "turns_search_insert",
+            "turns_search_update",
+        ] {
+            db.execute_batch(&format!(
+                "CREATE TRIGGER {trigger} AFTER INSERT ON turns BEGIN SELECT 1; END;"
+            ))
+            .unwrap();
+            assert_eq!(read(&db), (SCHEMA_VERSION, 1), "{trigger}");
+            db.execute_batch(&format!("DROP TRIGGER {trigger};"))
+                .unwrap();
+            assert_eq!(read(&db), (SCHEMA_VERSION, 0), "after dropping {trigger}");
+        }
     }
 
     fn replay_page(db: &rusqlite::Connection, after: i64) -> Vec<(i64, usize)> {

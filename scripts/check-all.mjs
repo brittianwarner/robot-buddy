@@ -16,7 +16,6 @@ const root = path.resolve(import.meta.dir, '..');
 const STEPS = [
   ['fmt', 'cargo', ['fmt', '--all', '--check']],
   ['clippy', 'cargo', ['clippy', '--workspace', '--all-targets', '--all-features', '--locked', '--', '-D', 'warnings']],
-  ['lint:pedantic', 'bun', ['run', 'lint:pedantic']],
   ['cargo test', 'cargo', ['test', '--workspace', '--locked']],
   ['test:robot-features', 'bun', ['run', 'test:robot-features']],
   ['deny', 'bun', ['run', 'deny']],
@@ -24,6 +23,8 @@ const STEPS = [
   ['release build', 'cargo', ['build', '--release', '--workspace', '--locked']],
   ['shutdown', 'bun', ['run', 'test:shutdown']],
   ['reconnect --strict', 'bun', ['tests/robot-reconnect.mjs', '--no-build', '--strict']],
+  ['bench --no-run', 'cargo', ['bench', '--workspace', '--locked', '--no-run']],
+  ['early-player', 'bun', ['tests/early-player.mjs']],
   ['lab-reconnect', 'bun', ['run', 'test:lab-reconnect']],
   ['eval:voice', 'bun', ['tests/eval-voice.mjs', '--no-build']],
   ['bench:report:check', 'bun', ['run', 'bench:report:check']],

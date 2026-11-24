@@ -6,7 +6,7 @@ use super::{
 use anyhow::{Context, Result};
 use rivetkit::{
     TypedClientExt,
-    client::{Client, GetOptions},
+    client::{Client, GetOptions, connection::ConnectionStatus},
     typed_client::{TypedActorConnection, TypedActorHandle},
 };
 use robot_buddy::{
@@ -65,8 +65,24 @@ impl ActorSource {
         })
     }
 
-    /// One actor call. Its error carries the [`error::SpeechError`] kind.
+    /// One actor call. Uses the open event WebSocket when connected so `SpeechChunk`
+    /// hits the actor's cached authorization instead of `on_before_connect`, falling
+    /// back to a stateless handle call if disconnected or on a transport failure.
+    /// Its error carries the [`error::SpeechError`] kind.
     async fn call(&self, command: Command) -> Result<Value> {
+        if let Some(connection) = &self.events
+            && connection.inner().conn_status() == ConnectionStatus::Connected
+        {
+            let request = Call {
+                session: self.session.clone(),
+                command: command.clone(),
+            };
+            match connection.send(request).await {
+                Ok(value) => return Ok(value),
+                Err(err) if !is_transport_error(&err) => return Err(error::engine(err)),
+                Err(_) => {}
+            }
+        }
         self.handle
             .send(Call {
                 session: self.session.clone(),
@@ -155,6 +171,22 @@ impl ChunkSource for ActorSource {
     }
 }
 
+/// Whether a connection RPC error reflects a broken or closed transport rather than
+/// an actor/engine response to the action.
+fn is_transport_error(error: &anyhow::Error) -> bool {
+    let mut saw_rpc = false;
+    for cause in error.chain() {
+        let message = cause.to_string();
+        if message.starts_with("RPC Error(") {
+            saw_rpc = true;
+            if message.contains(": Connection closed:") {
+                return true;
+            }
+        }
+    }
+    !saw_rpc
+}
+
 impl Drop for ActorSource {
     fn drop(&mut self) {
         let Some(connection) = self.events.take() else {
@@ -166,5 +198,28 @@ impl Drop for ActorSource {
         runtime.spawn(async move {
             let _ = tokio::time::timeout(Duration::from_secs(2), connection.disconnect()).await;
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::anyhow;
+
+    #[test]
+    fn connection_transport_errors_are_distinguished_from_actor_rpc_errors() {
+        assert!(is_transport_error(&anyhow!("Socket closed during rpc")));
+        assert!(is_transport_error(&anyhow!(
+            "RPC Error(ws/closed): Connection closed: ws.closed"
+        )));
+        assert!(!is_transport_error(&anyhow!(
+            "RPC Error(core/internal_error): speech turn stopped, null"
+        )));
+        assert!(!is_transport_error(&anyhow!(
+            "RPC Error(user/busy): busy, null"
+        )));
+        assert!(!is_transport_error(&anyhow!(
+            "RPC Error(actor/not_found): not found, null"
+        )));
     }
 }

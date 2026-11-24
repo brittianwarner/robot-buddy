@@ -8,7 +8,7 @@
 //! start also probes for rows past the window ([`OVERDUE_SQL`]) and runs a pass if any remain. A cursor
 //! older than the window replays from the oldest kept event. A pruned turn has no speech
 //! chunks, so a speech poll for it reads `done` and nothing old is spoken again.
-use super::{Conversation, Ctx, Db, Ordering, P, Result, Tx, named_for};
+use super::{Arc, AtomicBool, Conversation, Ctx, Db, Ordering, P, Result, Tx, named_for};
 use crate::db::BATCH_TX_TIMEOUT;
 use rivetkit::ColumnValue as V;
 
@@ -81,6 +81,24 @@ async fn prune_batch(ctx: &Ctx<Conversation>) -> Result<i64> {
         .await
 }
 
+/// Single-flight guard for retention passes. Clears the flag when dropped, including on
+/// early return, task cancellation, or panic.
+struct PruneGuard(Arc<AtomicBool>);
+
+impl PruneGuard {
+    fn acquire(flag: &Arc<AtomicBool>) -> Option<Self> {
+        flag.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| Self(flag.clone()))
+    }
+}
+
+impl Drop for PruneGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
 impl Conversation {
     /// Counts a finished turn and starts a retention pass every [`PRUNE_EVERY`] turns.
     pub(super) fn prune_after_turn(&self, ctx: &Ctx<Self>) {
@@ -88,50 +106,54 @@ impl Conversation {
             return;
         }
         self.since_prune.store(0, Ordering::SeqCst);
-        start_pass(ctx, false);
+        self.start_pass(ctx, false);
     }
-}
 
-/// At start: runs the pass an earlier lifetime owed, if rows past the window remain.
-pub(super) fn prune_if_overdue(ctx: &Ctx<Conversation>) {
-    start_pass(ctx, true);
-}
+    /// At start: runs the pass an earlier lifetime owed, if rows past the window remain.
+    pub(super) fn prune_if_overdue(&self, ctx: &Ctx<Self>) {
+        self.start_pass(ctx, true);
+    }
 
-/// Runs a retention pass on its own task, batch by batch. With `probe`, only when
-/// [`OVERDUE_SQL`] finds rows past the window.
-fn start_pass(ctx: &Ctx<Conversation>, probe: bool) {
-    let task_ctx = ctx.clone();
-    ctx.register_task(async move {
-        let _awake = task_ctx.keep_awake_region();
-        if probe {
-            let offset = Some(vec![P::Integer(KEPT_TURNS - 1)]);
-            match task_ctx.db().query(OVERDUE_SQL, offset).await {
-                Ok(result) if overdue(&result.rows) => {}
-                Ok(_) => return,
-                Err(error) => {
-                    tracing::warn!(%error, "retention probe failed");
-                    return;
+    /// Runs a retention pass on its own task, batch by batch. With `probe`, only when
+    /// [`OVERDUE_SQL`] finds rows past the window. Overlapping calls skip rather than contend.
+    fn start_pass(&self, ctx: &Ctx<Self>, probe: bool) {
+        let Some(guard) = PruneGuard::acquire(&self.pruning) else {
+            return;
+        };
+        let task_ctx = ctx.clone();
+        ctx.register_task(async move {
+            let _guard = guard;
+            let _awake = task_ctx.keep_awake_region();
+            if probe {
+                let offset = Some(vec![P::Integer(KEPT_TURNS - 1)]);
+                match task_ctx.db().query(OVERDUE_SQL, offset).await {
+                    Ok(result) if overdue(&result.rows) => {}
+                    Ok(_) => return,
+                    Err(error) => {
+                        tracing::warn!(%error, "retention probe failed");
+                        return;
+                    }
                 }
             }
-        }
-        let mut deleted = 0;
-        while !task_ctx.aborted() {
-            match prune_batch(&task_ctx).await {
-                Ok(0) => break,
-                Ok(rows) => deleted += rows,
-                Err(error) => {
-                    // The next pass continues; nothing depends on old rows going.
-                    tracing::warn!(deleted, %error, "retention pass paused");
-                    return;
+            let mut deleted = 0;
+            while !task_ctx.aborted() {
+                match prune_batch(&task_ctx).await {
+                    Ok(0) => break,
+                    Ok(rows) => deleted += rows,
+                    Err(error) => {
+                        // The next pass continues; nothing depends on old rows going.
+                        tracing::warn!(deleted, %error, "retention pass paused");
+                        return;
+                    }
                 }
+                // Turn writes and actions run between batches.
+                tokio::task::yield_now().await;
             }
-            // Turn writes and actions run between batches.
-            tokio::task::yield_now().await;
-        }
-        if deleted > 0 {
-            tracing::debug!(deleted, "retention pass finished");
-        }
-    });
+            if deleted > 0 {
+                tracing::debug!(deleted, "retention pass finished");
+            }
+        });
+    }
 }
 
 /// Reads [`OVERDUE_SQL`]'s one boolean.
@@ -300,5 +322,24 @@ mod tests {
         assert!(overdue(&[vec![V::Integer(1)]]));
         assert!(!overdue(&[vec![V::Integer(0)]]));
         assert!(!overdue(&[]));
+    }
+
+    #[test]
+    fn prune_guard_prevents_overlap_and_releases_on_drop_or_panic() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let first = PruneGuard::acquire(&flag).expect("first acquires");
+        assert!(flag.load(Ordering::Acquire));
+        assert!(PruneGuard::acquire(&flag).is_none(), "second skips");
+        drop(first);
+        assert!(!flag.load(Ordering::Acquire));
+
+        let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _held = PruneGuard::acquire(&flag).expect("re-acquires after drop");
+            assert!(PruneGuard::acquire(&flag).is_none());
+            panic!("retention panicked");
+        }));
+        assert!(unwound.is_err());
+        assert!(!flag.load(Ordering::Acquire));
+        assert!(PruneGuard::acquire(&flag).is_some());
     }
 }

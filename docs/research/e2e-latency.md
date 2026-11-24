@@ -45,14 +45,6 @@ Checks: 0 failed checks; 0 leaks; 21 turns played 2102400 of 2102400 samples the
 
 <!-- e2e-results:end -->
 
-The run above (`49daa35-dirty`) predates the provenance and noise record: it came from a
-dirty tree at load average 28 to 35 on 14 CPUs, and the fake speech server fell behind 121
-times, so `bench:report:check` rejects it until it is republished. Against the earlier
-wave2-robot run below (same machine, similar load), every text and audio measure was within
-the run-to-run spread recorded there (about ±60 ms at p50). It was the first run with the
-audio gates: every turn played exactly the samples the fake provider sent, and every barged
-turn ended in `turn.cancelled` with its player stopped.
-
 ## Earlier runs: baseline against wave2-robot (November 23, 2026)
 
 Hand-recorded before the bench published its JSON.

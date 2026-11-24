@@ -136,7 +136,10 @@ fn write_new(path: &Path, setup: &SetupWifi) -> Result<()> {
 }
 
 fn read(path: &Path) -> Result<SetupWifi> {
-    let file = std::fs::File::open(path)?;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_NOFOLLOW)
+        .open(path)?;
     let meta = file.metadata()?;
     ensure!(meta.is_file(), "{} is not a file", path.display());
     let shared = meta.permissions().mode() & 0o077;
@@ -299,5 +302,18 @@ mod tests {
                 .bytes()
                 .all(|c| c == b'-' || ALPHABET.contains(&c))
         );
+    }
+
+    #[test]
+    fn a_symlink_at_setup_wifi_is_refused() {
+        let dir = scratch();
+        let target = dir.join("target.json");
+        let setup = SetupWifi::generate();
+        write_new(&target, &setup).unwrap();
+        let link = dir.join(FILE_NAME);
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        assert!(read(&link).is_err());
+        assert!(load_or_create(&link).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

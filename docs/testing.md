@@ -5,12 +5,13 @@ the repository root with Bun (`bun install` first). Results from a dated run are
 [validation](research/validation.md); latency numbers are in [e2e latency](research/e2e-latency.md).
 
 `bun run check:all` (`scripts/check-all.mjs`) runs the whole local gate in CI order and
-stops at the first failure: fmt, Clippy `-D warnings`, `lint:pedantic`, `cargo test`, the
-robot feature profile, `deny`, `test:integration`, a release build, `test:shutdown`,
-`tests/robot-reconnect.mjs --no-build --strict`, `test:lab-reconnect`, `eval:voice` and
-`bench:report:check`. It passes its environment to every step, so set the port variables
-(see [ports](#ports)) and `BUDDY_STRICT_TIMING` once in front of it, and it ends with a
-table of every step's result and wall time. `-- --from <step>` resumes at a step.
+stops at the first failure: fmt, Clippy `-D warnings`, `cargo test`, the robot feature
+profile, `deny`, `test:integration`, a release build, `test:shutdown`,
+`tests/robot-reconnect.mjs --no-build --strict`, `cargo bench --no-run`,
+`tests/early-player.mjs`, `test:lab-reconnect`, `eval:voice` and `bench:report:check`. It
+passes its environment to every step, so set the port variables (see [ports](#ports)) and
+`BUDDY_STRICT_TIMING` once in front of it, and it ends with a table of every step's result
+and wall time. `-- --from <step>` resumes at a step.
 
 ## Suites
 

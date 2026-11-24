@@ -21,6 +21,61 @@ use tokio::{
     time::Instant,
 };
 
+/// Default path for the robot cache when `BUDDY_CACHE_FILE` is unset.
+pub const DEFAULT_CACHE_FILE: &str = "/var/lib/robot-buddy/cache.json";
+
+/// `BUDDY_CACHE_FILE`, else [`DEFAULT_CACHE_FILE`].
+pub fn path() -> PathBuf {
+    std::env::var_os("BUDDY_CACHE_FILE")
+        .filter(|v| !v.is_empty())
+        .map_or_else(|| PathBuf::from(DEFAULT_CACHE_FILE), PathBuf::from)
+}
+
+/// `robot-buddy-robot claim-url`: print the active claim URL from the cache,
+/// or say why none is active. Nothing is logged.
+pub fn print_claim_url() -> Result<()> {
+    write_claim_url(
+        &path(),
+        robot_buddy::auth::now(),
+        &mut std::io::stdout().lock(),
+    )
+}
+
+fn write_claim_url(path: &Path, now: i64, out: &mut impl Write) -> Result<()> {
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            writeln!(out, "No active claim URL yet.")?;
+            out.flush()?;
+            return Ok(());
+        }
+        Err(error) => {
+            return Err(error).with_context(|| format!("could not read {}", path.display()));
+        }
+    };
+    let cache: Cache = serde_json::from_slice(&bytes)
+        .with_context(|| format!("{} is not a valid cache file", path.display()))?;
+    if !cache.claim_url.is_empty() {
+        if cache.claim_expires > 0 && cache.claim_expires <= now {
+            writeln!(
+                out,
+                "Claim URL expired; waiting for the robot to start a new claim."
+            )?;
+        } else {
+            writeln!(out, "{}", cache.claim_url)?;
+        }
+    } else if !cache.bot_id.is_empty() {
+        writeln!(
+            out,
+            "No active claim URL (robot is already owned or waiting to start a claim)."
+        )?;
+    } else {
+        writeln!(out, "No active claim URL yet.")?;
+    }
+    out.flush()?;
+    Ok(())
+}
+
 /// Request IDs kept for cancellation at most. Each is an utterance replaced
 /// while its submit's answer was unknown; more than a few means the server
 /// has been unreachable through several interruptions, and the oldest go.
@@ -584,6 +639,56 @@ mod tests {
         // The later checkpoint is written before the store stops.
         store.shutdown().await;
         assert_eq!(load(&path).cursor, 7);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn claim_url_helper_reports_active_expired_owned_and_missing_states() {
+        let dir = temp_dir();
+        let path = dir.join("cache.json");
+
+        // Missing cache file.
+        let mut out = Vec::new();
+        write_claim_url(&path, 1_000, &mut out).unwrap();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "No active claim URL yet.\n"
+        );
+
+        // Active claim URL.
+        let active = Cache {
+            bot_id: "bot-1".into(),
+            claim_url: "https://buddy.example/claim?bot=bot-1&token=tok".into(),
+            claim_expires: 2_000,
+            ..Cache::default()
+        };
+        persist(&path, &serde_json::to_vec(&active).unwrap()).unwrap();
+        let mut out = Vec::new();
+        write_claim_url(&path, 1_000, &mut out).unwrap();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            "https://buddy.example/claim?bot=bot-1&token=tok\n"
+        );
+
+        // Expired claim URL.
+        let mut out = Vec::new();
+        write_claim_url(&path, 2_000, &mut out).unwrap();
+        assert!(
+            String::from_utf8(out)
+                .unwrap()
+                .contains("Claim URL expired")
+        );
+
+        // Owned robot (bot_id present, claim_url cleared).
+        let owned = Cache {
+            bot_id: "bot-1".into(),
+            ..Cache::default()
+        };
+        persist(&path, &serde_json::to_vec(&owned).unwrap()).unwrap();
+        let mut out = Vec::new();
+        write_claim_url(&path, 1_000, &mut out).unwrap();
+        assert!(String::from_utf8(out).unwrap().contains("already owned"));
+
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

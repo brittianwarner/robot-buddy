@@ -59,13 +59,70 @@ const BIND_RETRY: Duration = Duration::from_millis(200);
 /// nmcli error text kept for the log, from calls that carry no secret.
 const ERROR_CAP: usize = 300;
 
+enum JoinSlot {
+    Idle,
+    Running(tokio::task::JoinHandle<()>),
+    Closed,
+}
+
 #[derive(Clone)]
 struct Setup {
     csrf: String,
     interface: String,
     done: mpsc::Sender<()>,
     lock: Arc<Mutex<()>>,
+    join_task: Arc<std::sync::Mutex<JoinSlot>>,
+    apply_delay: Duration,
     screen: Screen,
+}
+
+/// Aborts the setup HTTP server and any in-flight `join_home` task when
+/// setup ends (timeout, success, or external cancellation).
+struct SetupGuard {
+    server: Option<tokio::task::JoinHandle<std::io::Result<()>>>,
+    join_task: Arc<std::sync::Mutex<JoinSlot>>,
+}
+
+impl SetupGuard {
+    async fn stop(mut self, abort_join: bool) {
+        if let Some(server) = self.server.take() {
+            server.abort();
+            let _ = server.await;
+        }
+        let inflight = match std::mem::replace(
+            &mut *self
+                .join_task
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            JoinSlot::Closed,
+        ) {
+            JoinSlot::Running(handle) => Some(handle),
+            JoinSlot::Idle | JoinSlot::Closed => None,
+        };
+        if let Some(handle) = inflight {
+            if abort_join {
+                handle.abort();
+            }
+            let _ = handle.await;
+        }
+    }
+}
+
+impl Drop for SetupGuard {
+    fn drop(&mut self) {
+        if let Some(server) = self.server.take() {
+            server.abort();
+        }
+        if let JoinSlot::Running(handle) = std::mem::replace(
+            &mut *self
+                .join_task
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            JoinSlot::Closed,
+        ) {
+            handle.abort();
+        }
+    }
 }
 
 #[cfg(not(test))]
@@ -301,6 +358,46 @@ fn setup_network() -> card::SetupWifi {
     }
 }
 
+async fn serve_setup(
+    listener: TcpListener,
+    interface: String,
+    screen: Screen,
+    window: Option<Duration>,
+    apply_delay: Duration,
+) -> bool {
+    let (done, mut finished) = mpsc::channel(1);
+    let join_task = Arc::new(std::sync::Mutex::new(JoinSlot::Idle));
+    let app = Router::new()
+        .route("/", get(form))
+        .route("/wifi", post(apply))
+        .fallback(get(form))
+        .layer(DefaultBodyLimit::max(4096))
+        .with_state(Setup {
+            csrf: auth::random(),
+            interface,
+            done,
+            lock: Arc::new(Mutex::new(())),
+            join_task: join_task.clone(),
+            apply_delay,
+            screen,
+        });
+    let listener = guard::guard(listener, guard::Limits::PAGE);
+    let server = tokio::spawn(async move { axum::serve(listener, app).await });
+    let guard = SetupGuard {
+        server: Some(server),
+        join_task,
+    };
+    let joined = match window {
+        Some(window) => tokio::time::timeout(window, finished.recv())
+            .await
+            .unwrap_or(None)
+            .is_some(),
+        None => finished.recv().await.is_some(),
+    };
+    guard.stop(!joined).await;
+    joined
+}
+
 /// Host the setup hotspot and form until home Wi-Fi connects. With a
 /// `window`, give up after it and remove the hotspot so `NetworkManager` can
 /// rejoin a known network.
@@ -320,38 +417,24 @@ pub async fn setup(screen: &Screen, window: Option<Duration>) -> Result<()> {
         )
         .await?;
     drop(network);
-    let (done, mut finished) = mpsc::channel(1);
-    let app = Router::new()
-        .route("/", get(form))
-        .route("/wifi", post(apply))
-        .fallback(get(form))
-        .layer(DefaultBodyLimit::max(4096))
-        .with_state(Setup {
-            csrf: auth::random(),
-            interface,
-            done,
-            lock: Arc::new(Mutex::new(())),
-            screen: screen.clone(),
-        });
-    let listener = guard::guard(listener, guard::Limits::PAGE);
-    let server = tokio::spawn(async move { axum::serve(listener, app).await });
-    let joined = match window {
-        Some(window) => tokio::time::timeout(window, finished.recv())
-            .await
-            .unwrap_or(None),
-        None => finished.recv().await,
-    };
-    server.abort();
+    let joined = serve_setup(
+        listener,
+        interface,
+        screen.clone(),
+        window,
+        Duration::from_secs(1),
+    )
+    .await;
     // After success the radio is on the home profile, so the hotspot is
     // already down. After a timeout, deleting it frees the radio.
     hotspot.remove().await?;
     match (joined, window) {
-        (Some(()), _) => Ok(()),
-        (None, Some(_)) => {
+        (true, _) => Ok(()),
+        (false, Some(_)) => {
             tracing::info!("Wi-Fi setup window closed; retrying known networks");
             Ok(())
         }
-        (None, None) => bail!("setup closed"),
+        (false, None) => bail!("setup closed"),
     }
 }
 
@@ -370,7 +453,9 @@ const FORM_FIELDS: &str = "<label>Network name \
 
 const CONNECTING: &str = "<h1>Connecting…</h1>\
     <p>Your phone will leave the robot’s setup network. \
-    Watch the robot’s face for the registration QR. \
+    Once online, open the robot’s claim link (from its panel, journal, or \
+    <code>robot-buddy-robot claim-url</code>) and confirm the 6-digit code \
+    by voice or on the panel. \
     If connection fails, rejoin its setup network and try again.</p>";
 
 /// Served for any `Host`, so captive-portal probes land on the form.
@@ -412,20 +497,34 @@ async fn apply(State(s): State<Setup>, headers: HeaderMap, Form(f): Form<WifiFor
     let Ok(guard) = s.lock.clone().try_lock_owned() else {
         return reply(StatusCode::CONFLICT, "Connection attempt in progress");
     };
-    tokio::spawn(async move {
+    let mut slot = s
+        .join_task
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if matches!(*slot, JoinSlot::Closed) {
+        return reply(StatusCode::SERVICE_UNAVAILABLE, "Setup session closed");
+    }
+    let delay = s.apply_delay;
+    let interface = s.interface.clone();
+    let done = s.done.clone();
+    let screen = s.screen.clone();
+    *slot = JoinSlot::Running(tokio::spawn(async move {
         let _guard = guard;
         // Let the response reach the phone before the radio switches.
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        match join_home(&s.interface, &f).await {
+        if !delay.is_zero() {
+            tokio::time::sleep(delay).await;
+        }
+        match join_home(&interface, &f).await {
             Ok(()) => {
-                let _ = s.done.send(()).await;
+                let _ = done.send(()).await;
             }
             Err(error) => {
                 tracing::warn!(%error, "Wi-Fi connection failed; restoring setup network");
-                restore_setup(&s.screen).await;
+                restore_setup(&screen).await;
             }
         }
-    });
+    }));
+    drop(slot);
     let mut response = Html(CONNECTING).into_response();
     local_headers(&mut response);
     response
@@ -700,6 +799,10 @@ case " $* " in
     [ -n "$u" ] && [ -e "$dir/p/$u.name" ] || missing "$uuid$id"
     rm "$dir/p/$u.name" "$dir/p/$u.auto";;
   *" connection up "*)
+    if [ -e "$dir/slow-up" ]; then
+      echo $$ > "$dir/up-pid"
+      exec sleep 30
+    fi
     if [ -e "$dir/fail-up" ]; then
       [ -n "$secret" ] && cat "$secret" >&2
       echo "Error: Connection activation failed: Secrets were required" >&2; exit 4
@@ -816,6 +919,8 @@ exit 0
             interface: "wlan0".into(),
             done,
             lock: Arc::new(Mutex::new(())),
+            join_task: Arc::new(std::sync::Mutex::new(JoinSlot::Idle)),
+            apply_delay: Duration::ZERO,
             screen: Screen::new(),
         }
     }
@@ -1082,5 +1187,96 @@ exit 0
             .await
             .unwrap_err();
         assert!(error.to_string().contains("cannot listen"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn setup_timeout_cancels_inflight_join_home_cleanly() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let _serial = SERIAL.lock().await;
+        let fake = Fake::reset();
+        fake.set("slow-up", "");
+        let screen = Screen::at(crate::screen::Address::Off);
+        screen.show("initial setup status", "").await.unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+
+        let setup_task = tokio::spawn(serve_setup(
+            listener,
+            "wlan0".into(),
+            screen.clone(),
+            Some(Duration::from_millis(400)),
+            Duration::ZERO,
+        ));
+
+        // Fetch the form to extract the CSRF token.
+        let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+        stream
+            .write_all(b"GET / HTTP/1.1\r\nHost: 10.42.0.1\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        let mut page = String::new();
+        stream.read_to_string(&mut page).await.unwrap();
+        let csrf = page
+            .split("name=csrf value=\"")
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+            .expect("csrf token in form");
+
+        // Submit the home Wi-Fi form so `join_home` starts and blocks in `nmcli connection up`.
+        let body = format!("csrf={csrf}&ssid=MyNet&password=password123");
+        let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+        let req = format!(
+            "POST /wifi HTTP/1.1\r\nHost: 10.42.0.1\r\nOrigin: http://10.42.0.1\r\n\
+             Content-Type: application/x-www-form-urlencoded\r\n\
+             Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        stream.write_all(req.as_bytes()).await.unwrap();
+        let mut reply = String::new();
+        stream.read_to_string(&mut reply).await.unwrap();
+        assert!(reply.starts_with("HTTP/1.1 200 OK"), "{reply}");
+        assert!(!reply.contains("face for the registration QR"), "{reply}");
+        assert!(reply.contains("claim-url"), "{reply}");
+
+        // Wait until `join_home` has spawned `nmcli connection up`.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while fake.read("up-pid").trim().is_empty() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "join_home never reached nmcli connection up: {:?}",
+                fake.log()
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let pid: i32 = fake.read("up-pid").trim().parse().unwrap();
+
+        // When the window expires, `serve_setup` aborts and awaits `join_home`
+        // (killing `nmcli`) promptly rather than waiting 30 s.
+        let joined = tokio::time::timeout(Duration::from_secs(5), setup_task)
+            .await
+            .expect("setup timed out instead of aborting join_home")
+            .unwrap();
+        assert!(!joined);
+        let log_after_return = fake.log();
+        // Give any stray task a moment to prove nothing mutates NM or screen afterward.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert_eq!(
+            fake.log(),
+            log_after_return,
+            "no nmcli calls after setup returned"
+        );
+        assert_eq!(
+            screen.message().await,
+            "initial setup status",
+            "screen status not overwritten after setup returned"
+        );
+        // The `nmcli` (`sleep 30`) child was killed via `kill_on_drop`.
+        let alive = std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stderr(Stdio::null())
+            .status()
+            .unwrap()
+            .success();
+        assert!(!alive, "nmcli child {pid} still alive after setup timeout");
     }
 }

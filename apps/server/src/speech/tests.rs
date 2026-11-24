@@ -340,7 +340,7 @@ fn five_sentences() -> Script {
 }
 
 /// Eval (a): real time, 300 ms TTFB, 1 s sentences streamed at real-time rate.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn eval_gap_lookahead_vs_sequential() {
     let measure = |lookahead: bool| async move {
         let admission = Admission::new(4);
@@ -390,7 +390,7 @@ async fn eval_gap_lookahead_vs_sequential() {
 }
 
 /// Eval (b): chunk 0 commits 400 ms after the request; first byte follows the commit.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn eval_first_byte_follows_commit() {
     let measure = |events: bool| async move {
         let admission = Admission::new(4);
@@ -423,7 +423,7 @@ async fn eval_first_byte_follows_commit() {
 }
 
 /// Eval (c): dropping the body releases the lease and cancels both syntheses.
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn eval_barge_in_releases_promptly() {
     let admission = Admission::new(4);
     let synth = FakeSynth::new(ms(100), ms(1000));
