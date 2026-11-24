@@ -11,3 +11,14 @@ The hardware bring-up checklist is in [DEPLOYMENT.md](../DEPLOYMENT.md). Passing
 | Independent verification | Final OpenCode Neon review on the candidate; record decision, residuals, and CI status for the PR head. |
 
 Hardware checks remain separate even after these gates pass. A virtual servo register map cannot prove neck clearance or torque release. Fake PCM consumption cannot prove acoustic wake accuracy, echo suppression or audible latency. A fixture image cannot qualify the real CSI sensor, lighting, optics or face accuracy.
+
+## Asset-dependent checks on candidate `5351762`
+
+Both normally ignored robot tests below were explicitly run using the **Linux ARM64 full-feature Rust test binary**, not just its mock engine. Each passed. The models and recordings were mounted read-only; none are included in the repository.
+
+| Check | Input and result | What it does not establish |
+|---|---|---|
+| `listen::wake::onnx::tests::compare_reference_scores` | Upstream Python `openwakeword==0.6.0` reference, ONNX Runtime 1.20.1, 195 × 80 ms hops. After the 50-hop warmup, idle and busy decisions matched on all 145 evaluated hops. The positive was [two recorded words from one speaker](../tests/pip-e2e/speech/human-wake-recipe/README.md), edited together and surrounded by recorded human negatives. | Natural contiguous wake-word recall across people, rooms, and playback conditions. |
+| `vision::native::tests::enrollment_matches_another_view_but_not_an_unknown_person` | Pinned [OpenCV fixtures](../tests/pip-e2e/peripherals/fetch-vision-models.sh), YuNet and SFace. Enrolled `face_a_1.i420`, matched the distinct `face_a_2.i420` view to the same entry, and rejected `face_b_1.i420` as unknown. | Accuracy on Pip's camera or on a representative population. A recognition match does not authorize access. |
+
+The [systemd rehearsal](../tests/pip-deploy-qa/EVIDENCE.md) separately exercised the candidate executable with the effective 1 GiB cap, OIDC enrollment, and actual cross-version upgrade/rollback. The [workstation benchmark](research/e2e-latency.md) is a submit-to-output regression check, not a substitute for either test or the loaded soak.
