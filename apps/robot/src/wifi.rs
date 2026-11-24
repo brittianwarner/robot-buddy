@@ -410,13 +410,18 @@ pub async fn setup(screen: &Screen, window: Option<Duration>) -> Result<()> {
     let network = setup_network();
     let hotspot = Hotspot::start(&interface, &network.ssid, network.password.expose()).await?;
     let listener = bind_retrying(SETUP_ADDRESS, BIND_TRIES, BIND_RETRY).await?;
+    let join = network.join_payload();
+    // Only the physical display receives the hotspot PSK. On cancellation the
+    // lease clears the eyes even when the rest of the future cannot run.
+    let eyes = screen.wifi_eyes(join.expose(), SETUP_ORIGIN);
     screen
         .show(
             "Join the setup Wi-Fi on the robot's card, or scan this. Then open http://10.42.0.1",
-            network.join_payload().expose(),
+            join.expose(),
         )
         .await?;
     drop(network);
+    drop(join);
     let joined = serve_setup(
         listener,
         interface,
@@ -425,6 +430,7 @@ pub async fn setup(screen: &Screen, window: Option<Duration>) -> Result<()> {
         Duration::from_secs(1),
     )
     .await;
+    drop(eyes);
     // After success the radio is on the home profile, so the hotspot is
     // already down. After a timeout, deleting it frees the radio.
     hotspot.remove().await?;

@@ -1,5 +1,6 @@
 //! Loopback HTML panel for setup and registration (QR codes, owner confirmation).
 //! The ESP32 face is a separate output; see `face.rs`.
+pub mod operator;
 use crate::guard;
 use anyhow::{Result, bail};
 use axum::{
@@ -119,6 +120,8 @@ impl Allowed {
 
 #[derive(Default)]
 struct Panel {
+    /// Set only from the verified ownership state; a new claim gets a new epoch.
+    operator_epoch: Option<String>,
     message: String,
     /// The value `qr` was rendered from, so an unchanged code is not redrawn.
     qr_value: String,
@@ -131,6 +134,7 @@ struct Panel {
 
 #[derive(Clone)]
 pub struct Screen {
+    hardware: Option<Arc<dyn operator::Hardware>>,
     panel: Arc<RwLock<Panel>>,
     address: Arc<Address>,
     allowed: Arc<Allowed>,
@@ -150,6 +154,7 @@ impl Screen {
 
     pub fn at(address: Address) -> Self {
         Self {
+            hardware: None,
             panel: Arc::new(RwLock::new(Panel {
                 csrf: auth::random(),
                 ..Panel::default()
@@ -157,6 +162,30 @@ impl Screen {
             allowed: Arc::new(Allowed::for_address(&address)),
             address: Arc::new(address),
         }
+    }
+
+    pub fn with_hardware(mut self, hardware: Arc<dyn operator::Hardware>) -> Self {
+        self.hardware = Some(hardware);
+        self
+    }
+
+    /// Enable controls only while the session knows this device has an owner.
+    pub async fn set_owned(&self, owned: bool) {
+        let mut panel = self.panel.write().await;
+        if owned && panel.operator_epoch.is_none() {
+            panel.operator_epoch = Some(auth::random());
+        } else if !owned {
+            panel.operator_epoch = None;
+        }
+    }
+
+    /// A physical-only, cancellation-safe display of the active setup hotspot.
+    pub(crate) fn wifi_eyes<'a>(&'a self, join: &str, url: &str) -> WifiEyes<'a> {
+        let hardware = self.hardware.as_deref();
+        if let Some(device) = hardware {
+            device.wifi_eyes(Some((join, url)));
+        }
+        WifiEyes(hardware)
     }
 
     /// Show a message and optionally a QR code for `qr`. The session repeats
@@ -211,6 +240,7 @@ impl Screen {
 
     /// Start the panel in the background, unless `BUDDY_SCREEN_ADDR` is off.
     pub async fn serve(&self) -> Result<()> {
+        operator::serve(self).await?;
         let address = match &*self.address {
             Address::Off => {
                 tracing::info!("screen panel off");
@@ -231,6 +261,16 @@ impl Screen {
             }
         });
         Ok(())
+    }
+}
+
+pub(crate) struct WifiEyes<'a>(Option<&'a dyn operator::Hardware>);
+
+impl Drop for WifiEyes<'_> {
+    fn drop(&mut self) {
+        if let Some(device) = self.0 {
+            device.wifi_eyes(None);
+        }
     }
 }
 
