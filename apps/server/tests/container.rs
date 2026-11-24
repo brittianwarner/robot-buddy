@@ -8,6 +8,7 @@ use robot_buddy::{Bot, auth::Identity, protocol::*};
 use serde_json::{Value, json};
 
 #[tokio::test]
+#[allow(clippy::too_many_lines, reason = "one end-to-end boot scenario")]
 #[ignore = "requires isolated container and BUDDY_TEST_IDENTITY_FILE"]
 async fn first_boot_recovers_identity_and_scopes_the_rivet_client() -> Result<()> {
     let server = std::env::var("BUDDY_TEST_SERVER_URL")?;

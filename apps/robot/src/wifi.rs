@@ -1,10 +1,10 @@
-//! App-free SoftAP setup. Network credentials never leave this process for a cloud service.
-use crate::screen::{Screen, escape};
+//! App-free `SoftAP` setup. Network credentials never leave this process for a cloud service.
+use crate::screen::{Screen, escape, header_in, local_headers};
 use anyhow::{Context, Result, bail, ensure};
 use axum::{
     Router,
     extract::{DefaultBodyLimit, Form, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
@@ -16,6 +16,10 @@ use tokio::sync::{Mutex, mpsc};
 const SETUP_ID: &str = "robot-buddy-setup";
 const HOME_ID: &str = "robot-buddy-home";
 const SETUP_HOST: &str = "10.42.0.1";
+const SETUP_HOSTS: [&str; 2] = [SETUP_HOST, "10.42.0.1:80"];
+/// Phone browsers send `Origin` on every form POST (same-origin included); a missing one
+/// is refused. The setup page's `same-origin` referrer policy keeps it from being `null`.
+const SETUP_ORIGIN: &str = "http://10.42.0.1";
 const NM_DEADLINE: Duration = Duration::from_secs(45);
 
 #[derive(Clone)]
@@ -29,6 +33,9 @@ struct Setup {
 
 /// Run `nmcli` with each argument passed separately (no shell). The child is
 /// killed if it overruns the deadline.
+///
+/// No `--` separator: nmcli does not document one for these subcommands. Every positional
+/// value is a constant, a path we built, or an interface name that cannot start with `-`.
 async fn nm(args: &[&str]) -> Result<String> {
     let mut command = tokio::process::Command::new("nmcli");
     command.args(args).stdin(Stdio::null()).kill_on_drop(true);
@@ -43,14 +50,20 @@ async fn nm(args: &[&str]) -> Result<String> {
     Ok(String::from_utf8(output.stdout)?)
 }
 
+/// `^[A-Za-z0-9][A-Za-z0-9_-]{0,14}$`: a Linux interface name that nmcli cannot mistake
+/// for an option and that is safe inside a keyfile line.
+fn valid_interface(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    (1..=15).contains(&bytes.len())
+        && bytes[0].is_ascii_alphanumeric()
+        && bytes
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+}
+
 fn interface() -> Result<String> {
     let interface = std::env::var("BUDDY_WIFI_INTERFACE").unwrap_or_else(|_| "wlan0".into());
-    let valid = !interface.is_empty()
-        && interface.len() <= 15
-        && interface
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "_-".contains(c));
-    ensure!(valid, "invalid interface");
+    ensure!(valid_interface(&interface), "invalid BUDDY_WIFI_INTERFACE");
     Ok(interface)
 }
 
@@ -63,7 +76,7 @@ pub async fn connected() -> Result<bool> {
 }
 
 /// Host the setup hotspot and form until home Wi-Fi connects. With a
-/// `window`, give up after it and remove the hotspot so NetworkManager can
+/// `window`, give up after it and remove the hotspot so `NetworkManager` can
 /// rejoin a known network.
 pub async fn setup(screen: &Screen, window: Option<Duration>) -> Result<()> {
     ensure!(
@@ -147,11 +160,21 @@ const CONNECTING: &str = "<h1>Connecting…</h1>\
     Watch the robot’s face for the registration QR. \
     If connection fails, rejoin its setup network and try again.</p>";
 
-async fn form(State(s): State<Setup>) -> Html<String> {
-    Html(format!(
+/// Served for any `Host`, so captive-portal probes land on the form.
+async fn form(State(s): State<Setup>) -> Response {
+    let mut response = Html(format!(
         "{FORM_HEAD}<input type=hidden name=csrf value=\"{}\">{FORM_FIELDS}",
         escape(&s.csrf)
     ))
+    .into_response();
+    local_headers(&mut response);
+    response
+}
+
+fn reply(status: StatusCode, body: &'static str) -> Response {
+    let mut response = (status, body).into_response();
+    local_headers(&mut response);
+    response
 }
 
 #[derive(Deserialize)]
@@ -162,22 +185,19 @@ struct WifiForm {
 }
 
 async fn apply(State(s): State<Setup>, headers: HeaderMap, Form(f): Form<WifiForm>) -> Response {
-    let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
-    let host = header("host").unwrap_or("");
-    if host != SETUP_HOST && host != "10.42.0.1:80" {
-        return (StatusCode::FORBIDDEN, "Invalid host").into_response();
+    if !header_in(&headers, header::HOST, &SETUP_HOSTS) {
+        return reply(StatusCode::FORBIDDEN, "Invalid host");
     }
-    let foreign = header("origin").is_some_and(|o| o != "http://10.42.0.1")
-        || headers.get("origin").is_some_and(|o| o.to_str().is_err());
-    if foreign || f.csrf != s.csrf {
-        return (StatusCode::FORBIDDEN, "Invalid setup session").into_response();
+    let same_origin = header_in(&headers, header::ORIGIN, &[SETUP_ORIGIN]);
+    if !same_origin || !auth::ct_eq(f.csrf.as_bytes(), s.csrf.as_bytes()) {
+        return reply(StatusCode::FORBIDDEN, "Invalid setup session");
     }
     if validate(&f.ssid, &f.password).is_err() {
         let message = "Enter a valid network name and WPA password.";
-        return (StatusCode::BAD_REQUEST, message).into_response();
+        return reply(StatusCode::BAD_REQUEST, message);
     }
     let Ok(guard) = s.lock.clone().try_lock_owned() else {
-        return (StatusCode::CONFLICT, "Connection attempt in progress").into_response();
+        return reply(StatusCode::CONFLICT, "Connection attempt in progress");
     };
     tokio::spawn(async move {
         let _guard = guard;
@@ -193,7 +213,9 @@ async fn apply(State(s): State<Setup>, headers: HeaderMap, Form(f): Form<WifiFor
             }
         }
     });
-    Html(CONNECTING).into_response()
+    let mut response = Html(CONNECTING).into_response();
+    local_headers(&mut response);
+    response
 }
 
 async fn join_home(s: &Setup, f: &WifiForm) -> Result<()> {
@@ -238,9 +260,39 @@ fn validate(ssid: &str, password: &str) -> Result<()> {
     Ok(())
 }
 
-/// NetworkManager keyfile escaping for a string value.
+/// `GLib` key-file escaping for a string value: `\\`, `\s` for spaces, `\n`, `\t`, `\r`.
+///
+/// `GLib` only needs `\s` for leading spaces but decodes it anywhere; escaping every space
+/// keeps profiles byte-identical to earlier releases. `;` and `#` stay literal: `;` only
+/// separates list values and `#` only starts a comment at the start of a line.
 fn keyfile(value: &str) -> String {
-    value.replace('\\', "\\\\").replace(' ', "\\s")
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            ' ' => out.push_str("\\s"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// `NetworkManager` reads `ssid=` as bytes and treats `;`-separated integers as a byte list,
+/// with its own `\;` unescaping for strings. An SSID containing `;` or `\` is therefore
+/// written as the unambiguous byte list (`ssid=97;59;98;`), as `NetworkManager` does itself.
+fn ssid_value(ssid: &str) -> String {
+    if ssid.contains([';', '\\']) {
+        ssid.bytes().fold(String::new(), |mut out, b| {
+            out.push_str(&b.to_string());
+            out.push(';');
+            out
+        })
+    } else {
+        keyfile(ssid)
+    }
 }
 
 struct Profile<'a> {
@@ -268,7 +320,7 @@ fn profile_text(p: &Profile<'_>, uuid: &str) -> String {
         String::new(),
         "[wifi]".into(),
         format!("mode={mode}"),
-        format!("ssid={}", keyfile(p.ssid)),
+        format!("ssid={}", ssid_value(p.ssid)),
         String::new(),
         "[wifi-security]".into(),
         "key-mgmt=wpa-psk".into(),
@@ -282,6 +334,7 @@ fn profile_text(p: &Profile<'_>, uuid: &str) -> String {
 
 fn write_profile(profile: &Profile<'_>) -> Result<PathBuf> {
     validate(profile.ssid, profile.password)?;
+    ensure!(valid_interface(profile.interface), "invalid interface");
     let path = PathBuf::from(format!(
         "/etc/NetworkManager/system-connections/robot-buddy-{}.nmconnection",
         profile.name
@@ -312,9 +365,101 @@ mod tests {
     #[test]
     fn escapes_network_values() {
         assert_eq!(keyfile("a b\\c"), "a\\sb\\\\c");
+        assert_eq!(keyfile(" lead"), "\\slead");
+        assert_eq!(keyfile("a\nb\tc\rd"), "a\\nb\\tc\\rd");
+        assert_eq!(keyfile("p;a#ss"), "p;a#ss");
+        assert_eq!(ssid_value("My Net"), "My\\sNet");
+        assert_eq!(ssid_value("Café"), "Café");
+        assert_eq!(ssid_value("a;b"), "97;59;98;");
+        assert_eq!(ssid_value("1;2;"), "49;59;50;59;");
+        assert_eq!(ssid_value("a\\b"), "97;92;98;");
     }
 
-    /// The profile text must stay byte-for-byte what NetworkManager received
+    #[test]
+    fn interface_names_cannot_be_options() {
+        for ok in ["wlan0", "wlp2s0", "w", "a_b-c", "abcdefghijklmno"] {
+            assert!(valid_interface(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "-wlan0",
+            "_wlan0",
+            "wlan 0",
+            "wlan0\n",
+            "abcdefghijklmnop",
+            "wlån0",
+        ] {
+            assert!(!valid_interface(bad), "{bad:?}");
+        }
+    }
+
+    fn setup() -> Setup {
+        let (done, _) = mpsc::channel(1);
+        Setup {
+            csrf: "setup-csrf".into(),
+            interface: "wlan0".into(),
+            done,
+            lock: Arc::new(Mutex::new(())),
+            screen: Screen::new(),
+        }
+    }
+
+    fn request(host: &str, origin: Option<&str>) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, host.parse().unwrap());
+        if let Some(origin) = origin {
+            headers.insert(header::ORIGIN, origin.parse().unwrap());
+        }
+        headers
+    }
+
+    async fn post(headers: HeaderMap, csrf: &str, ssid: &str) -> Response {
+        let form = WifiForm {
+            csrf: csrf.into(),
+            ssid: ssid.into(),
+            password: "password123".into(),
+        };
+        apply(State(setup()), headers, Form(form)).await
+    }
+
+    #[tokio::test]
+    async fn setup_form_requires_host_origin_and_csrf() {
+        let origin = Some(SETUP_ORIGIN);
+        for (headers, csrf) in [
+            (request(SETUP_HOST, None), "setup-csrf"),
+            (
+                request(SETUP_HOST, Some("http://attacker.example")),
+                "setup-csrf",
+            ),
+            (request(SETUP_HOST, Some("null")), "setup-csrf"),
+            (request("attacker.example", origin), "setup-csrf"),
+            (request(SETUP_HOST, origin), "forged"),
+        ] {
+            let response = post(headers, csrf, "home").await;
+            assert_eq!(response.status(), StatusCode::FORBIDDEN);
+            assert_eq!(response.headers()[header::X_FRAME_OPTIONS], "DENY");
+        }
+        // Passing every check reaches validation (an invalid SSID stops before nmcli).
+        let response = post(request("10.42.0.1:80", origin), "setup-csrf", "").await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let page = form(State(setup())).await;
+        assert_eq!(page.headers()[header::CACHE_CONTROL], "no-store");
+        assert_eq!(page.headers()[header::REFERRER_POLICY], "same-origin");
+    }
+
+    #[test]
+    fn profile_rejects_an_invalid_interface() {
+        let profile = Profile {
+            name: "home",
+            ssid: "home",
+            password: "password123",
+            interface: "-x",
+            access_point: false,
+        };
+        assert!(write_profile(&profile).is_err());
+    }
+
+    /// The profile text must stay byte-for-byte what `NetworkManager` received
     /// before this module was reformatted.
     #[test]
     fn profile_text_is_unchanged() {

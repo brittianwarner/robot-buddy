@@ -1,8 +1,14 @@
 //! Optional operator-only simulator. All chat calls use the real Rivet actors.
-use super::*;
-use axum::http::header;
+use super::{
+    App, Arc, Bot, Call, Command, Context, Deserialize, Duration, EnrollmentRequest, GetOptions,
+    HeaderMap, HeaderValue, IntoResponse, Json, Kind, Reject, Response, Result, Router, Serialize,
+    SpeechRequest, State, StatusCode, TypedClientExt, Value, Web, auth, cookie, get, header, json,
+    post, require, same_origin, web,
+};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
+use web::ApiError;
+use web::CookieSpec;
 
 #[derive(Serialize, Deserialize)]
 struct LabSession {
@@ -39,50 +45,62 @@ pub fn routes() -> Router<Arc<App>> {
             },
         ))
 }
-fn configured(app: &App) -> Result<&str> {
-    app.lab_token.as_deref().context("lab disabled")
+fn configured(app: &App) -> Web<&str> {
+    app.lab_token
+        .as_ref()
+        .map(|t| t.expose().as_str())
+        .reject(Kind::NotFound)
 }
-fn origin(app: &App, headers: &HeaderMap) -> Result<()> {
-    let expected = url::Url::parse(&app.public_url)?
-        .origin()
-        .ascii_serialization();
-    ensure!(
-        headers.get("origin").and_then(|v| v.to_str().ok()) == Some(expected.as_str()),
-        "origin rejected"
-    );
-    Ok(())
+fn origin(app: &App, headers: &HeaderMap) -> Web<()> {
+    require(same_origin(&app.public_origin, headers), Kind::Forbidden)
 }
-fn session(app: &App, headers: &HeaderMap, mutation: bool) -> Result<LabSession> {
+fn session(app: &App, headers: &HeaderMap, mutation: bool) -> Web<LabSession> {
     configured(app)?;
-    let cookie = headers
-        .get(header::COOKIE)
-        .context("login required")?
-        .to_str()?
-        .split(';')
-        .find_map(|s| s.trim().strip_prefix("buddy_lab="))
-        .context("login required")?;
-    let session: LabSession = auth::verify(&app.key, "lab", cookie)?;
-    ensure!(session.expires > auth::now(), "lab session expired");
+    let raw = cookie(headers, "buddy_lab").reject(Kind::Unauthorized)?;
+    let session: LabSession = auth::verify(&app.key, "lab", raw).reject(Kind::Unauthorized)?;
+    require(session.expires > auth::now(), Kind::Unauthorized)?;
     if mutation {
         origin(app, headers)?;
-        ensure!(
-            headers.get("x-buddy-csrf").and_then(|v| v.to_str().ok())
-                == Some(session.csrf.as_str()),
-            "CSRF rejected"
-        );
+        let supplied = headers
+            .get("x-buddy-csrf")
+            .map(HeaderValue::as_bytes)
+            .unwrap_or_default();
+        require(
+            auth::ct_eq(supplied, session.csrf.as_bytes()),
+            Kind::Forbidden,
+        )?;
     }
     Ok(session)
 }
-fn cookie(app: &App, s: &LabSession) -> Result<HeaderValue> {
-    let secure = if app.public_url.starts_with("https:") {
-        "; Secure"
-    } else {
-        ""
+fn lab_cookie(app: &App) -> CookieSpec {
+    CookieSpec {
+        name: "buddy_lab",
+        path: "/lab",
+        same_site: "Strict",
+        max_age: 3600,
+        secure: app.secure_cookies(),
+    }
+}
+fn cookie_for(app: &App, s: &LabSession) -> Web<HeaderValue> {
+    let signed = auth::sign(&app.key, "lab", s).reject(Kind::Internal)?;
+    lab_cookie(app).set(&signed).reject(Kind::Internal)
+}
+/// Both tokens are run through HMAC under the server key, with the token as the message, and the
+/// tags compared in constant time. (A token in the HMAC key position is zero-padded to the
+/// block size, so `token` and `token\0` would collide.)
+fn lab_token_matches(key: &[u8], expected: &str, supplied: &str) -> bool {
+    let tag = |token: &str| {
+        let mut mac = Hmac::<Sha256>::new_from_slice(key).ok()?;
+        mac.update(b"lab-login.");
+        mac.update(token.as_bytes());
+        Some(mac)
     };
-    Ok(HeaderValue::from_str(&format!(
-        "buddy_lab={}; HttpOnly; SameSite=Strict; Path=/lab; Max-Age=3600{secure}",
-        auth::sign(&app.key, "lab", s)?
-    ))?)
+    let (Some(expected), Some(supplied)) = (tag(expected), tag(supplied)) else {
+        return false;
+    };
+    supplied
+        .verify_slice(&expected.finalize().into_bytes())
+        .is_ok()
 }
 fn asset(content: &'static str, content_type: &'static str) -> Response {
     let mut response = ([(header::CONTENT_TYPE, content_type)], content).into_response();
@@ -132,14 +150,11 @@ async fn login(
 ) -> Web<Response> {
     origin(&app, &headers)?;
     let expected = configured(&app)?;
-    if !(32..=256).contains(&body.token.len()) {
-        return Err(anyhow::anyhow!("invalid lab credential").into());
-    }
-    let mut mac = Hmac::<Sha256>::new_from_slice(expected.as_bytes())?;
-    mac.update(b"lab-login");
-    let mut supplied = Hmac::<Sha256>::new_from_slice(body.token.as_bytes())?;
-    supplied.update(b"lab-login");
-    mac.verify_slice(&supplied.finalize().into_bytes())?;
+    require(
+        (32..=256).contains(&body.token.len())
+            && lab_token_matches(app.key.expose(), expected, &body.token),
+        Kind::Unauthorized,
+    )?;
     let s = LabSession {
         bot: None,
         csrf: auth::random(),
@@ -148,7 +163,7 @@ async fn login(
     let mut response = Json(json!({"csrf":s.csrf})).into_response();
     response
         .headers_mut()
-        .insert(header::SET_COOKIE, cookie(&app, &s)?);
+        .insert(header::SET_COOKIE, cookie_for(&app, &s)?);
     security_headers(&mut response);
     Ok(response)
 }
@@ -157,14 +172,18 @@ async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> Web<Response
     let mut r = StatusCode::NO_CONTENT.into_response();
     r.headers_mut().insert(
         header::SET_COOKIE,
-        HeaderValue::from_static("buddy_lab=; HttpOnly; SameSite=Strict; Path=/lab; Max-Age=0"),
+        lab_cookie(&app).clear().reject(Kind::Internal)?,
     );
     Ok(r)
 }
 async fn state(State(app): State<Arc<App>>, headers: HeaderMap) -> Web<Json<Value>> {
     let s = session(&app, &headers, false)?;
     let bot = if let Some(bot) = s.bot.as_deref() {
-        Some(device_call(&app, bot, "bot", Command::Snapshot).await?)
+        Some(
+            device_call(&app, bot, "bot", Command::Snapshot)
+                .await
+                .reject(Kind::BadGateway)?,
+        )
     } else {
         None
     };
@@ -196,7 +215,7 @@ async fn enroll_device(
     .into_response();
     response
         .headers_mut()
-        .insert(header::SET_COOKIE, cookie(&app, &s)?);
+        .insert(header::SET_COOKIE, cookie_for(&app, &s)?);
     security_headers(&mut response);
     Ok(response)
 }
@@ -206,7 +225,6 @@ async fn action(
     Json(body): Json<Action>,
 ) -> Web<Json<Value>> {
     let s = session(&app, &headers, true)?;
-    let bot = s.bot.context("enroll a device first")?;
     if !matches!(
         (&*body.target, &body.command),
         (
@@ -231,22 +249,28 @@ async fn action(
             Command::Snapshot | Command::SearchMemory { .. } | Command::Forget { .. }
         )
     ) {
-        return Err(anyhow::anyhow!("command not allowed in lab").into());
+        return Err(ApiError(Kind::Forbidden));
     }
+    let bot = s.bot.reject(Kind::BadRequest)?;
     let claim = matches!(body.command, Command::BeginClaim);
-    let mut value = device_call(&app, &bot, &body.target, body.command).await?;
+    let mut value = device_call(&app, &bot, &body.target, body.command)
+        .await
+        .reject(Kind::BadGateway)?;
     if claim {
-        let mut url = url::Url::parse(&format!("{}/claim", app.public_url.trim_end_matches('/')))?;
-        url.query_pairs_mut()
-            .append_pair("bot", &bot)
-            .append_pair("token", value["token"].as_str().context("claim token")?);
-        let qr = qrcode::QrCode::new(url.as_str())?
-            .render::<qrcode::render::svg::Color>()
-            .min_dimensions(220, 220)
-            .build();
-        value = json!({"url":url.as_str(),"qr":qr,"expires":value["expires"]});
+        value = claim_qr(&app, &bot, &value).reject(Kind::Internal)?;
     }
     Ok(Json(value))
+}
+fn claim_qr(app: &App, bot: &str, claim: &Value) -> Result<Value> {
+    let mut url = url::Url::parse(&format!("{}/claim", app.public_url.trim_end_matches('/')))?;
+    url.query_pairs_mut()
+        .append_pair("bot", bot)
+        .append_pair("token", claim["token"].as_str().context("claim token")?);
+    let qr = qrcode::QrCode::new(url.as_str())?
+        .render::<qrcode::render::svg::Color>()
+        .min_dimensions(220, 220)
+        .build();
+    Ok(json!({"url":url.as_str(),"qr":qr,"expires":claim["expires"]}))
 }
 async fn device_call(app: &App, bot: &str, target: &str, command: Command) -> Result<Value> {
     let session = app.session(bot, "device")?;
@@ -292,8 +316,11 @@ async fn speech(
     Json(body): Json<SpeechRequest>,
 ) -> Web<Response> {
     let s = session(&app, &headers, true)?;
-    let bot = s.bot.context("enroll a device first")?;
-    Ok(super::speech::stream(&app, &bot, &app.session(&bot, "device")?, body).await?)
+    let bot = s.bot.reject(Kind::BadRequest)?;
+    require(app.speech.is_some(), Kind::Unavailable)?;
+    let device = app.session(&bot, "device").reject(Kind::Internal)?;
+    // Stream errors (unknown turn, stream capacity) keep the default 400.
+    Ok(super::speech::stream(&app, &bot, &device, body).await?)
 }
 
 async fn voice_js(State(app): State<Arc<App>>) -> Response {
@@ -304,4 +331,19 @@ async fn voice_js(State(app): State<Arc<App>>) -> Response {
         include_str!("lab/voice.js"),
         "text/javascript; charset=utf-8",
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lab_token_rejects_nul_padding() {
+        let key = [7u8; 32];
+        let token = "a".repeat(40);
+        assert!(lab_token_matches(&key, &token, &token));
+        assert!(!lab_token_matches(&key, &token, &format!("{token}\0")));
+        assert!(!lab_token_matches(&key, &token, &format!("{token}\0\0\0")));
+        assert!(!lab_token_matches(&key, &token, &"a".repeat(41)));
+    }
 }

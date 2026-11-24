@@ -1,13 +1,47 @@
 //! Bot-scoped durable facts, independently addressable from conversation history.
-use crate::{auth, protocol::*};
-use anyhow::{Context, Result, bail, ensure};
+use crate::{
+    auth,
+    protocol::{Call, Command, Connection},
+};
+use anyhow::{Result, bail, ensure};
 use async_trait::async_trait;
 use rivetkit::TypedClientExt;
 use rivetkit::{BindParam as P, ColumnValue as V, action, prelude::*};
 use serde_json::{Value, json};
 use std::sync::Arc;
 pub struct Memory {
-    signing_key: Vec<u8>,
+    signing_key: auth::Secret<Vec<u8>>,
+}
+/// Facts per bot. Updating an existing key is always allowed; new keys beyond this fail.
+pub const MAX_FACTS: i64 = 500;
+const KEY_MAX: usize = 128;
+const VALUE_MAX: usize = 2048;
+/// Matches the Conversation `Submit` text cap: the harness searches with the user's text.
+const QUERY_MAX: usize = 8192;
+const QUERY_TERMS: usize = 16;
+const TERM_MAX: usize = 128;
+/// Upsert that refuses a new key once the table holds `MAX_FACTS` rows. One statement, so
+/// concurrent writes cannot both pass the count check.
+const REMEMBER: &str = "INSERT INTO facts(key,value,updated) SELECT ?1,?2,?3 \
+    WHERE (SELECT count(*) FROM facts)<?4 OR EXISTS(SELECT 1 FROM facts WHERE key=?1) \
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated=excluded.updated RETURNING key";
+fn valid_fact(key: &str, value: &str) -> bool {
+    !key.is_empty() && key.len() <= KEY_MAX && !value.is_empty() && value.len() <= VALUE_MAX
+}
+/// FTS5 query: at most 16 quoted terms, each truncated to a bounded number of bytes.
+fn search_terms(query: &str) -> String {
+    query
+        .split_whitespace()
+        .take(QUERY_TERMS)
+        .map(|w| {
+            let mut end = w.len().min(TERM_MAX);
+            while !w.is_char_boundary(end) {
+                end -= 1;
+            }
+            format!("\"{}\"", w[..end].replace('"', "\"\""))
+        })
+        .collect::<Vec<_>>()
+        .join(" OR ")
 }
 fn key(ctx: &Ctx<Memory>) -> Result<String> {
     match ctx.key().first() {
@@ -31,9 +65,7 @@ impl Actor for Memory {
     async fn create(ctx: &Ctx<Self>) -> Result<Self> {
         ctx.sql().exec("CREATE TABLE IF NOT EXISTS facts(key TEXT PRIMARY KEY,value TEXT NOT NULL,updated INTEGER NOT NULL); CREATE VIRTUAL TABLE IF NOT EXISTS facts_search USING fts5(key,value); CREATE TRIGGER IF NOT EXISTS facts_insert AFTER INSERT ON facts BEGIN INSERT INTO facts_search(key,value) VALUES(new.key,new.value); END; CREATE TRIGGER IF NOT EXISTS facts_delete AFTER DELETE ON facts BEGIN DELETE FROM facts_search WHERE key=old.key; END; CREATE TRIGGER IF NOT EXISTS facts_update AFTER UPDATE ON facts BEGIN DELETE FROM facts_search WHERE key=old.key; INSERT INTO facts_search(key,value) VALUES(new.key,new.value); END;").await?;
         Ok(Self {
-            signing_key: std::env::var("BUDDY_SIGNING_KEY")
-                .context("signing key required")?
-                .into_bytes(),
+            signing_key: auth::signing_key_from_env()?,
         })
     }
     async fn on_before_connect(self: Arc<Self>, ctx: Ctx<Self>, p: &Connection) -> Result<()> {
@@ -42,7 +74,7 @@ impl Actor for Memory {
 }
 impl Memory {
     async fn authorize(&self, ctx: &Ctx<Self>, token: &str) -> Result<()> {
-        let session: auth::Session = auth::verify(&self.signing_key, "session", token)?;
+        let session: auth::Session = auth::verify(self.signing_key.expose(), "session", token)?;
         session.validate(&key(ctx)?, None)?;
         crate::actor::check_access(ctx.client()?, &key(ctx)?, token).await
     }
@@ -52,14 +84,22 @@ impl Handler<Call> for Memory {
         self.authorize(&ctx, &call.session).await?;
         match call.command {
             Command::Remember { key, value } => {
-                ensure!(
-                    !key.is_empty() && key.len() <= 128 && !value.is_empty() && value.len() <= 2048,
-                    "invalid memory"
-                );
-                ctx.sql().execute("INSERT INTO facts(key,value,updated) VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated=excluded.updated",Some(vec![P::Text(key),P::Text(value),P::Integer(auth::now())])).await?;
+                ensure!(valid_fact(&key, &value), "invalid memory");
+                let values = vec![
+                    P::Text(key),
+                    P::Text(value),
+                    P::Integer(auth::now()),
+                    P::Integer(MAX_FACTS),
+                ];
+                let saved = ctx.sql().query(REMEMBER, Some(values)).await?.rows;
+                ensure!(!saved.is_empty(), "memory is full; forget a fact first");
                 Ok(json!({"saved":true}))
             }
             Command::Forget { key } => {
+                ensure!(
+                    !key.is_empty() && key.len() <= KEY_MAX,
+                    "invalid memory key"
+                );
                 ctx.sql()
                     .execute("DELETE FROM facts WHERE key=?", Some(vec![P::Text(key)]))
                     .await?;
@@ -81,13 +121,8 @@ impl Handler<Call> for Memory {
                 ))
             }
             Command::SearchMemory { query } => {
-                ensure!(query.len() <= 8192, "query too long");
-                let terms = query
-                    .split_whitespace()
-                    .take(16)
-                    .map(|w| format!("\"{}\"", w.replace('"', "\"\"")))
-                    .collect::<Vec<_>>()
-                    .join(" OR ");
+                ensure!(query.len() <= QUERY_MAX, "query too long");
+                let terms = search_terms(&query);
                 let mut rows = if terms.is_empty() {
                     Vec::new()
                 } else {
@@ -136,4 +171,48 @@ pub async fn call(
             command,
         })
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::{Connection, params};
+
+    fn remember(db: &Connection, key: &str, max: i64) -> bool {
+        db.prepare(REMEMBER)
+            .unwrap()
+            .exists(params![key, "value", 1, max])
+            .unwrap()
+    }
+
+    #[test]
+    fn fact_cap_rejects_new_keys_but_allows_updates() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE facts(key TEXT PRIMARY KEY,value TEXT NOT NULL,updated INTEGER NOT NULL)",
+        )
+        .unwrap();
+        for i in 0..3 {
+            assert!(remember(&db, &format!("k{i}"), 3));
+        }
+        assert!(!remember(&db, "k3", 3), "fourth key must be refused");
+        assert!(remember(&db, "k1", 3), "existing key stays writable");
+        let count: i64 = db
+            .query_row("SELECT count(*) FROM facts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn inputs_are_bounded() {
+        assert!(valid_fact("k", "v"));
+        assert!(!valid_fact("", "v"));
+        assert!(!valid_fact("k", ""));
+        assert!(!valid_fact(&"k".repeat(KEY_MAX + 1), "v"));
+        assert!(!valid_fact("k", &"v".repeat(VALUE_MAX + 1)));
+        let terms = search_terms(&format!("{} {}", "é".repeat(200), "x ".repeat(40)));
+        assert_eq!(terms.matches(" OR ").count(), QUERY_TERMS - 1);
+        assert!(terms.split(" OR ").all(|t| t.len() <= TERM_MAX + 2));
+        assert_eq!(search_terms("say \"hi\""), "\"say\" OR \"\"\"hi\"\"\"");
+    }
 }

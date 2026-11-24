@@ -8,7 +8,7 @@ COPY crates ./crates
 COPY apps ./apps
 RUN --mount=type=cache,id=robot-buddy-registry,target=/usr/local/cargo/registry,sharing=locked --mount=type=cache,id=robot-buddy-target,target=/build/target,sharing=locked cargo build --locked --release --package robot-buddy-server && cp /build/target/release/robot-buddy-server /robot-buddy-server
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl procps tini && rm -rf /var/lib/apt/lists/* && useradd --uid 10001 --create-home buddy && mkdir -p /data && chown buddy:buddy /data
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tini && rm -rf /var/lib/apt/lists/* && useradd --uid 10001 --create-home buddy && mkdir -p /data && chown buddy:buddy /data
 COPY --from=engine /usr/bin/rivet-engine /usr/local/bin/rivet-engine
 COPY --from=build /robot-buddy-server /usr/local/bin/robot-buddy-server
 USER buddy

@@ -96,6 +96,8 @@ The Bot actor stores model policy, personality, enabled tools, capabilities, loc
 
 Configuration is revisioned. The robot applies a complete snapshot atomically and acknowledges its revision. Local hardware facts such as microphone/camera availability are reported capabilities, not authority to enable every tool. The server returns the intersection of hardware support, firmware compatibility and policy.
 
+Implemented owner claim: the robot shows a QR for `GET /claim?bot&token`. That page sets a signed `HttpOnly` cookie bound to the bot, a digest of the token and a CSRF value. `POST /login` requires a same-origin `Origin`, the cookie and the matching form value, then redirects to the IdP with separate random `state` and `nonce`. After the ID token and userinfo check, the Bot actor stores a pending owner and a uniform six-digit code. The owner presses confirm on the robot. Five wrong codes clear the pending claim and its token; the robot starts a new claim once its cached claim expiry passes. The face panel rotates its CSRF token with each new code. Controls and tests: [security](../security.md).
+
 Unclaimed bots may become ready immediately with bot-local memory and limited service budgets. Account claim is optional for the first demo, but required for personal email/calendar, shared person memory or remote ownership controls. Claim requires authenticated user identity plus proof of physical possession; knowing a bot ID is insufficient. Ownership transfer rotates authorization and explicitly clears or quarantines previous personal state before the new owner can access it. Do not automatically attach an anonymous voice speaker to a named person's memory.
 
 ## Reconnect and token renewal
