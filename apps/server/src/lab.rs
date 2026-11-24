@@ -1,21 +1,105 @@
 //! Optional operator-only simulator. All chat calls use the real Rivet actors.
-use super::{
-    App, Arc, Bot, Call, Command, Context, Deserialize, Duration, EnrollmentRequest, GetOptions,
-    HeaderMap, HeaderValue, IntoResponse, Json, Kind, Reject, Response, Result, Router, Serialize,
-    State, StatusCode, TypedClientExt, Value, Web, auth, cookie, get, header, json, post, require,
-    same_origin, web,
+//!
+//! Mounted only when `BUDDY_LAB_TOKEN` is set. Sessions live server-side: the
+//! `buddy_lab` cookie carries only an opaque id, and logout deletes the session. Every
+//! API route but login is checked from headers by [`guard`] (the cookie, and for a POST
+//! the Origin and CSRF header) before its body is read; login checks Origin first.
+use super::{App, Bot, Call, Command, enroll, limit::Admitted, speech, web};
+use anyhow::{Context, Result};
+use axum::{
+    Extension, Json, Router,
+    body::Body,
+    extract::{Request, State},
+    http::{HeaderMap, HeaderValue, Method, header},
+    middleware::{Next, from_fn_with_state, map_response},
+    response::{IntoResponse, Response},
+    routing::{get, post},
 };
 use hmac::{Hmac, Mac};
+use rivetkit::{TypedClientExt, client::GetOptions};
+use robot_buddy::{auth, protocol::EnrollmentRequest};
+use serde::Deserialize;
+use serde_json::{Value, json};
 use sha2::Sha256;
-use web::ApiError;
-use web::CookieSpec;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+use web::{ApiError, CookieSpec, Kind, Reject, Web, cookie, require, same_origin};
 
-#[derive(Serialize, Deserialize)]
+/// Lab sessions alive at once; a new login past this replaces the oldest.
+const MAX_SESSIONS: usize = 32;
+const SESSION_TTL: i64 = 3600;
+
+#[derive(Clone)]
 struct LabSession {
     bot: Option<String>,
     csrf: String,
     expires: i64,
 }
+
+/// Lab sessions, keyed by the digest of their cookie id.
+#[derive(Default)]
+pub struct Sessions(Mutex<HashMap<String, LabSession>>);
+
+impl Sessions {
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, LabSession>> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+    /// A new session and its cookie id.
+    fn create(&self, now: i64) -> (String, LabSession) {
+        let mut sessions = self.lock();
+        sessions.retain(|_, s| s.expires > now);
+        if sessions.len() >= MAX_SESSIONS {
+            let oldest = sessions
+                .iter()
+                .min_by_key(|(_, s)| s.expires)
+                .map(|(k, _)| k.clone());
+            if let Some(key) = oldest {
+                sessions.remove(&key);
+            }
+        }
+        let id = format!("{}{}", auth::random(), auth::random()).replace('-', "");
+        let session = LabSession {
+            bot: None,
+            csrf: auth::random(),
+            expires: now + SESSION_TTL,
+        };
+        sessions.insert(auth::digest(&id), session.clone());
+        (id, session)
+    }
+    fn get(&self, id: &str, now: i64) -> Option<LabSession> {
+        let mut sessions = self.lock();
+        let key = auth::digest(id);
+        match sessions.get(&key) {
+            Some(s) if s.expires > now => Some(s.clone()),
+            Some(_) => {
+                sessions.remove(&key);
+                None
+            }
+            None => None,
+        }
+    }
+    fn set_bot(&self, id: &str, bot: String) {
+        if let Some(session) = self.lock().get_mut(&auth::digest(id)) {
+            session.bot = Some(bot);
+        }
+    }
+    fn remove(&self, id: &str) {
+        self.lock().remove(&auth::digest(id));
+    }
+}
+
+/// The checked session of a lab API request, inserted by [`guard`].
+#[derive(Clone)]
+struct Current {
+    id: String,
+    session: LabSession,
+}
+
 #[derive(Deserialize)]
 struct Login {
     token: String,
@@ -26,39 +110,41 @@ struct Action {
     command: Command,
 }
 
-pub fn routes() -> Router<Arc<App>> {
+pub fn routes(app: &Arc<App>) -> Router<Arc<App>> {
+    let api = Router::new()
+        .route("/lab/api/logout", post(logout))
+        .route("/lab/api/state", get(state))
+        .route("/lab/api/enroll", post(enroll_device))
+        .route("/lab/api/action", post(action))
+        .route("/lab/api/speech", post(speech))
+        .route_layer(from_fn_with_state(app.clone(), guard));
     Router::new()
         .route("/lab", get(index))
         .route("/lab/app.js", get(js))
         .route("/lab/voice.js", get(voice_js))
         .route("/lab/style.css", get(css))
         .route("/lab/api/login", post(login))
-        .route("/lab/api/logout", post(logout))
-        .route("/lab/api/state", get(state))
-        .route("/lab/api/enroll", post(enroll_device))
-        .route("/lab/api/action", post(action))
-        .route("/lab/api/speech", post(speech))
-        .layer(axum::middleware::map_response(
-            |mut response: Response| async move {
-                security_headers(&mut response);
-                response
-            },
-        ))
+        .merge(api)
+        .layer(map_response(|mut response: Response| async move {
+            response.headers_mut().insert(
+                header::CONTENT_SECURITY_POLICY,
+                HeaderValue::from_static(LAB_CSP),
+            );
+            response
+        }))
 }
-fn configured(app: &App) -> Web<&str> {
-    app.lab_token
-        .as_ref()
-        .map(|t| t.expose().as_str())
-        .reject(Kind::NotFound)
-}
+
 fn origin(app: &App, headers: &HeaderMap) -> Web<()> {
     require(same_origin(&app.public_origin, headers), Kind::Forbidden)
 }
-fn session(app: &App, headers: &HeaderMap, mutation: bool) -> Web<LabSession> {
-    configured(app)?;
-    let raw = cookie(headers, "buddy_lab").reject(Kind::Unauthorized)?;
-    let session: LabSession = auth::verify(&app.key, "lab", raw).reject(Kind::Unauthorized)?;
-    require(session.expires > auth::now(), Kind::Unauthorized)?;
+
+/// Checks the session from headers alone; a POST also needs Origin and the CSRF header.
+fn check(app: &App, mutation: bool, headers: &HeaderMap) -> Web<Current> {
+    let id = cookie(headers, "buddy_lab").reject(Kind::Unauthorized)?;
+    let session = app
+        .lab_sessions
+        .get(id, auth::now())
+        .reject(Kind::Unauthorized)?;
     if mutation {
         origin(app, headers)?;
         let supplied = headers
@@ -70,20 +156,31 @@ fn session(app: &App, headers: &HeaderMap, mutation: bool) -> Web<LabSession> {
             Kind::Forbidden,
         )?;
     }
-    Ok(session)
+    Ok(Current {
+        id: id.to_owned(),
+        session,
+    })
 }
+
+async fn guard(State(app): State<Arc<App>>, mut request: Request, next: Next) -> Response {
+    let mutation = request.method() != Method::GET && request.method() != Method::HEAD;
+    match check(&app, mutation, request.headers()) {
+        Ok(current) => {
+            request.extensions_mut().insert(current);
+            next.run(request).await
+        }
+        Err(error) => error.into_response(),
+    }
+}
+
 fn lab_cookie(app: &App) -> CookieSpec {
     CookieSpec {
         name: "buddy_lab",
         path: "/lab",
         same_site: "Strict",
-        max_age: 3600,
+        max_age: SESSION_TTL,
         secure: app.secure_cookies(),
     }
-}
-fn cookie_for(app: &App, s: &LabSession) -> Web<HeaderValue> {
-    let signed = auth::sign(&app.key, "lab", s).reject(Kind::Internal)?;
-    lab_cookie(app).set(&signed).reject(Kind::Internal)
 }
 /// Both tokens are run through HMAC under the server key, with the token as the message, and the
 /// tags compared in constant time. (A token in the HMAC key position is zero-padded to the
@@ -103,81 +200,55 @@ fn lab_token_matches(key: &[u8], expected: &str, supplied: &str) -> bool {
         .is_ok()
 }
 fn asset(content: &'static str, content_type: &'static str) -> Response {
-    let mut response = ([(header::CONTENT_TYPE, content_type)], content).into_response();
-    security_headers(&mut response);
-    response
+    ([(header::CONTENT_TYPE, content_type)], content).into_response()
 }
 const LAB_CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; \
     connect-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; \
     base-uri 'none'";
-pub(super) fn security_headers(response: &mut Response) {
-    response
-        .headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    response
-        .headers_mut()
-        .insert("referrer-policy", HeaderValue::from_static("no-referrer"));
-    response.headers_mut().insert(
-        "x-content-type-options",
-        HeaderValue::from_static("nosniff"),
-    );
-    response
-        .headers_mut()
-        .insert("content-security-policy", HeaderValue::from_static(LAB_CSP));
-}
-async fn index(State(app): State<Arc<App>>) -> Response {
-    if app.lab_token.is_none() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
+async fn index() -> Response {
     asset(include_str!("lab/index.html"), "text/html; charset=utf-8")
 }
-async fn js(State(app): State<Arc<App>>) -> Response {
-    if app.lab_token.is_none() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
+async fn js() -> Response {
     asset(include_str!("lab/app.js"), "text/javascript; charset=utf-8")
 }
-async fn css(State(app): State<Arc<App>>) -> Response {
-    if app.lab_token.is_none() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
+async fn css() -> Response {
     asset(include_str!("lab/style.css"), "text/css; charset=utf-8")
 }
-async fn login(
-    State(app): State<Arc<App>>,
-    headers: HeaderMap,
-    Json(body): Json<Login>,
-) -> Web<Response> {
+/// Origin is checked from headers before the token body is read.
+async fn login(State(app): State<Arc<App>>, headers: HeaderMap, body: Body) -> Web<Response> {
     origin(&app, &headers)?;
-    let expected = configured(&app)?;
+    let expected = app.lab_token.as_ref().reject(Kind::NotFound)?;
+    let body: Login = web::json(&headers, body).await?;
     require(
         (32..=256).contains(&body.token.len())
-            && lab_token_matches(app.key.expose(), expected, &body.token),
+            && lab_token_matches(app.key.expose(), expected.expose(), &body.token),
         Kind::Unauthorized,
     )?;
-    let s = LabSession {
-        bot: None,
-        csrf: auth::random(),
-        expires: auth::now() + 3600,
-    };
-    let mut response = Json(json!({"csrf":s.csrf})).into_response();
-    response
-        .headers_mut()
-        .insert(header::SET_COOKIE, cookie_for(&app, &s)?);
-    security_headers(&mut response);
+    let (id, session) = app.lab_sessions.create(auth::now());
+    let mut response = Json(json!({"csrf":session.csrf})).into_response();
+    response.headers_mut().insert(
+        header::SET_COOKIE,
+        lab_cookie(&app).set(&id).reject(Kind::Internal)?,
+    );
     Ok(response)
 }
-async fn logout(State(app): State<Arc<App>>, headers: HeaderMap) -> Web<Response> {
-    session(&app, &headers, true)?;
-    let mut r = StatusCode::NO_CONTENT.into_response();
+/// Ends the session server-side, so the cookie is dead even if a copy survives.
+async fn logout(
+    State(app): State<Arc<App>>,
+    Extension(current): Extension<Current>,
+) -> Web<Response> {
+    app.lab_sessions.remove(&current.id);
+    let mut r = axum::http::StatusCode::NO_CONTENT.into_response();
     r.headers_mut().insert(
         header::SET_COOKIE,
         lab_cookie(&app).clear().reject(Kind::Internal)?,
     );
     Ok(r)
 }
-async fn state(State(app): State<Arc<App>>, headers: HeaderMap) -> Web<Json<Value>> {
-    let s = session(&app, &headers, false)?;
+async fn state(
+    State(app): State<Arc<App>>,
+    Extension(Current { session: s, .. }): Extension<Current>,
+) -> Web<Json<Value>> {
     let bot = if let Some(bot) = s.bot.as_deref() {
         Some(
             device_call(&app, bot, "bot", Command::Snapshot)
@@ -200,31 +271,27 @@ async fn state(State(app): State<Arc<App>>, headers: HeaderMap) -> Web<Json<Valu
 }
 async fn enroll_device(
     State(app): State<Arc<App>>,
+    Extension(current): Extension<Current>,
     headers: HeaderMap,
-    Json(body): Json<EnrollmentRequest>,
-) -> Web<Response> {
-    let mut s = session(&app, &headers, true)?;
-    let Json(bundle) = super::enroll(State(app.clone()), Json(body)).await?;
-    s.bot = Some(bundle.bot_id.clone());
-    let mut response = Json(json!({
+    body: Body,
+) -> Web<Json<Value>> {
+    let request: EnrollmentRequest = web::json(&headers, body).await?;
+    let bundle = enroll::enroll_request(&app, request).await?;
+    app.lab_sessions.set_bot(&current.id, bundle.bot_id.clone());
+    Ok(Json(json!({
         "bot_id": bundle.bot_id,
         "actor_id": bundle.actor_id,
         "conversation_actor_id": bundle.conversation_actor_id,
         "memory_actor_id": bundle.memory_actor_id,
-    }))
-    .into_response();
-    response
-        .headers_mut()
-        .insert(header::SET_COOKIE, cookie_for(&app, &s)?);
-    security_headers(&mut response);
-    Ok(response)
+    })))
 }
 async fn action(
     State(app): State<Arc<App>>,
+    Extension(Current { session: s, .. }): Extension<Current>,
     headers: HeaderMap,
-    Json(body): Json<Action>,
+    body: Body,
 ) -> Web<Json<Value>> {
-    let s = session(&app, &headers, true)?;
+    let body: Action = web::json(&headers, body).await?;
     if !matches!(
         (&*body.target, &body.command),
         (
@@ -310,27 +377,21 @@ async fn device_call(app: &App, bot: &str, target: &str, command: Command) -> Re
         .context("actor request timed out")?
 }
 
-/// Cookie, Origin and CSRF are checked from headers before the body is read.
+/// The session, Origin and CSRF were checked by [`guard`] before the body is read.
 async fn speech(
     State(app): State<Arc<App>>,
-    admitted: Option<axum::Extension<super::limit::Admitted>>,
-    headers: HeaderMap,
-    body: axum::body::Body,
+    Extension(Current { session: s, .. }): Extension<Current>,
+    admitted: Option<Extension<Admitted>>,
+    body: Body,
 ) -> Web<Response> {
-    let s = session(&app, &headers, true)?;
     let bot = s.bot.reject(Kind::BadRequest)?;
     require(app.speech.is_some(), Kind::Unavailable)?;
-    let body = super::speech::read(body).await?;
-    let device = app.session(&bot, "device").reject(Kind::Internal)?;
-    let admitted = admitted.map(|axum::Extension(admitted)| admitted);
-    // Speech maps its own errors: 429 at the stream cap, 400 for an unknown turn.
-    super::speech::stream(&app, admitted.as_ref(), &bot, &device, body).await
+    let body = speech::read(body).await?;
+    let admitted = admitted.map(|Extension(admitted)| admitted);
+    speech::stream(&app, admitted.as_ref(), &bot, body).await
 }
 
-async fn voice_js(State(app): State<Arc<App>>) -> Response {
-    if app.lab_token.is_none() {
-        return StatusCode::NOT_FOUND.into_response();
-    }
+async fn voice_js() -> Response {
     asset(
         include_str!("lab/voice.js"),
         "text/javascript; charset=utf-8",

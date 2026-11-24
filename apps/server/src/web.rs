@@ -1,8 +1,17 @@
-//! HTTP plumbing shared by every route: typed errors, cookies and origin checks.
+//! HTTP plumbing shared by every route: typed errors, bounded body reads, cookies,
+//! origin checks, HTML escaping and the response security headers.
 use axum::{
-    http::{HeaderMap, HeaderValue, StatusCode, header},
-    response::{IntoResponse, Response},
+    body::{Body, Bytes},
+    http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header},
+    response::{Html, IntoResponse, Response},
 };
+use serde::de::DeserializeOwned;
+use std::time::Duration;
+
+/// Every request body is read within this deadline, after the route's header checks.
+pub const BODY_DEADLINE: Duration = Duration::from_secs(5);
+/// Largest body any route reads, unless it passes a smaller limit.
+pub const BODY_LIMIT: usize = 16 * 1024;
 
 /// What went wrong, as the client may learn it. Internal error text never reaches a body.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -14,12 +23,18 @@ pub enum Kind {
     /// Authenticated or not, this request is refused (origin, CSRF, allowlist).
     Forbidden,
     NotFound,
+    /// The body did not arrive within [`BODY_DEADLINE`].
+    RequestTimeout,
+    /// The request conflicts with the target's state (a stopped or replaced turn).
+    Conflict,
     /// Rate or capacity limit.
     TooManyRequests,
     /// The engine, identity provider or another dependency failed.
     BadGateway,
     /// A feature is not configured or a dependency is down.
     Unavailable,
+    /// A dependency did not answer in time.
+    GatewayTimeout,
     Internal,
 }
 
@@ -30,9 +45,12 @@ impl Kind {
             Self::Unauthorized => StatusCode::UNAUTHORIZED,
             Self::Forbidden => StatusCode::FORBIDDEN,
             Self::NotFound => StatusCode::NOT_FOUND,
+            Self::RequestTimeout => StatusCode::REQUEST_TIMEOUT,
+            Self::Conflict => StatusCode::CONFLICT,
             Self::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
             Self::BadGateway => StatusCode::BAD_GATEWAY,
             Self::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
+            Self::GatewayTimeout => StatusCode::GATEWAY_TIMEOUT,
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -44,9 +62,12 @@ impl Kind {
             Self::Unauthorized => "Sign-in required or expired.",
             Self::Forbidden => "Request not allowed.",
             Self::NotFound => "Not found.",
+            Self::RequestTimeout => "Request body took too long.",
+            Self::Conflict => "Request no longer applies.",
             Self::TooManyRequests => "Too many requests. Retry shortly.",
             Self::BadGateway => "A dependent service failed. Retry shortly.",
             Self::Unavailable => "Not available. Check server configuration.",
+            Self::GatewayTimeout => "A dependent service did not answer in time.",
             Self::Internal => "Internal error.",
         }
     }
@@ -104,6 +125,97 @@ pub fn require(condition: bool, kind: Kind) -> Web<()> {
     } else {
         Err(ApiError(kind))
     }
+}
+
+/// Reads a body of at most `limit` bytes within [`BODY_DEADLINE`]. Routes call this only
+/// after their header checks, so an unauthenticated caller never holds a body open.
+pub async fn read_body(body: Body, limit: usize) -> Web<Bytes> {
+    tokio::time::timeout(BODY_DEADLINE, axum::body::to_bytes(body, limit))
+        .await
+        .reject(Kind::RequestTimeout)?
+        .reject(Kind::BadRequest)
+}
+
+/// A JSON body (`application/json`), read as [`read_body`].
+pub async fn json<T: DeserializeOwned>(headers: &HeaderMap, body: Body) -> Web<T> {
+    let json = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("application/json"));
+    require(json, Kind::BadRequest)?;
+    serde_json::from_slice(&read_body(body, BODY_LIMIT).await?).reject(Kind::BadRequest)
+}
+
+/// A URL-encoded form body of string fields, read as [`read_body`]. A repeated field
+/// is refused rather than resolved.
+pub async fn form<T: DeserializeOwned>(body: Body) -> Web<T> {
+    let bytes = read_body(body, BODY_LIMIT).await?;
+    let mut fields = serde_json::Map::new();
+    for (name, value) in url::form_urlencoded::parse(&bytes) {
+        let previous = fields.insert(name.into_owned(), value.into_owned().into());
+        require(previous.is_none(), Kind::BadRequest)?;
+    }
+    serde_json::from_value(fields.into()).reject(Kind::BadRequest)
+}
+
+/// Escapes text for an HTML element or a quoted attribute.
+pub fn escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&#39;"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// A small server-rendered page. `body` must already be escaped.
+pub fn page(body: &str) -> Response {
+    Html(format!(
+        "<!doctype html><html><head>\
+         <meta name=viewport content='width=device-width,initial-scale=1'>\
+         <title>Robot Buddy</title></head>\
+         <body><main><h1>Robot Buddy</h1>{body}</main></body></html>"
+    ))
+    .into_response()
+}
+
+/// Baseline for every response, route values win: no caching, no sniffing, no
+/// framing, no referrer and nothing loadable unless a route sets its own policy.
+/// `Strict-Transport-Security` once the public URL is HTTPS.
+pub fn security_headers(response: &mut Response, https: bool) {
+    let headers = response.headers_mut();
+    let defaults = [
+        (header::CACHE_CONTROL, "no-store"),
+        (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        (header::X_FRAME_OPTIONS, "DENY"),
+        (header::REFERRER_POLICY, "no-referrer"),
+        (
+            header::CONTENT_SECURITY_POLICY,
+            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+        ),
+    ];
+    for (name, value) in defaults {
+        insert_default(headers, name, value);
+    }
+    if https {
+        insert_default(
+            headers,
+            header::STRICT_TRANSPORT_SECURITY,
+            "max-age=31536000",
+        );
+    }
+}
+
+fn insert_default(headers: &mut HeaderMap, name: HeaderName, value: &'static str) {
+    headers
+        .entry(name)
+        .or_insert_with(|| HeaderValue::from_static(value));
 }
 
 /// Reads one cookie across every `Cookie` header (HTTP/2 may split them).
@@ -187,10 +299,83 @@ mod tests {
     }
 
     #[test]
+    fn escape_covers_html_and_attribute_metacharacters() {
+        assert_eq!(
+            escape(r#"<a href="x" title='y'>&</a>"#),
+            "&lt;a href=&quot;x&quot; title=&#39;y&#39;&gt;&amp;&lt;/a&gt;"
+        );
+        assert_eq!(escape("plain é"), "plain é");
+    }
+
+    #[test]
+    fn security_headers_fill_defaults_and_keep_route_values() {
+        let mut response = page("<p>x</p>");
+        response.headers_mut().insert(
+            header::REFERRER_POLICY,
+            HeaderValue::from_static("same-origin"),
+        );
+        security_headers(&mut response, true);
+        let headers = response.headers();
+        assert_eq!(headers[header::REFERRER_POLICY], "same-origin");
+        assert_eq!(headers[header::X_FRAME_OPTIONS], "DENY");
+        assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+        assert_eq!(headers[header::CACHE_CONTROL], "no-store");
+        assert_eq!(
+            headers[header::STRICT_TRANSPORT_SECURITY],
+            "max-age=31536000"
+        );
+        let mut plain = page("");
+        security_headers(&mut plain, false);
+        assert!(
+            !plain
+                .headers()
+                .contains_key(header::STRICT_TRANSPORT_SECURITY)
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn bodies_are_read_within_the_deadline() {
+        let stalled =
+            Body::from_stream(futures_util::stream::pending::<Result<Bytes, std::io::Error>>());
+        let started = tokio::time::Instant::now();
+        let error = read_body(stalled, 16).await.unwrap_err();
+        assert_eq!(error.0, Kind::RequestTimeout);
+        assert_eq!(started.elapsed(), BODY_DEADLINE);
+        let large = read_body(Body::from(vec![0u8; 17]), 16).await.unwrap_err();
+        assert_eq!(large.0, Kind::BadRequest);
+        let mut headers = HeaderMap::new();
+        let plain = json::<serde_json::Value>(&headers, Body::from("{}")).await;
+        assert_eq!(plain.unwrap_err().0, Kind::BadRequest, "content type");
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+        let value: serde_json::Value = json(&headers, Body::from("{}")).await.unwrap();
+        assert!(value.is_object());
+    }
+
+    #[tokio::test]
+    async fn forms_refuse_repeated_fields() {
+        #[derive(serde::Deserialize)]
+        struct F {
+            a: String,
+        }
+        let f: F = form(Body::from("a=x%20y&b=2")).await.unwrap();
+        assert_eq!(f.a, "x y");
+        assert!(form::<F>(Body::from("a=1&a=2")).await.is_err());
+        assert!(form::<F>(Body::from("b=1")).await.is_err());
+    }
+
+    #[test]
     fn server_errors_hide_details() {
         let response = ApiError::from(anyhow::anyhow!("secret detail")).into_response();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        for kind in [Kind::BadGateway, Kind::Unavailable, Kind::Internal] {
+        for kind in [
+            Kind::BadGateway,
+            Kind::Unavailable,
+            Kind::GatewayTimeout,
+            Kind::Internal,
+        ] {
             assert!(!kind.message().contains("secret"));
             assert!(kind.status().is_server_error());
         }

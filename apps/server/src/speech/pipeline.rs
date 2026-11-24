@@ -5,10 +5,14 @@
 //! Audio leaves through a bounded channel, so a slow or vanished listener never makes
 //! the task buffer without limit, and the task stops even if the body is never polled.
 //!
+//! A sentence that is only model markup (say `[laughs]`) has nothing to speak: the
+//! synthesizer answers `None` without a provider call and the stream moves on to the next
+//! sentence. A provider that was called and sent no audio is still an error.
+//!
 //! Every actor call re-authorizes the session. A successful chunk read therefore counts
 //! as an authorization check: the guard only calls when no read has proved access for
 //! `check_every`, and it starts once chunk 0 has been read.
-use super::admission::Lease;
+use super::{admission::Lease, error::SpeechError};
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use axum::body::Bytes;
 use futures_util::{
@@ -58,11 +62,12 @@ pub trait Synthesizer: Send + Sync + 'static {
     /// The turn's pinned voice, decoded once per stream.
     type Voice: Send + Sync;
     fn voice(&self, pinned: &Value) -> Result<Self::Voice>;
+    /// `None`: the sentence has nothing to speak, and no provider request was made.
     fn synthesize(
         &self,
         voice: &Self::Voice,
         text: &str,
-    ) -> impl Future<Output = Result<Synthesis>> + Send;
+    ) -> impl Future<Output = Result<Option<Synthesis>>> + Send;
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -224,9 +229,9 @@ async fn run<S: ChunkSource, T: Synthesizer>(
     let deadline = Instant::now() + job.limits.deadline;
     tokio::select! {
         biased;
-        () = job.lease.stopped() => bail!("speech stream replaced"),
+        () = job.lease.stopped() => Err(SpeechError::Replaced.into()),
         () = tx.closed() => bail!("listener disconnected"),
-        () = tokio::time::sleep_until(deadline) => bail!("speech deadline exceeded"),
+        () = tokio::time::sleep_until(deadline) => Err(SpeechError::Timeout.into()),
         result = ctx.guard() => result,
         result = ctx.speak(tx, head) => result,
     }
@@ -301,15 +306,24 @@ impl<S: ChunkSource, T: Synthesizer> Ctx<'_, S, T> {
     }
 
     async fn speak(self, tx: &mpsc::Sender<Bytes>, head: &mut Option<HeadSender>) -> Result<()> {
-        let spoken = self.wait_chunk(0).await?.context("no spoken chunks")?;
+        let spoken = self.wait_chunk(0).await?.ok_or(SpeechError::NoSpeech)?;
         let voice = Arc::new(self.synth.voice(&spoken.voice)?);
-        let first = self.open(&voice, &spoken).await?;
+        // Chunk 0 pins the voice even when it has nothing to speak.
+        let (index, first) = if let Some(first) = self.open(&voice, &spoken).await? {
+            (0, first)
+        } else {
+            let (index, first) = self
+                .audible(&voice, 1)
+                .await?
+                .ok_or(SpeechError::NoSpeech)?;
+            (index, first?)
+        };
         let value = Head::new(&spoken, first.format)?;
         head.take()
             .context("speech head already sent")?
             .send(Ok(value))
             .map_err(|_| anyhow!("listener disconnected"))?;
-        self.forward(tx, first, voice).await
+        self.forward(tx, first, index, voice).await
     }
 
     /// Waits for chunk `index`; `None` when the turn has no more speech.
@@ -321,7 +335,9 @@ impl<S: ChunkSource, T: Synthesizer> Ctx<'_, S, T> {
             let issued = Instant::now();
             let chunk = tokio::time::timeout(self.limits.actor_timeout, self.source.chunk(index))
                 .await
-                .context("speech actor deadline")??;
+                .map_err(|_| {
+                    anyhow::Error::from(SpeechError::Timeout).context("speech actor deadline")
+                })??;
             match chunk {
                 Chunk::Ready(spoken) => {
                     self.authorized_at(issued);
@@ -339,23 +355,40 @@ impl<S: ChunkSource, T: Synthesizer> Ctx<'_, S, T> {
         }
     }
 
-    async fn open(self, voice: &T::Voice, spoken: &Spoken) -> Result<Upstream> {
+    /// Starts synthesizing `spoken`; `None` when it has nothing to speak.
+    async fn open(self, voice: &T::Voice, spoken: &Spoken) -> Result<Option<Upstream>> {
         let permit = self.upstream.clone().acquire_owned().await?;
         let synthesis = self.synth.synthesize(voice, &spoken.text).await?;
-        Ok(Upstream {
+        Ok(synthesis.map(|synthesis| Upstream {
             format: synthesis.format,
             audio: synthesis.audio,
             _permit: permit,
-        })
+        }))
     }
 
-    /// Finds and starts the next sentence. The outer error (lookup) stops the stream
-    /// at once; the inner error (synthesis) waits until the current sentence ends.
-    async fn look(self, voice: Voice<T>, index: u32) -> Result<Option<Result<Upstream>>> {
-        let Some(spoken) = self.wait_chunk(index).await? else {
-            return Ok(None);
-        };
-        Ok(Some(self.open(&voice, &spoken).await))
+    /// Finds and starts the first sentence from `index` on that has something to speak,
+    /// and returns its index. `None` when the turn has no more speech. The outer error
+    /// (lookup) stops the stream at once; the inner error (synthesis) waits until the
+    /// current sentence ends.
+    async fn audible(
+        self,
+        voice: &T::Voice,
+        mut index: u32,
+    ) -> Result<Option<(u32, Result<Upstream>)>> {
+        loop {
+            let Some(spoken) = self.wait_chunk(index).await? else {
+                return Ok(None);
+            };
+            match self.open(voice, &spoken).await {
+                Ok(None) => index += 1,
+                Ok(Some(upstream)) => return Ok(Some((index, Ok(upstream)))),
+                Err(error) => return Ok(Some((index, Err(error)))),
+            }
+        }
+    }
+
+    async fn look(self, voice: Voice<T>, index: u32) -> Result<Option<(u32, Result<Upstream>)>> {
+        self.audible(&voice, index).await
     }
 
     /// Whether audio may be forwarded now: within `authorized_for` of the last proof.
@@ -375,13 +408,13 @@ impl<S: ChunkSource, T: Synthesizer> Ctx<'_, S, T> {
         self,
         tx: &mpsc::Sender<Bytes>,
         first: Upstream,
+        mut index: u32,
         voice: Voice<T>,
     ) -> Result<()> {
         let mut authorization = self.authorized.subscribe();
         let format = first.format;
         let (piece, budget) = (self.limits.piece_bytes, self.limits.prefetch_budget);
         let mut total = 0;
-        let mut index = 0;
         let mut playing = Playing::new(first);
         let mut ahead = Ahead::Idle;
         loop {
@@ -395,8 +428,8 @@ impl<S: ChunkSource, T: Synthesizer> Ctx<'_, S, T> {
                             next.upstream.format == format,
                             "speech format changed between chunks"
                         );
+                        index = next.index;
                         playing = next.into_playing();
-                        index += 1;
                         continue;
                     }
                     waiting => ahead = waiting,
@@ -485,6 +518,8 @@ impl Playing {
 
 /// The next sentence, buffered up to the prefetch budget.
 struct Prefetch {
+    /// Its chunk index, past any silent chunks skipped on the way.
+    index: u32,
     upstream: Upstream,
     buffer: VecDeque<Bytes>,
     buffered: usize,
@@ -502,7 +537,7 @@ impl Prefetch {
     }
 }
 
-type Lookup<'a> = BoxFuture<'a, Result<Option<Result<Upstream>>>>;
+type Lookup<'a> = BoxFuture<'a, Result<Option<(u32, Result<Upstream>)>>>;
 
 enum Ahead<'a> {
     Idle,
@@ -528,13 +563,14 @@ impl Ahead<'_> {
             Self::Looking(lookup) => {
                 *self = match lookup.await? {
                     None => Self::Done,
-                    Some(Ok(upstream)) => Self::Ready(Prefetch {
+                    Some((index, Ok(upstream))) => Self::Ready(Prefetch {
+                        index,
                         upstream,
                         buffer: VecDeque::new(),
                         buffered: 0,
                         eof: false,
                     }),
-                    Some(Err(error)) => Self::Failed(error),
+                    Some((_, Err(error))) => Self::Failed(error),
                 };
                 Ok(0)
             }
