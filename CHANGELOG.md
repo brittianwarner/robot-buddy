@@ -6,7 +6,7 @@
 
 ### Robot device client (`apps/robot`)
 
-- **Local listening** (`listen/`): ALSA capture, a built-in energy VAD (20 ms frames, 800 ms end), `whisper-cli` transcription, transcript wake ("Hey Pip", "Hi Pip", "Pip"), and optional neural wake through ONNX Runtime and openWakeWord with the private `hey_pip.onnx` (`onnx-wake` feature). Neural wake takes priority. Barge-in uses neural wake only. Fixes cover VAD recovery from sustained noise, reaping capture before reopening exclusive ALSA devices, and whisper.cpp ≥ 1.8 stdout (`-of /dev/null`). (`4230d7d`, `9027fc6`, `f0e88d1`, `1dbe0c3`, `768dc2c`, `0e8f497`, `5351762`)
+- **Local listening** (`listen/`): ALSA capture, a built-in energy VAD (20 ms frames, 800 ms end), `whisper-cli` transcription, transcript wake ("Hey Pip", "Hi Pip", "Pip"), and optional neural wake through ONNX Runtime and openWakeWord with butty's `hey_pip.onnx`, which is not in this repo (`onnx-wake` feature). Neural wake takes priority. Barge-in uses neural wake only. Fixes cover VAD recovery from sustained noise, reaping capture before reopening exclusive ALSA devices, and whisper.cpp ≥ 1.8 stdout (`-of /dev/null`). (`4230d7d`, `9027fc6`, `f0e88d1`, `1dbe0c3`, `768dc2c`, `0e8f497`, `5351762`)
 - **Neck** (`motion/`): calibrated STS3215 protocol at 1 Mbaud, per-device `neck.json` with EEPROM limit verification, the `servo ping|read|verify|provision|center` CLI, a 50 Hz worker with deadline instrumentation (late cycles and skipped 20 ms slots), gestures and expression poses, and hardened status-reply timeouts. (`481033c`, `a1be3fa`, `75e74e9`, `714bd0f`, `9c939a5`, `c5d7c08`)
 - **Face** (`face.rs`): drives the full ESP32-S3 firmware protocol, drains board status, repaints mood, gaze and QR after a board reboot, and keeps eye QR codes in view. (`98cea87`, `11d8605`, `4fd3b5a`, `ee6b18f`)
 - **Vision** (`vision/`, `pi-vision` feature): `rpicam-vid` at 15 fps, in-process OpenCV YuNet tracking and optional SFace recognition with a private on-device gallery, and camera gaze converted to the eye board's viewer frame. (`2927622`, `425fcf5`, `104bec3`)
@@ -40,6 +40,7 @@
 ### Docs
 
 - Release qualification gates (`docs/testing-pip-release.md`), performance procedure (`docs/performance-pip.md`), provenance (`NOTICE.md`) and robot-client updates. The e2e latency baseline was republished at `82e8d5b`. (`5c197de`, `0d73c26`, `d4ef544`)
+- Handoff docs after `d4ef544` (docs only): the README front door and butty comparison, DEPLOYMENT.md (hardware reference, binary choice, model pins including butty's `hey_pip.onnx`, check items), AGENTS.md commands, NOTICE.md provenance, the [docs index](docs/README.md) and this changelog.
 
 ## Validation status
 
@@ -47,7 +48,7 @@ Everything below ran **without a physical Pip**. All of it is at `82e8d5b` unles
 
 | Check | Result |
 | --- | --- |
-| 30-minute continuous E2E soak, virtual Pip (`tests/pip-e2e`, real ARM64 robot, server and Rivet 3.1.1, real whisper-cli, private `hey_pip.onnx` mounted read-only) | **PASS.** 149/149 turns. 50 Hz neck motion at 99.9% in-run tick coverage, 0 neck stops. Robot RSS peaked at 185.9 MiB and plateaued. The rivet-engine process did **not** plateau: +2.6 to 3.7 MiB/min over the run. Robot ELF SHA-256 `be7cae4e42fda047f857d327af875e0dbf91b54af3a8076df84080e802e2768b` from the pip-e2e image recipe. The soak report is not committed |
+| 30-minute continuous E2E soak, virtual Pip (`tests/pip-e2e`, real ARM64 robot, server and Rivet 3.1.1, real whisper-cli, `hey_pip.onnx` mounted read-only) | **PASS.** 149/149 turns. 50 Hz neck motion at 99.9% in-run tick coverage, 0 neck stops. Robot RSS peaked at 185.9 MiB and plateaued. The rivet-engine process did **not** plateau: +2.6 to 3.7 MiB/min over the run. Robot ELF SHA-256 `be7cae4e42fda047f857d327af875e0dbf91b54af3a8076df84080e802e2768b` (GNU BuildID `c15c88b7594bd0919c5a0bf78609c2b01c6162e9`) from the pip-e2e image recipe. Soak report artifact `soak-30m-c5d7c08`: soak report kept outside the repo; available from the release coordinator. [infra/toolchain-validation.md](infra/toolchain-validation.md) records this hash and BuildID and explains why the matrix's own ELFs differ. Clean rebuilds on 2026-11-24 from `82e8d5b` and from `c5d7c08` (the pip-e2e recipe) and from `82e8d5b` (`infra/pi-build.Dockerfile`) reproduced this ELF byte for byte ([DEPLOYMENT.md §2](DEPLOYMENT.md#2-build-the-linux-arm64-binary)) |
 | ARM64 toolchain matrix, Bookworm and Trixie, default and full Pip features ([evidence](infra/toolchain-validation.md)) | **PASS**, no retries. Robot bin 254 passed and 2 ignored with full features |
 | Workstation e2e latency bench ([table](docs/research/e2e-latency.md)) | Refreshed. p95 submit → first PCM byte at the player was **699.8 ms** (Apple M4 Pro, `--simulate`, fake model and speech). The clock starts at transcript submission, so it excludes VAD, Whisper and acoustic I/O |
 | Fresh ARM64 systemd deployment rehearsal ([evidence](tests/pip-deploy-qa/EVIDENCE.md)) | **PASS** on the earlier candidate `5351762`: install, 1 GiB drop-in, OIDC claim, upgrade and rollback |

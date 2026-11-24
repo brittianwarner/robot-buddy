@@ -11,7 +11,7 @@ The `feat/pip-hardware` branch adds the on-device client: local listening (VAD, 
 Evidence recorded so far. None of it is from a physical Pip:
 
 - ARM64 Bookworm and Trixie toolchain matrix green at `82e8d5b` ([evidence](../../infra/toolchain-validation.md)).
-- 30-minute virtual-Pip E2E soak passed at `82e8d5b`, with real ARM64 binaries, Rivet 3.1.1, whisper-cli and virtual peripherals. Summary in [CHANGELOG.md](../../CHANGELOG.md#validation-status). The report itself is not committed.
+- 30-minute virtual-Pip E2E soak passed at `82e8d5b`, with real ARM64 binaries, Rivet 3.1.1, whisper-cli and virtual peripherals. Summary in [CHANGELOG.md](../../CHANGELOG.md#validation-status). Soak report (artifact `soak-30m-c5d7c08`) kept outside the repo; available from the release coordinator.
 - Fresh ARM64 systemd deployment rehearsal passed on `5351762`, including OIDC claim against a fixture IdP, upgrade and rollback ([evidence](../../tests/pip-deploy-qa/EVIDENCE.md)).
 - Asset-dependent wake and vision checks on `5351762` ([release gates](../testing-pip-release.md)).
 - Workstation e2e latency republished at `82e8d5b` ([table](../research/e2e-latency.md)).
