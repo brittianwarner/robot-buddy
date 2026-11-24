@@ -89,10 +89,10 @@ After `usermod -aG video robot-buddy`, installing `/etc/systemd/system/robot-bud
 * **Positive OIDC claim flow:**
   * `GET /claim` returned `CSP: default-src 'none'; form-action 'self' https:; frame-ancestors 'none'; base-uri 'none'`, `Referrer-Policy: same-origin`, `buddy_claim` (`HttpOnly; SameSite=Strict; Path=/login; Max-Age=600; Secure`).
   * `POST /login` validated `Origin` + signed CSRF cookie, issued `buddy_login` (`HttpOnly; SameSite=Lax; Path=/auth/callback; Max-Age=300; Secure`), redirected to `https://oidc.pip-qa.internal:9443/authorize` with PKCE `S256`, `state`, and `nonce`.
-  * `GET /auth/callback` exchanged code via `POST /token` (PKCE `S256` + `client_secret_post`), fetched `GET /userinfo`, validated RS256 ID token against `GET /jwks`, cleared `buddy_login`, and returned 6-digit code `383654`.
+   * `GET /auth/callback` exchanged code via `POST /token` (PKCE `S256` + `client_secret_post`), fetched `GET /userinfo`, validated RS256 ID token against `GET /jwks`, cleared `buddy_login`, and returned a six-digit confirmation code.
   * **Verified OIDC identity:** issuer `https://oidc.pip-qa.internal:9443`, client `pip-deploy-qa-client`, subject `pip-deploy-qa-owner-01`, canonical owner **`https://oidc.pip-qa.internal:9443|pip-deploy-qa-owner-01`** (audit counts: `discoveries=1`, `jwksFetches=1`, `authorizes=1`, `deniedAuthorizes=1`, `tokens=1`, `userinfos=1`).
 * **Robot confirmation & post-claim verification:**
-  * Loopback panel `http://127.0.0.1:8090/` displayed matching `383654`; `POST /confirm` with CSRF + `Origin: http://127.0.0.1:8090` returned `303`, panel transitioned to `Ready — hello!`, `claim-url` reported `No active claim URL (robot is already owned or waiting to start a claim).`.
+   * Loopback panel `http://127.0.0.1:8090/` displayed the same six digits; `POST /confirm` with CSRF + `Origin: http://127.0.0.1:8090` returned `303`, panel transitioned to `Ready — hello!`, `claim-url` reported `No active claim URL (robot is already owned or waiting to start a claim).`.
   * Post-claim operator panel `http://127.0.0.1:8091/`: unauthenticated → `401`; valid Basic Auth → `200`.
   * Live utterance submitted via `/run/robot-buddy/control.sock` as `speech-qa` completed through real Rivet `Conversation` actor + mock model, advancing `/var/lib/robot-buddy/cache.json` `cursor` to `4`.
 

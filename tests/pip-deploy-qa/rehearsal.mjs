@@ -709,9 +709,9 @@ try {
       headers: { 'cookie': loginCookieFull.split(';')[0] },
     });
     const cbBody = await rCb.text();
-    if (rCb.status !== 200) throw new Error('GET /auth/callback status ' + rCb.status + ' body=' + cbBody);
+    if (rCb.status !== 200) throw new Error('GET /auth/callback status ' + rCb.status);
     const codeMatch = cbBody.match(/<h2>([0-9]{6})<\\/h2>/);
-    if (!codeMatch) throw new Error('No 6-digit code in callback page: ' + cbBody);
+    if (!codeMatch) throw new Error('No 6-digit confirmation in callback page');
     const cbClearCookie = extractCookie(rCb.headers, 'buddy_login') || '';
 
     console.log(JSON.stringify({
@@ -739,7 +739,7 @@ try {
   assert(oidcFlow.negativeCallbackClearedCookie, 'OIDC error callback did not clear buddy_login');
   assert(oidcFlow.confirmCode.length === 6, `Invalid 6-digit code`);
   assert(oidcFlow.callbackClearedCookie, 'Successful OIDC callback did not clear buddy_login');
-  log(`OIDC callback succeeded! 6-digit code=${oidcFlow.confirmCode}, CSP=${oidcFlow.cspHeader}`);
+  log(`OIDC callback succeeded with a 6-digit confirmation; CSP=${oidcFlow.cspHeader}`);
 
   // Confirm matching 6-digit code on robot's loopback panel (127.0.0.1:8090)
   let panelCsrf = '';
@@ -751,7 +751,9 @@ try {
     }
     await sleep(500);
   }
-  assert(panelCsrf.length > 0, `Loopback panel did not show 6-digit code ${oidcFlow.confirmCode}`);
+  assert(panelCsrf.length > 0, 'Loopback panel did not show matching confirmation code');
+  delete oidcFlow.confirmCode;
+  oidcFlow.confirmationMatched = true;
 
   const confirmStatus = dockerExec(PI_CTR, `
     curl -s -o /dev/null -w '%{http_code}' -X POST \
