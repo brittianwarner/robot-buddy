@@ -356,6 +356,7 @@ fn expression_reader_ignores_future_fields_but_never_moves_on_unknown_or_invalid
         json!({"emotion":"happy","intensity":1.000_000_001}),
         json!({"emotion":"happy","intensity":-1}),
         json!({"emotion":"other","intensity":0}),
+        json!({"emotion":"asleep","intensity":1.0}),
         json!({"emotion":"happy","intensity":1,"gesture":"custom"}),
     ] {
         event.payload = invalid;

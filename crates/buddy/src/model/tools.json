@@ -310,7 +310,7 @@
       "parameters": {
         "type": "object",
         "properties": {
-          "emotion": {"type": "string", "enum": ["neutral", "happy", "curious", "thinking", "surprised", "sad", "angry", "sleepy", "love", "asleep"]},
+          "emotion": {"type": "string", "enum": ["neutral", "happy", "curious", "thinking", "surprised", "sad", "angry", "sleepy", "love"]},
           "intensity": {"type": "number", "minimum": 0, "maximum": 1},
           "gesture": {"type": "string", "enum": ["blink", "ear_wiggle", "nod", "shake", "tilt", "look_around", "dance"]}
         },

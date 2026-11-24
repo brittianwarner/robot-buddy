@@ -102,5 +102,6 @@ impl OutputEvent {
         (self.kind == FACE_EXPRESS)
             .then(|| ExpressionCue::deserialize(&self.payload).ok())
             .flatten()
+            .filter(|cue| cue.emotion != Emotion::Asleep)
     }
 }

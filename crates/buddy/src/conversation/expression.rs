@@ -20,6 +20,10 @@ impl Conversation {
         intent: (&str, &str),
         cue: ExpressionCue,
     ) -> Result<Value> {
+        anyhow::ensure!(
+            cue.emotion != crate::protocol::Emotion::Asleep,
+            "sleep is a local device command"
+        );
         let turn = intent.0;
         let reserve = |tx: Tx| async move {
             let inserted = tx
