@@ -1,5 +1,7 @@
 # Turborepo and Cargo plan
 
+> Historical plan. The repository as built has three Cargo members (`apps/server`, `apps/robot`, `crates/buddy`); see the repo map in the [README](../../README.md#repository-map). The layout below was a proposal and most of its crates were never created.
+
 Turborepo is the task coordinator; Cargo is the Rust dependency/build authority. Bun installs pinned Turbo tooling and runs repository scripts. JavaScript package manifests are tooling metadata; there is no JavaScript backend runtime.
 
 ## Proposed layout

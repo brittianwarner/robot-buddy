@@ -5,8 +5,8 @@ the repository root with Bun (`bun install` first). Results from a dated run are
 [validation](research/validation.md); latency numbers are in [e2e latency](research/e2e-latency.md).
 
 `bun run check:all` (`scripts/check-all.mjs`) runs the whole local gate in CI order and
-stops at the first failure: fmt, Clippy `-D warnings`, `cargo test`, the robot feature
-profile, `deny`, `test:integration`, a release build, `test:shutdown`,
+stops at the first failure: fmt, Clippy `-D warnings`, `cargo test`, the full Pip
+features (`pip full features`), the robot feature profile, `deny`, `test:integration`, a release build, `test:shutdown`,
 `tests/robot-reconnect.mjs --no-build --strict`, `cargo bench --no-run`,
 `tests/early-player.mjs`, `test:lab-reconnect`, `eval:voice` and `bench:report:check`. It
 passes its environment to every step, so set the port variables (see [ports](#ports)) and
@@ -304,7 +304,7 @@ Fixed on November 23, 2026; each test failed before its fix.
   and audio quality. The fakes fix those latencies, so the bench measures our overhead only.
 - Robot hardware: ALSA output, the ESP32 face, NetworkManager setup, wake word and speech
   recognition. `--simulate` skips Wi-Fi and the fake player has no real buffer underruns.
-- aarch64 runtime: CI type-checks the robot for the Pi; nothing runs on one.
+- aarch64 on a real Pi: CI only type-checks the robot for the Pi. The ARM64 [toolchain matrix](../infra/toolchain-validation.md), the [E2E and soak harness](../tests/pip-e2e/README.md) and the [systemd rehearsal](../tests/pip-deploy-qa/EVIDENCE.md) run in `linux/arm64` containers with virtual peripherals, not on a Pi 5.
 - Real OIDC login (only the controlled-provider lab test and the unit test cover it),
   production load, multi-node engines, backup and restore.
 - Timings come from a shared developer machine; run the bench on idle hardware before

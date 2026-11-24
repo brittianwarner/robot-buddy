@@ -4,7 +4,7 @@ The wire contract is `crates/buddy/src/protocol.rs`; [implemented backend](backe
 
 ## Implemented: Linux device client (`apps/robot`)
 
-Target hardware is the "Pip" robot: Raspberry Pi 5 (8 GB, Raspberry Pi OS Bookworm, aarch64), ESP32-S3 face board on USB serial, microphone ring array with a local wake word and speech-to-text, and a MAX98357A I2S amplifier played through ALSA. None of this was tested on that hardware. Validation so far is unit tests and local fakes (see "Validation").
+Target hardware is the "Pip" robot: Raspberry Pi 5 (Raspberry Pi OS Bookworm or Trixie, aarch64), ESP32-S3 face board on USB serial, three STS3215 neck servos, an OV5647 camera, a USB reSpeaker microphone with local wake word and speech-to-text, and a MAX98357A I2S amplifier played through ALSA. None of this was tested on that hardware. Validation so far is unit tests, local fakes, and ARM64 containers with virtual peripherals (see "Validation" and [CHANGELOG.md](../../CHANGELOG.md#validation-status)).
 
 | Module | Role |
 |---|---|
@@ -112,6 +112,8 @@ There is no Wi-Fi gate at start: input is served at once. After three unhealthy 
 | `BUDDY_SETUP_WIFI_FILE` | `/var/lib/robot-buddy/setup-wifi.json` | Per-robot setup hotspot name and password (0600) |
 | `BUDDY_CONTROL_SOCKET`, `BUDDY_CONTROL_GROUP` | off (unit sets `/run/robot-buddy/control.sock`), `pip-control` | Control input socket (mode 0660) or FIFO, and socket group |
 | `BUDDY_SCREEN_ADDR` | `127.0.0.1:8090` | Panel address; loopback `ip:port` only, `off` or empty disables it, anything else fails at start |
+
+Hardware variables (`BUDDY_LISTEN_*`, `ORT_DYLIB_PATH`, `BUDDY_SERVO_*`, `BUDDY_VISION_*`, `BUDDY_OPERATOR_*`, `BUDDY_PIPER_*`) are listed in [`device.env.example`](../../infra/device.env.example) and explained in [DEPLOYMENT.md](../../DEPLOYMENT.md).
 
 ### Building for the Pi 5
 

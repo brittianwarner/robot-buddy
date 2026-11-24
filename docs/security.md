@@ -113,6 +113,6 @@ Direct Rivet callers skip the server's body limit, so actors check their own inp
 
 ## Not covered
 
-- No live browser, IdP, hardware or container run validates these controls. The tests above are unit and router tests.
+- No live browser, real IdP or hardware run validates these controls. The tests above are unit and router tests. The ARM64 [systemd rehearsal](../tests/pip-deploy-qa/EVIDENCE.md) exercised the unit sandbox, polkit rule, socket permissions and an OIDC claim in containers against a fixture IdP.
 - The rate limiter, `Logins`, and `lab::Sessions` are per process. They do not share state across replicas.
 - A cloned device credential cannot be told apart from the original.
