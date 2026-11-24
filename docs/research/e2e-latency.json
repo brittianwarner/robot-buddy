@@ -1,12 +1,12 @@
 {
-  "label": "qa-bench-eb639ad",
-  "commit": "eb639ad",
+  "label": "bench-candidate",
+  "commit": "82e8d5b",
   "git": {
-    "sha": "eb639ad2e97bfed2ab25ed4ad25ab21fdfa71d4b",
-    "describe": "eb639ad",
+    "sha": "82e8d5b51a02f98ccec2ecc1b2134efe10264184",
+    "describe": "82e8d5b",
     "dirty": false
   },
-  "date": "2026-11-24T19:11:47.570Z",
+  "date": "2026-11-24T20:46:34.211Z",
   "platform": "darwin arm64 Apple M4 Pro",
   "machine": {
     "platform": "darwin",
@@ -15,13 +15,13 @@
     "cpu": "Apple M4 Pro",
     "cpus": 14,
     "memory_gb": 64,
-    "bun": "1.4.4",
+    "bun": "1.4.5",
     "rustc": "rustc 1.100.0 (0ef1bc386 2026-11-09)"
   },
   "load_average": [
-    6.3,
-    8,
-    7.6
+    5.8,
+    8.3,
+    10
   ],
   "rivetkit": "3.1.1",
   "turns": 20,
@@ -30,47 +30,47 @@
   "note": null,
   "failed_turns": 0,
   "cold_turn_ms": {
-    "speech_ready": 552.7548828125,
-    "speech_request": 553.60595703125,
-    "player_start": 94.879150390625,
-    "first_pcm": 854.29833984375,
-    "completed": 709.82568359375
+    "speech_ready": 644.4853515625,
+    "speech_request": 645.045166015625,
+    "player_start": 142.060302734375,
+    "first_pcm": 946.1181640625,
+    "completed": 810.658935546875
   },
   "metrics_ms": {
     "submit_to_turn_started": {
       "n": 20,
-      "p50": 27.2,
-      "p95": 50.1,
-      "p99": 166.9,
-      "max": 166.9
+      "p50": 24.8,
+      "p95": 35.1,
+      "p99": 37.5,
+      "max": 37.5
     },
     "submit_to_first_text_delta": {
       "n": 20,
-      "p50": 309.3,
-      "p95": 325.3,
-      "p99": 453.9,
-      "max": 453.9
+      "p50": 297.9,
+      "p95": 313,
+      "p99": 317.6,
+      "max": 317.6
     },
     "submit_to_first_speech_ready": {
       "n": 20,
-      "p50": 392.4,
-      "p95": 422.9,
-      "p99": 468.8,
-      "max": 468.8
+      "p50": 383.2,
+      "p95": 401.4,
+      "p99": 413.9,
+      "max": 413.9
     },
     "submit_to_first_pcm_byte": {
       "n": 20,
-      "p50": 693.3,
-      "p95": 723.2,
-      "p99": 769.7,
-      "max": 769.7
+      "p50": 676.9,
+      "p95": 699.8,
+      "p99": 700.3,
+      "max": 700.3
     },
     "submit_to_turn_completed": {
       "n": 20,
-      "p50": 594.5,
-      "p95": 631.6,
-      "p99": 676,
-      "max": 676
+      "p50": 566.6,
+      "p95": 607.8,
+      "p99": 620.9,
+      "max": 620.9
     },
     "silence_gap_within_reply": {
       "n": 0,
@@ -87,24 +87,24 @@
     },
     "barge_in_to_audio_closed": {
       "n": 5,
-      "p50": 1.4,
-      "p95": 2.4,
-      "p99": 2.4,
-      "max": 2.4
+      "p50": 1.7,
+      "p95": 2.1,
+      "p99": 2.1,
+      "max": 2.1
     },
     "barge_in_to_turn_terminal_event": {
       "n": 5,
-      "p50": 14.4,
-      "p95": 29.8,
-      "p99": 29.8,
-      "max": 29.8
+      "p50": 11.8,
+      "p95": 12.4,
+      "p99": 12.4,
+      "max": 12.4
     },
     "barge_in_to_provider_stream_closed": {
       "n": 5,
-      "p50": 14.3,
-      "p95": 29.7,
-      "p99": 29.7,
-      "max": 29.7
+      "p50": 11.7,
+      "p95": 12.3,
+      "p99": 12.3,
+      "max": 12.3
     }
   },
   "audio": {
@@ -115,14 +115,14 @@
   },
   "rss_kb": {
     "server": {
-      "after_warmup": 41536,
-      "max": 42336,
-      "end": 42336
+      "after_warmup": 42864,
+      "max": 43360,
+      "end": 43360
     },
     "engine": {
-      "after_warmup": 69552,
-      "max": 91904,
-      "end": 91904
+      "after_warmup": 72384,
+      "max": 93760,
+      "end": 93760
     }
   },
   "fake_speech_fell_behind_ms": {
@@ -134,97 +134,9 @@
   "per_turn": [
     {
       "kind": "turn.completed",
-      "ready": 407,
-      "pcm": 708,
-      "done": 625,
-      "gaps": [],
-      "samples": [
-        110880,
-        110880
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 394,
-      "pcm": 694,
-      "done": 625,
-      "gaps": [],
-      "samples": [
-        115200,
-        115200
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 469,
-      "pcm": 770,
-      "done": 676,
-      "gaps": [],
-      "samples": [
-        82080,
-        82080
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 413,
-      "pcm": 715,
-      "done": 566,
-      "gaps": [],
-      "samples": [
-        93600,
-        93600
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 382,
-      "pcm": 683,
-      "done": 632,
-      "gaps": [],
-      "samples": [
-        110880,
-        110880
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 387,
+      "ready": 386,
       "pcm": 689,
-      "done": 602,
-      "gaps": [],
-      "samples": [
-        115200,
-        115200
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 335,
-      "pcm": 645,
-      "done": 540,
-      "gaps": [],
-      "samples": [
-        82080,
-        82080
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 423,
-      "pcm": 723,
-      "done": 584,
-      "gaps": [],
-      "samples": [
-        93600,
-        93600
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 388,
-      "pcm": 688,
-      "done": 607,
+      "done": 601,
       "gaps": [],
       "samples": [
         110880,
@@ -233,9 +145,9 @@
     },
     {
       "kind": "turn.completed",
-      "ready": 406,
-      "pcm": 706,
-      "done": 627,
+      "ready": 383,
+      "pcm": 685,
+      "done": 599,
       "gaps": [],
       "samples": [
         115200,
@@ -246,50 +158,6 @@
       "kind": "turn.completed",
       "ready": 325,
       "pcm": 627,
-      "done": 517,
-      "gaps": [],
-      "samples": [
-        82080,
-        82080
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 392,
-      "pcm": 693,
-      "done": 549,
-      "gaps": [],
-      "samples": [
-        93600,
-        93600
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 395,
-      "pcm": 696,
-      "done": 611,
-      "gaps": [],
-      "samples": [
-        110880,
-        110880
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 382,
-      "pcm": 682,
-      "done": 597,
-      "gaps": [],
-      "samples": [
-        115200,
-        115200
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 327,
-      "pcm": 629,
       "done": 524,
       "gaps": [],
       "samples": [
@@ -299,9 +167,9 @@
     },
     {
       "kind": "turn.completed",
-      "ready": 396,
-      "pcm": 697,
-      "done": 550,
+      "ready": 398,
+      "pcm": 700,
+      "done": 553,
       "gaps": [],
       "samples": [
         93600,
@@ -310,9 +178,9 @@
     },
     {
       "kind": "turn.completed",
-      "ready": 396,
-      "pcm": 696,
-      "done": 595,
+      "ready": 380,
+      "pcm": 682,
+      "done": 598,
       "gaps": [],
       "samples": [
         110880,
@@ -321,9 +189,9 @@
     },
     {
       "kind": "turn.completed",
-      "ready": 379,
-      "pcm": 679,
-      "done": 594,
+      "ready": 392,
+      "pcm": 698,
+      "done": 608,
       "gaps": [],
       "samples": [
         115200,
@@ -332,9 +200,9 @@
     },
     {
       "kind": "turn.completed",
-      "ready": 331,
-      "pcm": 632,
-      "done": 538,
+      "ready": 343,
+      "pcm": 645,
+      "done": 545,
       "gaps": [],
       "samples": [
         82080,
@@ -343,9 +211,141 @@
     },
     {
       "kind": "turn.completed",
-      "ready": 410,
-      "pcm": 711,
-      "done": 566,
+      "ready": 396,
+      "pcm": 696,
+      "done": 554,
+      "gaps": [],
+      "samples": [
+        93600,
+        93600
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 381,
+      "pcm": 676,
+      "done": 598,
+      "gaps": [],
+      "samples": [
+        110880,
+        110880
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 385,
+      "pcm": 677,
+      "done": 599,
+      "gaps": [],
+      "samples": [
+        115200,
+        115200
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 321,
+      "pcm": 611,
+      "done": 522,
+      "gaps": [],
+      "samples": [
+        82080,
+        82080
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 401,
+      "pcm": 690,
+      "done": 553,
+      "gaps": [],
+      "samples": [
+        93600,
+        93600
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 384,
+      "pcm": 671,
+      "done": 601,
+      "gaps": [],
+      "samples": [
+        110880,
+        110880
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 383,
+      "pcm": 669,
+      "done": 599,
+      "gaps": [],
+      "samples": [
+        115200,
+        115200
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 336,
+      "pcm": 622,
+      "done": 536,
+      "gaps": [],
+      "samples": [
+        82080,
+        82080
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 414,
+      "pcm": 700,
+      "done": 567,
+      "gaps": [],
+      "samples": [
+        93600,
+        93600
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 400,
+      "pcm": 685,
+      "done": 621,
+      "gaps": [],
+      "samples": [
+        110880,
+        110880
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 382,
+      "pcm": 666,
+      "done": 597,
+      "gaps": [],
+      "samples": [
+        115200,
+        115200
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 320,
+      "pcm": 603,
+      "done": 521,
+      "gaps": [],
+      "samples": [
+        82080,
+        82080
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 395,
+      "pcm": 680,
+      "done": 551,
       "gaps": [],
       "samples": [
         93600,
@@ -356,37 +356,37 @@
   "per_barge": [
     {
       "end_kind": "turn.cancelled",
-      "audio_closed": 1,
-      "terminal_event": 30,
-      "provider_closed": 30,
+      "audio_closed": 1.8,
+      "terminal_event": 12,
+      "provider_closed": 12,
       "player_stopped": true
     },
     {
       "end_kind": "turn.cancelled",
-      "audio_closed": 0.9,
-      "terminal_event": 14,
-      "provider_closed": 14,
+      "audio_closed": 1.2,
+      "terminal_event": 11,
+      "provider_closed": 11,
       "player_stopped": true
     },
     {
       "end_kind": "turn.cancelled",
-      "audio_closed": 1.4,
-      "terminal_event": 15,
-      "provider_closed": 15,
+      "audio_closed": 1.1,
+      "terminal_event": 12,
+      "provider_closed": 12,
       "player_stopped": true
     },
     {
       "end_kind": "turn.cancelled",
-      "audio_closed": 1.4,
-      "terminal_event": 14,
-      "provider_closed": 14,
+      "audio_closed": 1.7,
+      "terminal_event": 12,
+      "provider_closed": 12,
       "player_stopped": true
     },
     {
       "end_kind": "turn.cancelled",
-      "audio_closed": 2.4,
-      "terminal_event": 13,
-      "provider_closed": 13,
+      "audio_closed": 2.1,
+      "terminal_event": 12,
+      "provider_closed": 12,
       "player_stopped": true
     }
   ],
@@ -401,14 +401,14 @@
     "robot_sigterm_exit_ms": 51
   },
   "load_average_end": [
-    6.1,
-    7.4,
-    7.4
+    4.6,
+    6.8,
+    9.1
   ],
   "noise": {
     "ok": true,
     "reasons": [],
-    "load_per_cpu": 0.45,
+    "load_per_cpu": 0.41,
     "fake_late_frames": 0,
     "fake_late_max_ms": 0,
     "limits": {
