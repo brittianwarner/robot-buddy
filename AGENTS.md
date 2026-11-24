@@ -27,13 +27,13 @@ tests/pip-e2e/run-in-docker.sh prepare-cache     # checksum-verified public spee
 tests/pip-e2e/run-in-docker.sh run --suite smoke # then --suite all for the fault suite
 ```
 
-**30-minute soak.** This is the exact form used for the `82e8d5b` qualifying run. Private paths are placeholders:
+**30-minute soak.** This is the exact form used for the qualifying run (artifact `soak-30m-c5d7c08`; its robot ELF is byte-identical to a `82e8d5b` build, see DEPLOYMENT.md §2). Private paths are placeholders:
 
 ```sh
 PIP_E2E_IMAGE=<e2e image tag> \
 PIP_E2E_HOST_CACHE=<host cache dir> \
 PIP_E2E_HOST_ARTIFACTS=<host artifacts dir> \
-PIP_E2E_HEY_PIP_ONNX=<path to private hey_pip.onnx, mounted read-only> \
+PIP_E2E_HEY_PIP_ONNX=<path to brain/models/wake/hey_pip.onnx in a butty checkout, mounted read-only> \
 PIP_E2E_EXPECT_ROBOT_SHA256=<expected robot ELF sha256> \
 bash tests/pip-e2e/run-in-docker.sh run --suite soak --duration 30m --out /opt/pip-e2e/artifacts/<name>
 ```
@@ -74,7 +74,7 @@ Pip has one device service and one Rivet session. The robot uses the official Ri
 
 ## Security and secrets
 
-Application sessions and engine gateway grants both restrict access. Never log session tokens, device credentials, QR claim tokens, prompts or model-provider keys. Never commit real env files (`.env`, `.env.local`), `secrets/`, identities, private models (`hey_pip.onnx`), recordings or firmware sources. Docs use placeholders such as `<your-openrouter-key>`. Fixtures use isolated ports and test-only credentials.
+Application sessions and engine gateway grants both restrict access. Never log session tokens, device credentials, QR claim tokens, prompts or model-provider keys. Never commit real env files (`.env`, `.env.local`), `secrets/`, identities, butty files (models such as `hey_pip.onnx`, firmware sources, CAD), recordings or other private models. butty is ToschLogic's repository (<https://github.com/ToschLogic/butty>, access managed by Gage); see [NOTICE.md](NOTICE.md). Docs use placeholders such as `<your-openrouter-key>`. Fixtures use isolated ports and test-only credentials.
 
 The optional browser lab is operator-only and stays disabled without `BUDDY_LAB_TOKEN`. Its action allowlist uses device-scoped sessions. Do not expose admin actor actions or private device keys to server routes. Browser acceptance: [lab guide](docs/lab.md), `bun run test:lab`.
 
