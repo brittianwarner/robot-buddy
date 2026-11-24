@@ -1,5 +1,6 @@
-//! A TCP listener for the robot's small local pages that bounds what one client
-//! can hold. At most [`Limits::max`] connections are open; more wait in the
+//! A TCP listener for the robot's small local pages (the loopback panel in
+//! `screen.rs` and the `SoftAP` setup portal in `wifi.rs`) that bounds what one
+//! client can hold. At most [`Limits::max`] connections are open; more wait in the
 //! kernel backlog. Each connection is closed after [`Limits::idle`] without a
 //! byte in either direction, and after [`Limits::lifetime`] in any case, so a
 //! client trickling a request header frees its slot within the lifetime.
@@ -270,22 +271,53 @@ mod tests {
 
     #[tokio::test]
     async fn connections_past_the_cap_wait_for_a_free_slot() {
+        use axum::serve::Listener;
+        let inner = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = inner.local_addr().unwrap();
         let limits = Limits {
-            max: 1,
+            max: 2,
             idle: GUARD,
             lifetime: GUARD,
         };
+        let mut listener = guard(inner, limits);
+        let clients: Vec<_> =
+            futures_util::future::join_all((0..3).map(|_| TcpStream::connect(address))).await;
+        assert!(clients.iter().all(Result::is_ok));
+        let first = listener.accept().await.0;
+        let _second = listener.accept().await.0;
+        // The kernel completed the third handshake into the backlog; no slot is
+        // free, so it is not accepted.
+        let mut third = Box::pin(listener.accept());
+        assert!(
+            futures_util::poll!(third.as_mut()).is_pending(),
+            "no slot is free"
+        );
+        drop(first);
+        tokio::time::timeout(GUARD, third)
+            .await
+            .expect("a freed slot accepts the waiting client");
+    }
+
+    #[tokio::test]
+    async fn a_half_sent_request_is_cut_off_and_its_slot_freed() {
+        let lifetime = Duration::from_millis(200);
+        let limits = Limits {
+            max: 1,
+            idle: lifetime,
+            lifetime,
+        };
         let address = page(limits).await;
-        let holder = TcpStream::connect(address).await.unwrap();
-        // The kernel completes the handshake from the backlog; the server does
-        // not read this request while the only slot is held.
-        let mut waiting = TcpStream::connect(address).await.unwrap();
-        waiting.write_all(REQUEST).await.unwrap();
-        let mut early = [0u8; 1];
-        let served =
-            tokio::time::timeout(Duration::from_millis(300), waiting.read(&mut early)).await;
-        assert!(served.is_err(), "served past the cap");
-        drop(holder);
-        assert!(answered(&mut waiting).await);
+        let started = std::time::Instant::now();
+        let mut slow = TcpStream::connect(address).await.unwrap();
+        slow.write_all(b"GET / HTTP/1.1\r\nHost: x\r\n")
+            .await
+            .unwrap();
+        // Closed (EOF or reset) without an answer, no sooner than its deadline.
+        assert!(!answered(&mut slow).await);
+        assert!(started.elapsed() >= lifetime);
+        // The only slot is free again: a whole request is answered.
+        let mut client = TcpStream::connect(address).await.unwrap();
+        client.write_all(REQUEST).await.unwrap();
+        assert!(answered(&mut client).await);
     }
 }

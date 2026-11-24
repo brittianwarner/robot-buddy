@@ -20,7 +20,7 @@ use crate::{
 };
 use anyhow::{Context, Result, bail, ensure};
 use async_trait::async_trait;
-pub use harness::RECENT_TURNS_SQL;
+pub use history::RECENT_TURNS_SQL;
 use rivetkit::{BindParam as P, ColumnValue as V, action, prelude::*};
 use serde_json::{Value, json};
 use std::{

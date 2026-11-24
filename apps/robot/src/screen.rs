@@ -1,5 +1,6 @@
 //! Loopback HTML panel for setup and registration (QR codes, owner confirmation).
 //! The ESP32 face is a separate output; see `face.rs`.
+use crate::guard;
 use anyhow::{Result, bail};
 use axum::{
     Router,
@@ -11,143 +12,16 @@ use axum::{
 use robot_buddy::auth;
 use serde::Deserialize;
 use std::{
-    future::Future,
-    io,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    pin::Pin,
     sync::Arc,
-    task::{Context, Poll},
-    time::Duration,
 };
-use tokio::{
-    io::{AsyncRead, AsyncWrite, ReadBuf},
-    net::{TcpListener, TcpStream},
-    sync::{OwnedSemaphorePermit, RwLock, Semaphore},
-    time::Sleep,
-};
+use tokio::{net::TcpListener, sync::RwLock};
 
 /// Where the panel listens unless `BUDDY_SCREEN_ADDR` says otherwise.
 const DEFAULT_ADDRESS: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8090);
 /// Shared by the face panel and the `SoftAP` setup form.
 pub const LOCAL_CSP: &str =
     "default-src 'none'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'";
-
-/// Local pages are tiny: a few connections at once, each closed after a
-/// fixed time whatever it is doing. `axum::serve` has no header read
-/// timeout of its own, so a client that sends half a request would
-/// otherwise hold its connection (and a task) forever.
-pub const MAX_CONNECTIONS: usize = 16;
-pub const CONNECTION_LIFETIME: Duration = Duration::from_secs(10);
-
-/// A TCP listener for local pages that bounds open connections and their
-/// lifetime. Shared by the face panel and the `SoftAP` setup form.
-pub struct Bounded {
-    inner: TcpListener,
-    slots: Arc<Semaphore>,
-    lifetime: Duration,
-}
-
-impl Bounded {
-    pub fn new(inner: TcpListener, connections: usize, lifetime: Duration) -> Self {
-        Self {
-            inner,
-            slots: Arc::new(Semaphore::new(connections)),
-            lifetime,
-        }
-    }
-
-    /// The bounds every local page uses.
-    pub fn local(inner: TcpListener) -> Self {
-        Self::new(inner, MAX_CONNECTIONS, CONNECTION_LIFETIME)
-    }
-}
-
-impl axum::serve::Listener for Bounded {
-    type Io = Limited;
-    type Addr = SocketAddr;
-
-    async fn accept(&mut self) -> (Limited, SocketAddr) {
-        // Wait for a free slot before accepting: extra clients queue in the
-        // kernel backlog instead of holding tasks here.
-        let Ok(slot) = self.slots.clone().acquire_owned().await else {
-            unreachable!("the semaphore is never closed");
-        };
-        // Retries accept errors with axum's back-off.
-        let (io, address) = axum::serve::Listener::accept(&mut self.inner).await;
-        let io = Limited {
-            io,
-            deadline: Box::pin(tokio::time::sleep(self.lifetime)),
-            _slot: slot,
-        };
-        (io, address)
-    }
-
-    fn local_addr(&self) -> io::Result<SocketAddr> {
-        self.inner.local_addr()
-    }
-}
-
-/// One accepted connection. Reads and writes fail with `TimedOut` once its
-/// lifetime is over, which makes hyper drop it and free its slot.
-pub struct Limited {
-    io: TcpStream,
-    deadline: Pin<Box<Sleep>>,
-    _slot: OwnedSemaphorePermit,
-}
-
-impl Limited {
-    fn expired(&mut self, cx: &mut Context<'_>) -> bool {
-        self.deadline.as_mut().poll(cx).is_ready()
-    }
-}
-
-fn timed_out<T>() -> Poll<io::Result<T>> {
-    Poll::Ready(Err(io::Error::new(
-        io::ErrorKind::TimedOut,
-        "local page connection lifetime over",
-    )))
-}
-
-impl AsyncRead for Limited {
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
-        let this = self.get_mut();
-        if this.expired(cx) {
-            return timed_out();
-        }
-        Pin::new(&mut this.io).poll_read(cx, buf)
-    }
-}
-
-impl AsyncWrite for Limited {
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        let this = self.get_mut();
-        if this.expired(cx) {
-            return timed_out();
-        }
-        Pin::new(&mut this.io).poll_write(cx, buf)
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        let this = self.get_mut();
-        if this.expired(cx) {
-            return timed_out();
-        }
-        Pin::new(&mut this.io).poll_flush(cx)
-    }
-
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        // Closing is always allowed.
-        Pin::new(&mut self.get_mut().io).poll_shutdown(cx)
-    }
-}
 
 /// Adds the headers every local page carries. `same-origin` (not `no-referrer`) so form
 /// POSTs still send a real `Origin`.
@@ -345,7 +219,7 @@ impl Screen {
             .route("/confirm", post(confirm))
             .layer(DefaultBodyLimit::max(4096))
             .with_state(self.clone());
-        let listener = Bounded::local(TcpListener::bind(address).await?);
+        let listener = guard::guard(TcpListener::bind(address).await?, guard::Limits::PAGE);
         tokio::spawn(async move {
             if let Err(e) = axum::serve(listener, router).await {
                 tracing::error!(error = %e, "face server failed");
@@ -559,72 +433,6 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::SEE_OTHER);
-    }
-
-    /// Real sockets, real time: small bounds keep it quick, and the only
-    /// latency bound is a hang detector.
-    async fn bounded(connections: usize, lifetime: Duration) -> (SocketAddr, Bounded) {
-        let inner = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = inner.local_addr().unwrap();
-        (address, Bounded::new(inner, connections, lifetime))
-    }
-
-    const HANG: Duration = Duration::from_secs(10);
-
-    #[tokio::test]
-    async fn the_listener_holds_new_connections_while_every_slot_is_taken() {
-        use axum::serve::Listener;
-        let (address, mut listener) = bounded(2, HANG).await;
-        let clients: Vec<_> =
-            futures_util::future::join_all((0..3).map(|_| tokio::net::TcpStream::connect(address)))
-                .await;
-        assert!(clients.iter().all(Result::is_ok));
-        let first = listener.accept().await.0;
-        let _second = listener.accept().await.0;
-        let mut third = Box::pin(listener.accept());
-        assert!(
-            futures_util::poll!(third.as_mut()).is_pending(),
-            "no slot is free"
-        );
-        drop(first);
-        tokio::time::timeout(HANG, third)
-            .await
-            .expect("a freed slot accepts the waiting client");
-    }
-
-    #[tokio::test]
-    async fn a_half_sent_request_is_cut_off_and_its_slot_freed() {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        let lifetime = Duration::from_millis(200);
-        let (address, listener) = bounded(1, lifetime).await;
-        let router = Router::new().route("/", get(|| async { "ok" }));
-        let server = tokio::spawn(async move { axum::serve(listener, router).await });
-        let started = std::time::Instant::now();
-        let mut slow = tokio::net::TcpStream::connect(address).await.unwrap();
-        slow.write_all(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n")
-            .await
-            .unwrap();
-        let mut rest = Vec::new();
-        // Closed (EOF or reset) without an answer.
-        let _closed = tokio::time::timeout(HANG, slow.read_to_end(&mut rest))
-            .await
-            .expect("the half-sent request is cut off");
-        assert!(started.elapsed() >= lifetime);
-        assert!(rest.is_empty(), "{}", String::from_utf8_lossy(&rest));
-        // The only slot is free again: a whole request is answered.
-        let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
-        client
-            .write_all(b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
-            .await
-            .unwrap();
-        let mut answer = Vec::new();
-        tokio::time::timeout(HANG, client.read_to_end(&mut answer))
-            .await
-            .expect("answered")
-            .unwrap();
-        let answer = String::from_utf8_lossy(&answer);
-        assert!(answer.starts_with("HTTP/1.1 200"), "{answer}");
-        server.abort();
     }
 
     #[tokio::test]

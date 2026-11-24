@@ -3,7 +3,7 @@ use super::{
     error,
     pipeline::{Chunk, ChunkSource, Spoken},
 };
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use rivetkit::{
     TypedClientExt,
     client::{Client, GetOptions},
@@ -11,7 +11,7 @@ use rivetkit::{
 };
 use robot_buddy::{
     conversation::Conversation,
-    protocol::{Call, Command, OutputEvent},
+    protocol::{Call, Command, OutputEvent, SpeechChunkReply, SpokenAnswerReply},
 };
 use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
@@ -82,7 +82,9 @@ impl ActorSource {
                 turn_id: self.turn_id.clone(),
             })
             .await?;
-        spoken(&value).map(Chunk::Ready)
+        let SpokenAnswerReply { text, voice, .. } =
+            serde_json::from_value(value).context("invalid spoken answer")?;
+        Ok(Chunk::Ready(Spoken { text, voice }))
     }
 }
 
@@ -113,16 +115,6 @@ async fn subscribe(
     connection
 }
 
-fn spoken(value: &Value) -> Result<Spoken> {
-    Ok(Spoken {
-        text: value["text"]
-            .as_str()
-            .context("spoken text missing")?
-            .into(),
-        voice: value["voice"].clone(),
-    })
-}
-
 impl ChunkSource for ActorSource {
     async fn chunk(&self, index: u32) -> Result<Chunk> {
         if self.replay {
@@ -138,12 +130,13 @@ impl ChunkSource for ActorSource {
                 index,
             })
             .await?;
-        match value["state"].as_str() {
-            Some("ready") => spoken(&value).map(Chunk::Ready),
-            Some("pending") => Ok(Chunk::Pending),
-            Some("done") => Ok(Chunk::Done),
-            _ => bail!("invalid speech state"),
-        }
+        let reply: SpeechChunkReply =
+            serde_json::from_value(value).context("invalid speech state")?;
+        Ok(match reply {
+            SpeechChunkReply::Ready { text, voice, .. } => Chunk::Ready(Spoken { text, voice }),
+            SpeechChunkReply::Pending => Chunk::Pending,
+            SpeechChunkReply::Done => Chunk::Done,
+        })
     }
 
     /// `SpeechChunk` re-verifies the session against Conversation and Bot and fails

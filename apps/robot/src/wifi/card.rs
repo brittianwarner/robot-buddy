@@ -184,10 +184,6 @@ pub fn card(setup: &SetupWifi) -> Result<Secret<String>> {
 
 /// `robot-buddy-robot setup-card`: print the card on stdout, creating the
 /// credentials if this robot has none yet. Nothing is logged.
-#[allow(
-    dead_code,
-    reason = "main.rs dispatches `setup-card` here (robot-loop lane); remove when wired"
-)]
 pub fn print_setup_card() -> Result<()> {
     write_setup_card(&path(), &mut std::io::stdout().lock())
 }

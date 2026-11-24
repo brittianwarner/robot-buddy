@@ -170,14 +170,16 @@ pub struct Busy {
 /// The open turn named by a [`BUSY_ERROR`] as `rivetkit-client` renders a refused call
 /// over an actor connection: `RPC Error(user/busy): <message>, <metadata JSON>`. The client
 /// exposes no structured error, so this is the one place that reads its text; the real
-/// engine round trip is pinned by `tests/actors.rs`. Anything else is not a busy refusal.
+/// engine round trip is pinned by `tests/actors.rs`. The metadata is the trailing JSON
+/// object, however the message reads (a brace in the message does not hide it). Anything
+/// else, including a busy refusal without readable metadata, is not a busy refusal.
 #[must_use]
 pub fn busy_turn(error: &str) -> Option<String> {
     let (group, code) = BUSY_ERROR;
     let rest = error.strip_prefix(&format!("RPC Error({group}/{code}): "))?;
-    let metadata = &rest[rest.find('{')?..];
-    let busy: Busy = serde_json::from_str(metadata).ok()?;
-    Some(busy.turn_id)
+    rest.match_indices('{')
+        .find_map(|(at, _)| serde_json::from_str::<Busy>(&rest[at..]).ok())
+        .map(|busy| busy.turn_id)
 }
 
 // Action replies. The action output is JSON (`Call::Output`); these types are what the

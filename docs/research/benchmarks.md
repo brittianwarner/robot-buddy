@@ -65,8 +65,8 @@ Local in-memory SQLite (rusqlite, bundled), with the real schema files. `v1` is 
 | Startup DDL, first start after the upgrade | 54 pages |
 | Startup DDL, every later start | 0 pages |
 | Start transaction (`begin_history_backfill`) | 5 pages |
-| Batches (index, then sweep) | 42 |
-| Largest batch | 84 pages |
+| Batches (index mapping) | 21 |
+| Largest batch | 34 pages |
 | One-shot rebuild it replaced | 260 pages in one transaction |
 | Rivet limit per transaction | 32,768 pages |
 
@@ -87,11 +87,13 @@ Run with the environment of `bun run test:integration`.
 | Measure | Statements before | after | Auto-commit before | after | Transactions before | after |
 |---|---|---|---|---|---|---|
 | Direct spoken turn (2 sentences) | 37 | 31 | 23 | 11 | 5 | 6 |
-| One tool turn (`memory_remember`, then a spoken answer) | 63 | 53 to 58 | 51 | 35 to 40 | 4 | 5 |
-| Enroll plus first turn (new database) | 76 | 71 to 79 | 54 | 42 to 50 | 9 | 11 |
-| Wake after an engine restart plus a direct turn | not measured | 42 to 49 | not measured | 24 to 31 | not measured | 5 |
+| One tool turn (`memory_remember`, then a spoken answer) | 63 | 52 | 51 | 34 | 4 | 5 |
+| Enroll plus first turn (new database) | 76 | 60 | 54 | 31 | 9 | 11 |
+| Wake after an engine restart plus a direct turn | not measured | 32 | not measured | 14 | not measured | 5 |
+| PCM speech chunk read (per chunk) | not measured | 1 conversation + 2 Bot access-check | not measured | 3 | not measured | 0 |
+| Pending speech chunk poll | not measured | 3 | not measured | 3 | not measured | 0 |
 
-Before is one run. After is four runs for the first three rows and three for the wake row; the direct turn gave the same counts each time. The spread is auto-commit reads whose number depends on timing: live access checks (one Bot statement each, at most once a second during a turn) and the test client's replay reads.
+Before is one run. After counts are netted: harness `Replay` polls are counted and subtracted so only actor work remains, and speech reads are included in the wrapper counts.
 
 What changed on the turn path:
 

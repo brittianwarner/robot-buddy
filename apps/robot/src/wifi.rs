@@ -11,8 +11,8 @@
 //! replaces the previous one once it has joined and its password reads back
 //! from `NetworkManager`; a mistyped password leaves the old network in place.
 pub mod card;
-pub mod guard;
 
+use crate::guard;
 use crate::screen::{Screen, escape, header_in, local_headers};
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use axum::{

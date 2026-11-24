@@ -546,6 +546,14 @@ fn busy_refusals_name_the_open_turn() {
         "RPC Error(user/busy): Another turn is still open., {{\"turn_id\":\"{TURN}\",\"x\":1}}"
     );
     assert_eq!(busy_turn(&newer).as_deref(), Some(TURN));
+    // The `{:#}` (pretty) rendering, and a brace in the message text, still name it.
+    let pretty = format!(
+        "RPC Error(user/busy): Another turn is still open., {:#}",
+        json!({ "turn_id": TURN })
+    );
+    assert_eq!(busy_turn(&pretty).as_deref(), Some(TURN));
+    let braced = format!("RPC Error(user/busy): Busy {{still open}}., {metadata}");
+    assert_eq!(busy_turn(&braced).as_deref(), Some(TURN));
     for other in [
         "RPC Error(user/busy): Another turn is still open., null",
         "RPC Error(actor/internal_error): busy, {\"turn_id\":\"t\"}",

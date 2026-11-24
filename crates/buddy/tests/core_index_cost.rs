@@ -59,6 +59,7 @@ fn turns_completed_build_cost() {
 }
 
 /// Median time of `runs` executions of `sql` bound to each of `queries`, read to the end.
+#[cfg(feature = "server")]
 fn median_read(db: &Connection, sql: &str, queries: &[String], runs: usize) -> Duration {
     let mut stmt = db.prepare(sql).unwrap();
     let mut times = Vec::with_capacity(runs * queries.len());
@@ -122,8 +123,10 @@ fn history_search_latency() {
 }
 
 /// The two reads Memory search made before it became one statement, measured against it.
+#[cfg(feature = "server")]
 const MEMORY_MATCHES_BEFORE: &str =
     "SELECT key,value FROM facts_search WHERE facts_search MATCH ? ORDER BY rank LIMIT 6";
+#[cfg(feature = "server")]
 const MEMORY_RECENT_BEFORE: &str = "SELECT key,value FROM facts ORDER BY updated DESC LIMIT 2";
 
 /// Memory search at the 500-fact cap with a 16-term query, the largest the actor accepts:

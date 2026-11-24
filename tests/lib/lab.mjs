@@ -34,12 +34,12 @@ export async function openLab({ viewport = { width: 1440, height: 1000 } } = {})
     const page = await context.newPage();
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
-    assert.equal((await context.request.get(url + '/lab/api/state')).status(), 400);
+    assert.equal((await context.request.get(url + '/lab/api/state')).status(), 401);
     const foreign = await context.request.post(url + '/lab/api/login', {
       headers: { origin: 'https://attacker.invalid' },
       data: { token },
     });
-    assert.equal(foreign.status(), 400);
+    assert.equal(foreign.status(), 403);
     await page.goto(url + '/lab');
     await page.locator('#operator-token').fill(token);
     await page.locator('#login-form button').click();
@@ -49,13 +49,13 @@ export async function openLab({ viewport = { width: 1440, height: 1000 } } = {})
       headers: { origin: url },
       data: { target: 'bot', command: { type: 'revoke' } },
     });
-    assert.equal(noCsrf.status(), 400);
+    assert.equal(noCsrf.status(), 403);
     await page.locator('#identity-file').setInputFiles(identity);
     await page.locator('#enroll').click();
     await page.waitForFunction(() => document.querySelector('#bot-id').textContent !== '—');
     const bot = await page.locator('#bot-id').textContent();
     const action = labAction({ context, url, csrf });
-    assert.equal((await action('bot', { type: 'revoke' })).status(), 400, 'revoke is not on the lab allowlist');
+    assert.equal((await action('bot', { type: 'revoke' })).status(), 403, 'revoke is not on the lab allowlist');
     await page.locator('#enroll').click();
     await page.waitForTimeout(1000);
     assert.equal(await page.locator('#bot-id').textContent(), bot, 'reconnect keeps the same bot');

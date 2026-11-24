@@ -5,8 +5,8 @@
 //! spoken phase is one tool-disabled call that speaks the answer after tool work.
 use super::{
     CLAIM_SQL, CancellationToken, Command, Context, Conversation, Ctx, Db, Delta, Duration,
-    INSERT_EVENT_SQL, Result, ToolCall, Tx, V, Value, bail, context, ensure, integer, json, named,
-    params, persona, string,
+    INSERT_EVENT_SQL, RECENT_TURNS_SQL, Result, ToolCall, Tx, V, Value, bail, context, ensure,
+    integer, json, named, params, persona, string,
 };
 use rig::{
     completion::{
@@ -26,14 +26,6 @@ const CHECKPOINT_SQL: &str = r"
     ON CONFLICT(turn_id) DO UPDATE SET state = excluded.state, phase = excluded.phase
     RETURNING turn_id";
 const SAVED_RUN_SQL: &str = "SELECT version, state, preamble FROM runs WHERE turn_id = ?";
-/// The latest completed turns, oldest first. Served by the `turns_completed` index.
-/// Public for the history SQL tests and benches.
-pub const RECENT_TURNS_SQL: &str = r"
-    SELECT text, answer FROM (
-        SELECT id, substr(text, 1, 4000) AS text, substr(answer, 1, 6000) AS answer
-        FROM turns WHERE status = 'completed'
-        ORDER BY id DESC LIMIT 12
-    ) ORDER BY id";
 /// This turn's completed tool calls, the receipts every model request lists.
 const EFFECTS_SQL: &str =
     "SELECT call_id, name FROM tool_calls WHERE turn_id = ? AND result <> '' LIMIT 64";

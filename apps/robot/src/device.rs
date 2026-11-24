@@ -1616,7 +1616,18 @@ mod tests {
             // An owner signed in on their phone.
             *world.confirming.lock().unwrap() = true;
             until("claim window", Duration::from_secs(10), || {
-                face.steady() == Mood::Thinking
+                face.steady() == Mood::Confirming
+            })
+            .await;
+            // Wake and mute still show over the claim face, then it returns.
+            controls.send(Control::Listening(true)).await.unwrap();
+            until("listening over the claim", SOON, || {
+                face.steady() == Mood::Listening
+            })
+            .await;
+            controls.send(Control::Listening(false)).await.unwrap();
+            until("back to the claim", SOON, || {
+                face.steady() == Mood::Confirming
             })
             .await;
             tokio::time::sleep(face::SORRY).await;

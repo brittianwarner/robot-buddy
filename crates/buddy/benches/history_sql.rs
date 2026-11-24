@@ -1,15 +1,12 @@
 //! History SQL at 10,000 turns: the version 1 schema against the current one.
 //! Run: `cargo bench -p robot-buddy --bench history_sql -- --warm-up-time 1 --measurement-time 3`
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use robot_buddy::conversation::RECENT_TURNS_SQL;
 use rusqlite::{Connection, params};
 use std::hint::black_box;
 
 const SCHEMA: &str = include_str!("../src/conversation.sql");
 const SCHEMA_V1: &str = include_str!("../tests/fixtures/conversation-v1.sql");
-/// Copy of the prompt-context read in `conversation/harness.rs`.
-const RECENT_TURNS: &str = "SELECT text,answer FROM (SELECT id,substr(text,1,4000) AS text,\
-    substr(answer,1,6000) AS answer FROM turns WHERE status='completed' \
-    ORDER BY id DESC LIMIT 12) ORDER BY id";
 const TURNS: usize = 10_000;
 
 fn database(current: bool) -> Connection {
@@ -39,7 +36,7 @@ fn database(current: bool) -> Connection {
 }
 
 fn recent(db: &Connection) -> usize {
-    let mut stmt = db.prepare_cached(RECENT_TURNS).expect("prepare");
+    let mut stmt = db.prepare_cached(RECENT_TURNS_SQL).expect("prepare");
     let rows = stmt
         .query_map([], |r| r.get::<_, String>(1))
         .expect("query");

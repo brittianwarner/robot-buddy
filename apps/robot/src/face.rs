@@ -88,10 +88,14 @@ pub enum Mood {
     Muted,
     /// Brief apology after a failed or interrupted turn.
     Sorry,
+    /// An owner signed in on their phone; the robot waits for them to speak
+    /// the six-digit code it shows them.
+    Confirming,
 }
 
 impl Mood {
-    const ALL: [Self; 7] = [
+    /// In discriminant order: `frame` indexes it by `self as usize`.
+    const ALL: [Self; 8] = [
         Self::Offline,
         Self::Idle,
         Self::Listening,
@@ -99,6 +103,7 @@ impl Mood {
         Self::Speaking,
         Self::Muted,
         Self::Sorry,
+        Self::Confirming,
     ];
 
     pub fn commands(self) -> Vec<FaceCommand> {
@@ -111,9 +116,12 @@ impl Mood {
             Self::Speaking => (Led::Speaking, Expression::Happy, 0.7),
             Self::Muted => (Led::Muted, Expression::Neutral, 0.3),
             Self::Sorry => (Led::Idle, Expression::Sad, 0.6),
+            // Listening for the owner's code, glad to meet them: the LED asks
+            // for speech, the expression tells it apart from the wake word.
+            Self::Confirming => (Led::Listening, Expression::Happy, 0.8),
         };
         let mut commands = vec![L { led }, E { e, i }];
-        if matches!(self, Self::Listening | Self::Speaking) {
+        if matches!(self, Self::Listening | Self::Speaking | Self::Confirming) {
             commands.push(Look { look: [0.0, 0.0] });
         }
         commands
@@ -147,6 +155,8 @@ pub struct Signals {
     pub listening: bool,
     pub speaking: bool,
     pub thinking: bool,
+    /// A claim waits for the owner's spoken confirmation code.
+    pub confirming: bool,
 }
 
 pub fn mood(s: Signals) -> Mood {
@@ -158,6 +168,8 @@ pub fn mood(s: Signals) -> Mood {
         Mood::Speaking
     } else if s.listening {
         Mood::Listening
+    } else if s.confirming {
+        Mood::Confirming
     } else if s.thinking {
         Mood::Thinking
     } else {
@@ -477,6 +489,53 @@ mod tests {
             ..speaking
         };
         assert_eq!(mood(muted), Mood::Muted);
+        // A claim waiting for the owner's code has its own face, above a
+        // waiting utterance but never hiding listening, speaking or mute.
+        let confirming = Signals {
+            confirming: true,
+            ..thinking
+        };
+        assert_eq!(mood(confirming), Mood::Confirming);
+        for (over, want) in [
+            (
+                Signals {
+                    listening: true,
+                    ..confirming
+                },
+                Mood::Listening,
+            ),
+            (
+                Signals {
+                    speaking: true,
+                    ..confirming
+                },
+                Mood::Speaking,
+            ),
+            (
+                Signals {
+                    muted: true,
+                    ..confirming
+                },
+                Mood::Muted,
+            ),
+            (
+                Signals {
+                    connected: false,
+                    ..confirming
+                },
+                Mood::Offline,
+            ),
+        ] {
+            assert_eq!(mood(over), want, "{over:?}");
+        }
+        // Only existing wire lines, distinct from every other mood.
+        assert_eq!(
+            Mood::Confirming.frame(),
+            b"{\"led\":\"listening\"}\n{\"e\":\"happy\",\"i\":0.8}\n{\"look\":[0.0,0.0]}\n"
+        );
+        for other in Mood::ALL.into_iter().filter(|m| *m != Mood::Confirming) {
+            assert_ne!(other.frame(), Mood::Confirming.frame(), "{other:?}");
+        }
     }
 
     #[tokio::test(start_paused = true)]

@@ -65,8 +65,9 @@ table of every step's result and wall time. `-- --from <step>` resumes at a step
   `<break/>`, a stray `[whispering]`) is removed, so rule-derived `[whispering] ` is the
   only tag that reaches the provider; the canonical transcript is never changed.
 - `sentences.rs` and `history_sql.rs` cover the sentence splitter and the history queries.
-  `history_sql.rs` measures the startup DDL apart from the rebuild start transaction and
-  its batches (WAL pages per commit, numbers in [benchmarks](research/benchmarks.md)).
+  `history_sql.rs` checks exact search results on both readers at every batch boundary and
+  measures the startup DDL apart from the rebuild start transaction and its batches (WAL
+  pages per commit, numbers in [benchmarks](research/benchmarks.md)).
 
 ### Integration harness (`crates/buddy/tests/actors.rs`, `tests/support/mod.rs`)
 
@@ -93,24 +94,22 @@ Extra arguments go to every suite.
   with its PID and command, and the run refuses to start.
 - Tests share one engine behind a read/write gate. Latency, barge-in and restart tests take
   it exclusively so their timings are not shared with other tests.
-- The model is an axum mock on `BUDDY_TEST_MODEL_PORT`. Web search goes to a fake Brave key
-  through `HTTPS_PROXY` pointing at the mock, which accepts the CONNECT and never answers:
-  a deterministic tool that is still in flight when the engine restarts.
+- The model is an axum mock on `BUDDY_TEST_MODEL_PORT`. The restart test holds
+  `memory_remember` through a deterministic test seam rather than a proxy or retry, so the
+  effect is guaranteed to be in flight when the engine restarts.
 - Event subscriptions replay from the first hole in the sequence, so an event dropped while a
   socket reconnects is still seen. Replay pages are capped by count and at 512 KiB, so a pull
   pages until a page comes back empty. Pushed events are stamped when the push arrives.
-- The search client gives the proxy tunnel 5 s. If the graceful stop takes longer than that to reach
-  the tool's actor, the search fails by itself before the restart and the checkpoint is never
-  exercised. The restart test detects this (a `turn.failed` pushed before the restart finished)
-  and retries the tool leg once.
 
 Scenarios: enrollment idempotency and session binding; single-use challenges and one-time
 claim confirmation; revocation across bot, conversation and memory; one provider call per
 chat turn with private text hidden; tool turns that write memory then speak; direct-mode
 tool call after spoken text fails the turn; one numbered speech chunk per sentence;
-barge-in closes the provider stream and commits nothing after; a running turn pins its
-voice, rejects a second submit and cancels cleanly; bot isolation; compare-and-swap on
-voice and context settings; system-prompt tool writes apply to the next turn; persona
+barge-in closes the provider stream and commits nothing after; cancel by request ID
+(`CancelRequest`, including before the submit arrives); spoken-phase cancel; web-result
+taint refusing subsequent write and history tools; short-lifetime retention; a running turn
+pins its voice, rejects a second submit and cancels cleanly; bot isolation; compare-and-swap
+on voice and context settings; system-prompt tool writes apply to the next turn; persona
 save, activate and roll back; persona library limits (50 names, 16 versions); history
 paging and phrase search; memory remember, search and forget; engine restart interrupts
 live streams and fails closed on unresolved tools; every output event kind matches its
@@ -282,8 +281,10 @@ Fixed on November 23, 2026; each test failed before its fix.
   resolved leftmost-first; now longest-first as `docs/architecture/voice.md` says.
 - `voice_rules.rs::model_authored_tags_do_not_reach_the_provider` and
   `model_markup_is_removed_with_tidy_spacing`: model-authored bracket tags reached the
-  Eleven v4 input. A sentence that is only markup now sends no speech request
-  (`apps/server/src/speech/tests.rs::provider_error_body_is_bounded_and_not_echoed`).
+  Eleven v4 input. A markup-only chunk is now skipped without a provider call
+  (`apps/server/src/speech/tests.rs::an_all_markup_turn_has_no_speech`,
+  `markup_chunks_are_skipped_and_the_reply_continues`,
+  `openrouter_skips_markup_through_the_pipeline`).
 - `protocol_golden.rs::settings_read_back_ignore_additive_fields` and
   `settings_writes_reject_unknown_fields` replace the old test that pinned strict settings
   types, which contradicted "Clients ignore additive unknown fields".

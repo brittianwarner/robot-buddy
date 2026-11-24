@@ -976,12 +976,10 @@ impl<'a, S: Speaker> Controller<'a, S> {
 
     fn refresh(&self) {
         let speaking = self.playing.as_ref().is_some_and(|p| p.audible);
-        // A claim waiting for the spoken code reads as Thinking until the
-        // face has a confirmation mood of its own. An unowned robot never
-        // thinks otherwise, and Thinking still shows the apology for a
-        // refused code (Listening would hide it).
-        let thinking =
-            self.online && (self.is_live() || self.state.cache.pending.is_some() || self.claiming);
+        let thinking = self.online && (self.is_live() || self.state.cache.pending.is_some());
+        // A claim waiting for the spoken code has its own face. Like Thinking
+        // it still shows the apology for a refused code.
+        let confirming = self.online && self.claiming;
         // Mute, listening and audio already playing show without a
         // connection; only an otherwise idle robot reads Offline.
         let connected = self.online || self.state.muted || self.state.listening || speaking;
@@ -991,6 +989,7 @@ impl<'a, S: Speaker> Controller<'a, S> {
             listening: self.state.listening,
             speaking,
             thinking,
+            confirming,
         }));
     }
 }
@@ -1252,7 +1251,7 @@ pub mod tests {
 
     /// Run the controller's calls (and disk writes) until it has none left
     /// or the connection is lost.
-    async fn drive(c: &mut Controller<'_, FakeSpeaker>, remote: &Fake) -> Result<(), Lost> {
+    async fn drive<S: Speaker>(c: &mut Controller<'_, S>, remote: &Fake) -> Result<(), Lost> {
         loop {
             if let Some(write) = c.take_persist(Instant::now()) {
                 let done = write.await;
@@ -1938,6 +1937,115 @@ pub mod tests {
         c.expire(Instant::now() + FIRST_AUDIO * 2).await;
         drop(c);
         assert_eq!(starts(&log, "turn-hi"), 1);
+    }
+
+    /// The deadline above against the real speaker and a real socket: the
+    /// request still waiting for its headers at the deadline is cancelled (its
+    /// connection closes, it reports nothing), the one retry plays, and the
+    /// retry's `Started`, sent on its first pipe write, clears the deadline.
+    #[tokio::test]
+    async fn a_request_silent_past_the_deadline_is_cancelled_and_the_retry_plays() {
+        use crate::audio::{Media, Playback, PlayerFactory};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        /// Liveness only; nothing here waits on wall-clock time.
+        const GUARD: Duration = Duration::from_secs(10);
+        /// Read one request: its header block and `content-length` body.
+        async fn request(socket: &mut tokio::net::TcpStream) {
+            let mut read = Vec::new();
+            let mut buffer = [0u8; 4096];
+            loop {
+                let n = socket.read(&mut buffer).await.unwrap();
+                assert!(n > 0, "client left mid-request");
+                read.extend_from_slice(&buffer[..n]);
+                let Some(end) = read.windows(4).position(|w| w == b"\r\n\r\n") else {
+                    continue;
+                };
+                let head = String::from_utf8_lossy(&read[..end]).to_ascii_lowercase();
+                let length: usize = head
+                    .lines()
+                    .find_map(|l| l.strip_prefix("content-length:"))
+                    .map_or(0, |v| v.trim().parse().unwrap());
+                if read.len() >= end + 4 + length {
+                    return;
+                }
+            }
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let server = format!("http://{}", listener.local_addr().unwrap());
+        let (seen_tx, seen) = tokio::sync::oneshot::channel();
+        let (closed_tx, closed) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            // The first request never gets headers; note when the client goes.
+            let (mut first, _) = listener.accept().await.unwrap();
+            request(&mut first).await;
+            let _ = seen_tx.send(());
+            let mut buffer = [0u8; 64];
+            while let Ok(1..) = first.read(&mut buffer).await {}
+            let _ = closed_tx.send(());
+            // The retry is answered with audio for the turn.
+            let (mut second, _) = listener.accept().await.unwrap();
+            request(&mut second).await;
+            let pcm = vec![0u8; 4800];
+            let head = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: audio/pcm;rate=24000;channels=1\r\n\
+                 x-audio-encoding: pcm_s16le\r\nx-audio-turn-id: turn-hi\r\n\
+                 content-length: {}\r\nconnection: close\r\n\r\n",
+                pcm.len()
+            );
+            second.write_all(head.as_bytes()).await.unwrap();
+            second.write_all(&pcm).await.unwrap();
+            while let Ok(1..) = second.read(&mut buffer).await {}
+        });
+        let player: PlayerFactory = Arc::new(|_| {
+            let mut command = tokio::process::Command::new("cat");
+            command.stdout(std::process::Stdio::null());
+            command
+        });
+        let media = Arc::new(Media::for_test(&server, player, Duration::from_secs(2)));
+        let (events, playback) = mpsc::channel(8);
+        let mut rig = Rig::new();
+        let remote = rig.server.clone();
+        let mut c = Controller::new(&rig.face, &rig.store, &mut rig.state, quiet(), auth::now());
+        c.go_online(Playback::new(media, "s".into(), events), playback);
+        c.needs_replay = false;
+        c.control(Control::Say("hi".into())).await;
+        drive(&mut c, &remote).await.unwrap();
+        tokio::time::timeout(GUARD, seen).await.unwrap().unwrap();
+        c.pushed(event(1, "turn-hi", "speech.ready")).await;
+        let by = c.voice.as_ref().and_then(|v| v.first_audio_by);
+        assert!(by.is_some(), "speech.ready arms the deadline");
+        assert_eq!(c.deadline(), by);
+        c.expire(by.unwrap()).await;
+        tokio::time::timeout(GUARD, closed)
+            .await
+            .expect("the silent request's connection is closed")
+            .unwrap();
+        // Nothing from the cancelled generation: the retry speaks first.
+        let started = tokio::time::timeout(GUARD, c.next_playback())
+            .await
+            .unwrap();
+        assert_eq!(started, PlaybackEvent::Started { generation: 2 });
+        c.playback(started);
+        assert_eq!(c.deadline(), None, "first audio clears the deadline");
+        assert_eq!(c.face.steady(), Mood::Speaking);
+        let finished = tokio::time::timeout(GUARD, c.next_playback())
+            .await
+            .unwrap();
+        assert_eq!(
+            finished,
+            PlaybackEvent::Finished {
+                generation: 2,
+                played: true
+            }
+        );
+        c.playback(finished);
+        assert!(c.voice.as_ref().is_some_and(|v| v.retried && v.heard));
+        drop(c);
+        assert_eq!(
+            rig.log.count("submit hi"),
+            1,
+            "spoken twice, submitted once"
+        );
     }
 
     #[tokio::test]

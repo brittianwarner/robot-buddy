@@ -7,6 +7,7 @@ mod config;
 mod controller;
 mod device;
 mod face;
+mod guard;
 mod input;
 mod journal;
 mod screen;
@@ -41,6 +42,11 @@ const WORKER_THREADS: usize = 2;
 const SHUTDOWN_GRACE: Duration = Duration::from_millis(100);
 
 fn main() -> Result<()> {
+    // Provisioning, not the service: print the setup card and exit, before
+    // any logging so nothing about the credentials reaches the journal.
+    if std::env::args().nth(1).as_deref() == Some("setup-card") {
+        return wifi::card::print_setup_card();
+    }
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();

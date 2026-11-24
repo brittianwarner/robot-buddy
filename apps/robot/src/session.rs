@@ -20,8 +20,7 @@ use rivetkit_client::{
 use robot_buddy::{
     auth::{self, Identity},
     protocol::{
-        BUSY_ERROR, Bundle, Busy, CALL_ACTION, Call, Command, EnrollmentRequest, OUTPUT_EVENT,
-        OutputEvent,
+        Bundle, CALL_ACTION, Call, Command, EnrollmentRequest, OUTPUT_EVENT, OutputEvent, busy_turn,
     },
 };
 use serde_json::{Value, json};
@@ -291,20 +290,6 @@ fn classify(message: &str) -> CallError {
     }
 }
 
-/// The open turn named by a busy refusal, decoded as the typed [`Busy`]
-/// metadata. rivetkit-client 3.1 hands action errors over as text only
-/// (`RPC Error(group/code): message, metadata` with the metadata as JSON
-/// last), so the group and code are matched on that prefix and the metadata
-/// is the trailing JSON object, however the message reads. Anything else,
-/// including a busy refusal without readable metadata, is not one.
-fn busy_turn(message: &str) -> Option<String> {
-    let (group, code) = BUSY_ERROR;
-    let rest = message.strip_prefix(&format!("RPC Error({group}/{code}): "))?;
-    rest.match_indices('{')
-        .find_map(|(at, _)| serde_json::from_str::<Busy>(&rest[at..]).ok())
-        .map(|busy| busy.turn_id)
-}
-
 #[derive(PartialEq, Eq)]
 enum Shown {
     Nothing,
@@ -506,6 +491,7 @@ fn shown_claim_expiry(cached: i64, actor: i64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use robot_buddy::protocol::Busy;
 
     #[test]
     fn a_cleared_claim_is_replaced_at_once() {

@@ -132,7 +132,11 @@ impl Media {
     }
 
     #[cfg(test)]
-    fn for_test(server: &str, make_player: PlayerFactory, write_deadline: Duration) -> Self {
+    pub(crate) fn for_test(
+        server: &str,
+        make_player: PlayerFactory,
+        write_deadline: Duration,
+    ) -> Self {
         Self {
             http: client().unwrap(),
             server: server.to_owned(),
