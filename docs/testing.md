@@ -15,6 +15,8 @@ and wall time. `-- --from <step>` resumes at a step.
 
 ## Suites
 
+All-features check and lint now require OpenCV development headers/libraries, libclang and pkg-config. For default-profile robot tests (including mock camera, motor bus, face-board PTY and local speech controls), `cargo test -p robot-buddy-robot --locked` needs no OpenCV or models. The full Pi build and asset-dependent acceptance checks are in [DEPLOYMENT.md](../DEPLOYMENT.md).
+
 | Command | Runs in CI | Needs | Proves |
 | --- | --- | --- | --- |
 | `bun run format:check`, `bun run check`, `bun run lint` | yes | Rust toolchain | Formatting, type check of every target, Clippy with `-D warnings`. |
@@ -50,12 +52,12 @@ and wall time. `-- --from <step>` resumes at a step.
   change, regenerate with `BUDDY_UPDATE_GOLDEN=1 cargo test -p robot-buddy --test protocol_golden`
   and review the fixture diff.
 - Output events are not built in that file. Their fixtures (`output_event.*.json`, one per
-  kind: `turn.started`, `text.delta`, `speech.ready`, `tool.started`, `tool.completed`,
+  kind: `turn.started`, `text.delta`, `speech.ready`, `face.express`, `tool.started`, `tool.completed`,
   `turn.completed`, `turn.cancelled`, `turn.failed`, `turn.interrupted`) are captured from
   real turns by `actors.rs::output_events_match_their_golden_fixtures` and the restart test,
   which check that each pushed event equals its replayed copy and that both equal the fixture
   once sequence and turn ID are normalized. `protocol_golden.rs` then checks the set is
-  complete, each round-trips and ignores additive fields, and `speech.ready` carries only
+  complete, each round-trips and ignores additive fields. The live-only `face.express` cue replays as an empty payload; `speech.ready` carries only
   `index`. Recapture with `BUDDY_UPDATE_GOLDEN=1 bun run test:integration` and review the diff.
 - `voice_rules.rs` runs the table in `fixtures/voice_rules.json` (34 cases) through
   `VoiceConfig::speech_input` and `speech_body`, and through `VoiceConfig::for_speech`, which

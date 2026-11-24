@@ -14,6 +14,8 @@ jobs:
         with:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
+      # All-features check/lint builds the native bindings; no camera or model is needed.
+      - run: sudo apt-get update && sudo apt-get install -y libopencv-dev libclang-dev pkg-config
       - run: bun run format:check && bun run check && bun run lint && bun run test
       # The robot's feature profile (no actor runtime, no Rig): unit tests, not only a check.
       - run: bun run test:robot-features
