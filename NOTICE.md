@@ -1,27 +1,27 @@
 # Pip hardware port and external components
 
-The Pip on-device port was undertaken in collaboration with ToschLogic. The neck choreography, expression poses and tuning in `apps/robot/src/motion/poses.rs`, and the local voice coloring in `apps/robot/src/piper.rs`, adapt behavior from the private **butty** project. They are not independently invented Robot Buddy assets. Permission for this port does not itself document a separate MIT relicense or a grant to redistribute the original project or its model weights. Confirm applicable terms with the respective rights holders before distributing a downstream bundle.
+The Pip on-device port was undertaken in collaboration with ToschLogic. The neck choreography, expression poses and tuning in `apps/robot/src/motion/poses.rs`, and the local voice coloring in `apps/robot/src/piper.rs`, adapt behavior from ToschLogic's **butty** project. They are not independently invented Robot Buddy assets. Permission for this port does not itself document a separate MIT relicense or a grant to redistribute the original project or its model weights. butty at `c0ca680` contains no licence file. Nothing in this repository grants a relicence of butty or a right to redistribute it, its firmware or its models. Confirm applicable terms with the respective rights holders before distributing a downstream bundle.
 
-The robot client does not link Piper or espeak-ng. Optional offline speech launches the separately installed Piper executable; GPL versions of Piper and its espeak-ng dependency retain their own terms. Redistributing those programs, rather than installing them separately, requires handling their licenses and applicable source-distribution obligations. Voice files have their own model cards. The full vision build dynamically links system OpenCV libraries. Keep their package notices and the license/model card of each separately installed inference model. No private weights, recordings, or firmware sources are shipped here.
+The robot client does not link Piper or espeak-ng. Optional offline speech launches the separately installed Piper executable; GPL versions of Piper and its espeak-ng dependency retain their own terms. Redistributing those programs, rather than installing them separately, requires handling their licenses and applicable source-distribution obligations. Voice files have their own model cards. The full vision build dynamically links system OpenCV libraries. Keep their package notices and the license/model card of each separately installed inference model. No butty weights, recordings, or firmware sources are shipped here.
 
 ## Credits
 
-- **butty** is Brittian's private project and Pip's original robot: the 3D-printed body and CAD, the ESP32-S3 face firmware, and a Python "brain" that this Rust port replaces on the Pi. Its `SPEC.md` names the repository `ToschLogic/butty`. Ask Brittian for access. No butty source, firmware, model or recording is copied into this repository.
-- **ToschLogic** collaborated on the port.
+- **butty** belongs to **ToschLogic**: <https://github.com/ToschLogic/butty>. Gage manages access to it. It is Pip's original robot: the 3D-printed body and CAD, the ESP32-S3 face firmware, the wiring, the "Hey Pip" wake model and a Python "brain" that this Rust port replaces on the Pi. No butty source, firmware, model or recording is copied into this repository. Paths below are cited at butty commit `c0ca680`.
+- **ToschLogic** owns butty and collaborated on the port.
 - This repository's own code is under the MIT [LICENSE](LICENSE). The butty-derived behaviour and the third-party components below are covered by the notes above, not by that grant alone.
 
 ## What adapts or depends on butty
 
-These are the files that adapt butty behaviour or depend on butty assets, found by comparing the port with the butty tree:
+These are the files that adapt butty behaviour or depend on butty assets, found by comparing the port with the butty tree at `c0ca680`:
 
-| File | Relationship to butty |
-| --- | --- |
-| `apps/robot/src/motion/poses.rs` | Neck gestures and dance, expression poses and their tuning, adapted from butty's motion behaviour |
-| `apps/robot/src/piper.rs` | Offline voice coloring (a slower Piper `--length-scale`, played back 1.3× faster for a higher voice), adapted from butty's Pip voice |
-| `apps/robot/src/face.rs` | Speaks the line protocol of butty's ESP32-S3 face firmware (`{"e":…}`, `{"look":…}`, `{"led":…}`, `{"qr":…}`, `hello`/`hb`). It interoperates with that firmware and does not include it |
-| `apps/robot/src/listen/wake.rs` | Loads the private `hey_pip.onnx` wake classifier, trained for butty. The model is not in this repository |
+| robot-buddy file | Relationship | butty source (`c0ca680`) |
+| --- | --- | --- |
+| `apps/robot/src/motion/poses.rs` | Neck gestures and dance, expression poses and their tuning, adapted from butty's motion behaviour | `brain/pipbrain/motion.py`, `brain/pipbrain/expressions.py` |
+| `apps/robot/src/piper.rs` | Offline voice coloring (a slower Piper `--length-scale`, played back 1.3× faster for a higher voice), adapted from butty's Pip voice | `brain/pipbrain/voice.py`, `voice/pip_voice.py` |
+| `apps/robot/src/face.rs` | Speaks the line protocol of butty's ESP32-S3 face firmware (`{"e":…}`, `{"look":…}`, `{"led":…}`, `{"g":…}`, `{"qr":…}`, `{"ping":…}`, `hello`/`hb`). It interoperates with that firmware and does not include it | `firmware/README.md` (protocol), `firmware/src/main.cpp` |
+| `apps/robot/src/listen/wake.rs` | Loads butty's `hey_pip.onnx` wake classifier at run time. The model is not in this repository | `brain/models/wake/hey_pip.onnx` |
 
-The hardware design (parts, wiring, CAD) is butty's. [DEPLOYMENT.md](DEPLOYMENT.md) summarises it and points to the butty repo.
+The hardware design (parts, wiring, CAD) is butty's: `SPEC.md`, `REV2.md`, `README.md`, `firmware/README.md`, `firmware/include/pins.h` and `cad/`. [DEPLOYMENT.md](DEPLOYMENT.md) summarises it as a wiring and verification reference, quoting pin numbers and servo IDs from butty with citations, and points to the butty repository.
 
 ## Third-party components
 
