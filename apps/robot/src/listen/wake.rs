@@ -50,8 +50,12 @@ pub(super) trait WakeDetector {
 
 pub(super) struct Transcript;
 impl WakeDetector for Transcript {
-    async fn fired(&mut self, _: &[i16; FRAME], _: bool) -> Result<bool> {
-        Ok(false)
+    fn fired(
+        &mut self,
+        _: &[i16; FRAME],
+        _: bool,
+    ) -> impl std::future::Future<Output = Result<bool>> {
+        std::future::ready(Ok(false))
     }
 }
 
@@ -191,50 +195,41 @@ mod onnx {
         }
     }
 
-    pub(in super::super) struct Stream<'a> {
-        worker: &'a Worker,
-        models: &'a Models,
+    struct Gate {
+        threshold: f32,
+        busy_threshold: f32,
         samples: Vec<i16>,
         reset: bool,
         armed: bool,
     }
-    impl<'a> Stream<'a> {
-        pub(in super::super) fn new(worker: &'a Worker, models: &'a Models) -> Self {
+    impl Gate {
+        fn new(threshold: f32, busy_threshold: f32) -> Self {
             Self {
-                worker,
-                models,
+                threshold,
+                busy_threshold,
                 samples: Vec::with_capacity(HOP),
                 reset: true,
                 armed: true,
             }
         }
-    }
-    impl WakeDetector for Stream<'_> {
         fn reset(&mut self) {
             self.armed = true;
             self.samples.clear();
             self.reset = true;
         }
-        async fn fired(&mut self, frame: &[i16; FRAME], busy: bool) -> Result<bool> {
+        fn push(&mut self, frame: &[i16; FRAME]) -> Option<(bool, Vec<i16>)> {
             self.samples.extend(frame);
             if self.samples.len() < HOP {
-                return Ok(false);
+                return None;
             }
-            let (result, rx) = oneshot::channel();
             let samples = std::mem::replace(&mut self.samples, Vec::with_capacity(HOP));
-            self.worker
-                .tx
-                .try_send(Request {
-                    reset: std::mem::take(&mut self.reset),
-                    samples,
-                    result,
-                })
-                .map_err(|_| anyhow::anyhow!("wake worker unavailable"))?;
-            let score = tokio::time::timeout(Duration::from_secs(2), rx).await???;
+            Some((std::mem::take(&mut self.reset), samples))
+        }
+        fn evaluate(&mut self, score: f32, busy: bool) -> bool {
             let threshold = if busy {
-                self.models.busy_threshold
+                self.busy_threshold
             } else {
-                self.models.threshold
+                self.threshold
             };
             let fire = self.armed && score >= threshold;
             if fire {
@@ -242,13 +237,89 @@ mod onnx {
             } else if score < threshold * 0.6 {
                 self.armed = true;
             }
-            Ok(fire)
+            fire
+        }
+    }
+
+    pub(in super::super) struct Stream<'a> {
+        worker: &'a Worker,
+        gate: Gate,
+    }
+    impl<'a> Stream<'a> {
+        pub(in super::super) fn new(worker: &'a Worker, models: &'a Models) -> Self {
+            Self {
+                worker,
+                gate: Gate::new(models.threshold, models.busy_threshold),
+            }
+        }
+    }
+    impl WakeDetector for Stream<'_> {
+        fn reset(&mut self) {
+            self.gate.reset();
+        }
+        async fn fired(&mut self, frame: &[i16; FRAME], busy: bool) -> Result<bool> {
+            let Some((reset, samples)) = self.gate.push(frame) else {
+                return Ok(false);
+            };
+            let (result, rx) = oneshot::channel();
+            self.worker
+                .tx
+                .try_send(Request {
+                    reset,
+                    samples,
+                    result,
+                })
+                .map_err(|_| anyhow::anyhow!("wake worker unavailable"))?;
+            let score = tokio::time::timeout(Duration::from_secs(2), rx).await???;
+            Ok(self.gate.evaluate(score, busy))
         }
     }
 
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn gate_batches_hops_enforces_thresholds_and_hysteresis() {
+            let mut gate = Gate::new(0.5, 0.8);
+            for i in 0..3 {
+                assert!(gate.push(&[i; FRAME]).is_none());
+            }
+            let (reset, hop) = gate.push(&[3; FRAME]).unwrap();
+            assert!(reset);
+            assert_eq!(hop.len(), HOP);
+            assert_eq!(hop[0], 0);
+            assert_eq!(hop[3 * FRAME], 3);
+
+            for _ in 0..3 {
+                assert!(gate.push(&[4; FRAME]).is_none());
+            }
+            let (reset, hop) = gate.push(&[5; FRAME]).unwrap();
+            assert!(!reset);
+            assert_eq!(hop.len(), HOP);
+
+            // Busy requires the higher threshold; idle fires at the base threshold.
+            assert!(!gate.evaluate(0.6, true));
+            assert!(gate.evaluate(0.8, true));
+            // Staying warm across busy -> idle suppresses tail double-fires until score drops below 0.6 * threshold.
+            assert!(!gate.evaluate(0.7, false));
+            assert!(!gate.evaluate(0.3, false));
+            assert!(!gate.evaluate(0.29, false)); // re-arms
+            assert!(gate.evaluate(0.5, false));
+            assert!(!gate.evaluate(0.9, false));
+
+            // Boundary reset clears partial samples, marks pipeline reset, and re-arms.
+            assert!(gate.push(&[7; FRAME]).is_none());
+            gate.reset();
+            for _ in 0..3 {
+                assert!(gate.push(&[8; FRAME]).is_none());
+            }
+            let (reset, hop) = gate.push(&[9; FRAME]).unwrap();
+            assert!(reset);
+            assert_eq!(hop[0], 8);
+            assert!(gate.evaluate(0.5, false));
+        }
+
         /// Operator-supplied JSONL, one reference score per little-endian 1280-sample hop.
         /// Run with the three models and a locally recorded raw single-beam clip; never commit either.
         #[test]
@@ -266,10 +337,18 @@ mod onnx {
                 "unaligned or short reference clip"
             );
             let mut positives = 0;
-            for (index, (bytes, expected)) in raw.chunks_exact(HOP * 2).zip(scores).enumerate() {
+            for (index, (bytes, expected)) in raw
+                .as_chunks::<{ HOP * 2 }>()
+                .0
+                .iter()
+                .zip(scores)
+                .enumerate()
+            {
                 let samples: Vec<_> = bytes
-                    .chunks_exact(2)
-                    .map(|v| i16::from_le_bytes([v[0], v[1]]))
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|v| i16::from_le_bytes(*v))
                     .collect();
                 let actual = engine.score(&samples, index == 0)?;
                 // Reference random startup embeddings have drained by 4 seconds.
