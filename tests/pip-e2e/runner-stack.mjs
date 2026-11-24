@@ -98,12 +98,130 @@ export function gitInfo(repoDir = root) {
     const r = spawnSync('git', ['-C', repoDir, ...args], { encoding: 'utf8' });
     return r.status === 0 ? r.stdout.trim() : null;
   };
+  const head = runGit(['rev-parse', 'HEAD']);
+  if (head) {
+    return {
+      source: 'container_git',
+      head,
+      branch: runGit(['rev-parse', '--abbrev-ref', 'HEAD']),
+      describe: runGit(['describe', '--always', '--dirty']),
+      dirty: Boolean(runGit(['status', '--porcelain'])),
+    };
+  }
+  // The read-only /workspace mount has no usable git in the image; run-in-docker.sh
+  // passes the host checkout identity. Unknown stays explicit, never guessed.
+  const env = process.env;
   return {
-    head: runGit(['rev-parse', 'HEAD']),
-    branch: runGit(['rev-parse', '--abbrev-ref', 'HEAD']),
-    describe: runGit(['describe', '--always', '--dirty']),
-    dirty: Boolean(runGit(['status', '--porcelain'])),
+    source: env.PIP_E2E_HOST_GIT_HEAD ? 'host_env' : 'unknown',
+    head: env.PIP_E2E_HOST_GIT_HEAD || null,
+    branch: env.PIP_E2E_HOST_GIT_BRANCH || null,
+    describe: env.PIP_E2E_HOST_GIT_DESCRIBE || null,
+    dirty: env.PIP_E2E_HOST_GIT_DIRTY == null ? null : env.PIP_E2E_HOST_GIT_DIRTY === '1',
+    dirty_paths: env.PIP_E2E_HOST_GIT_DIRTY_PATHS ? env.PIP_E2E_HOST_GIT_DIRTY_PATHS.split(',').filter(Boolean) : [],
   };
+}
+
+/**
+ * SHA-256 over the exact harness files that ran (tests/pip-e2e minus caches,
+ * artifacts, and private mounts), plus a per-file digest for the entry points.
+ */
+export function harnessDigest(repoDir = root) {
+  const base = path.join(repoDir, 'tests', 'pip-e2e');
+  const files = [];
+  const walk = (rel) => {
+    const full = path.join(base, rel);
+    if (!fs.existsSync(full)) return;
+    const st = fs.statSync(full);
+    if (st.isFile()) {
+      if (!/\.(onnx|bin|wav|i420|ppm|jpg|png)$/i.test(rel)) files.push(rel);
+      return;
+    }
+    if (!st.isDirectory()) return;
+    for (const entry of fs.readdirSync(full).sort()) {
+      if (['.cache', '.artifacts', 'node_modules', '__pycache__', 'private'].includes(entry)) continue;
+      walk(rel ? path.join(rel, entry) : entry);
+    }
+  };
+  walk('');
+  files.sort();
+  const h = crypto.createHash('sha256');
+  const entryPoints = {};
+  for (const rel of files) {
+    const buf = fs.readFileSync(path.join(base, rel));
+    h.update(rel);
+    h.update('\0');
+    h.update(buf);
+    h.update('\0');
+    if (/^(runner[^/]*|soak-gate|run-in-docker)\.(mjs|sh)$/.test(rel) || rel === 'Dockerfile') {
+      entryPoints[rel] = crypto.createHash('sha256').update(buf).digest('hex');
+    }
+  }
+  return { file_count: files.length, sha256: h.digest('hex'), entry_points: entryPoints };
+}
+
+/** GNU build-id from an ELF64 little-endian executable's PT_NOTE segments (null if absent). */
+export function elfBuildId(filePath) {
+  try {
+    const fd = fs.openSync(filePath, 'r');
+    try {
+      const hdr = Buffer.alloc(64);
+      fs.readSync(fd, hdr, 0, 64, 0);
+      if (hdr.readUInt32BE(0) !== 0x7f454c46 || hdr[4] !== 2 || hdr[5] !== 1) return null;
+      const machine = hdr.readUInt16LE(18);
+      const phoff = Number(hdr.readBigUInt64LE(32));
+      const phentsize = hdr.readUInt16LE(54);
+      const phnum = hdr.readUInt16LE(56);
+      const ph = Buffer.alloc(phentsize * phnum);
+      fs.readSync(fd, ph, 0, ph.length, phoff);
+      for (let i = 0; i < phnum; i += 1) {
+        const o = i * phentsize;
+        if (ph.readUInt32LE(o) !== 4) continue; // PT_NOTE
+        const off = Number(ph.readBigUInt64LE(o + 8));
+        const size = Number(ph.readBigUInt64LE(o + 32));
+        const notes = Buffer.alloc(size);
+        fs.readSync(fd, notes, 0, size, off);
+        let p = 0;
+        while (p + 12 <= notes.length) {
+          const namesz = notes.readUInt32LE(p);
+          const descsz = notes.readUInt32LE(p + 4);
+          const type = notes.readUInt32LE(p + 8);
+          const nameStart = p + 12;
+          const descStart = nameStart + Math.ceil(namesz / 4) * 4;
+          const name = notes.subarray(nameStart, nameStart + namesz).toString('latin1').replace(/\0+$/, '');
+          if (type === 3 && name === 'GNU') {
+            return { machine: machine === 183 ? 'aarch64' : String(machine), build_id: notes.subarray(descStart, descStart + descsz).toString('hex') };
+          }
+          p = descStart + Math.ceil(descsz / 4) * 4;
+        }
+      }
+      return { machine: machine === 183 ? 'aarch64' : String(machine), build_id: null };
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+}
+
+/** Thread names (`/proc/<pid>/task/<tid>/comm`) for a live process; null when unreadable. */
+export function readThreadNames(pid) {
+  if (!pid) return null;
+  const dir = `/proc/${pid}/task`;
+  try {
+    return fs
+      .readdirSync(dir)
+      .map((tid) => {
+        try {
+          return fs.readFileSync(`${dir}/${tid}/comm`, 'utf8').trim();
+        } catch {
+          return null;
+        }
+      })
+      .filter((n) => n != null)
+      .sort();
+  } catch {
+    return null;
+  }
 }
 
 export function collectProvenance(paths, repoDir = root) {
@@ -127,11 +245,20 @@ export function collectProvenance(paths, repoDir = root) {
       files[label] = { name: path.basename(filePath), missing: true };
     }
   }
+  const elf = {};
+  for (const label of ['robotBin', 'serverBin']) {
+    if (paths[label]) elf[label] = elfBuildId(paths[label]);
+  }
+  const expectRobot = process.env.PIP_E2E_EXPECT_ROBOT_SHA256 || null;
   return {
     arch: `${process.platform}/${process.arch}`,
     engine_version: engineVer,
     git: gitInfo(repoDir),
     product_source_digest: productSourceDigest(repoDir),
+    harness_digest: harnessDigest(repoDir),
+    elf,
+    expected_robot_sha256: expectRobot,
+    robot_sha256_matches_expected: expectRobot ? files.robotBin?.sha256 === expectRobot : null,
     files,
   };
 }
@@ -1203,6 +1330,7 @@ export async function startPipE2EStack(options = {}) {
     return {
       t: Math.round(now()),
       robot,
+      robot_threads: readThreadNames(robotProc?.pid),
       robot_children: children,
       robot_tree_rss_kib:
         robot?.rss_kib != null ? robot.rss_kib + (children?.rss_kib ?? 0) : null,
@@ -1375,6 +1503,10 @@ export async function startPipE2EStack(options = {}) {
     restartServerAndEngine,
     sampleMetrics,
     parseLogTelemetry: () => parseLogTelemetry(work),
+    readRobotLog: () => {
+      const p = path.join(work, 'robot.log');
+      return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '';
+    },
     checkRedaction,
     tails,
     shutdown,

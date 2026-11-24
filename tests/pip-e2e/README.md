@@ -40,6 +40,24 @@ Private assets are **never** copied into images, caches, or commits:
 - `PIP_E2E_HEY_PIP_ONNX=/path/to/hey_pip.onnx` — mounted read-only at `/opt/pip-e2e/private/hey_pip.onnx` for `--neural-wake` runs.
 - `PIP_E2E_HUMAN_SPEECH_DIR=/path/to/human-recordings` — mounted read-only at `/opt/pip-e2e/private/human-speech` for real human-recorded positive/negative wake fixtures.
 
+## Sustained Soak Gate
+
+`soak-gate.mjs` is the pure full-run gate behind the soak check. Over `[start, end]` of the soak it requires:
+
+- **Neck motion:** a `neck loop timing` window every <= 7.5s from start to end (final freshness <= 7.5s), each window's `total_ticks` difference equal to its `ticks` (no counter reset), >= 45 Hz per window, >= 90% in-run tick coverage (pre-soak ticks never count), and zero `neck motion stopped` / `neck disarmed` / `neck worker panicked` / torque-off-unconfirmed lines anywhere in `robot.log`.
+- **Vision:** a `camera inference active` window every <= 7.5s with strictly advancing `vision_frames`, fresh at the end, no `camera stopped` in the run.
+- **Per-sample peripherals:** every sample has RSS, servo, camera, and `/proc/<pid>/task/*/comm` thread names; servo goal frames advance >= 45 Hz between every consecutive pair; torque is on for all three joints in every sample; `neck-50hz` is present in every sample; a final sample is taken at the end timestamp.
+- **Log integrity:** no malformed telemetry lines, no panics. A partial last line is ignored and reported; a log that stops early fails final freshness.
+
+Failures are stored with timestamps and redacted error templates in `soak-report.json` and `soak-gate-evidence.json` (per-window counter differences), both behind the artifact redaction gate. First/mid/end robot RSS and thread names are in the report.
+
+```sh
+bun test tests/pip-e2e/soak-gate.test.mjs     # fixture proofs: late stop, 10s gap, truncated log, ...
+bun tests/pip-e2e/soak-gate.mjs --robot-log robot.log --telemetry soak-telemetry.json --start <iso> --end <iso>
+```
+
+Provenance: the report binds the host git HEAD/dirty paths (passed by `run-in-docker.sh`), a digest of every harness file that ran, the robot/server ELF GNU build-ids, and, when `PIP_E2E_EXPECT_ROBOT_SHA256` is set, whether `robot-buddy-robot` matches it.
+
 ## Fixture vs Real Hardware Boundary
 
 Every generated report (`<suite>-report.json` and `<suite>-report.md`) explicitly distinguishes:

@@ -25,6 +25,7 @@ import {
   fileSha256,
   startPipE2EStack,
 } from './runner-stack.mjs';
+import { evaluateSoakGate } from './soak-gate.mjs';
 
 const argv = process.argv.slice(2);
 const hasFlag = (name) => argv.includes(`--${name}`);
@@ -1440,6 +1441,18 @@ async function runSoak(stack, manifest, { durationSec, intervalSec, includeVisio
   const endWall = Date.now();
   const endIso = new Date(endWall).toISOString();
   const elapsedSec = Math.round((endWall - startWall) / 1000);
+  // Final freshness sample at the end timestamp, before any teardown-side query.
+  samples.push(await sampleWithPeripherals());
+  const sustainedGate = evaluateSoakGate({
+    robotLog: stack.readRobotLog(),
+    samples,
+    startMs: startWall,
+    endMs: endWall,
+    includeVision: Boolean(visionFrame),
+  });
+  for (const f of sustainedGate.failures.slice(0, 8)) {
+    log(`sustained gate failure: ${f.kind} at=${f.at ?? 'n/a'} ${f.detail ?? ''}`);
+  }
   const servoBounds = await stack.periph.servoAssertBounds({});
   const servoState = await stack.periph.servoState();
   const servoGoalsAll = (await stack.periph.servoEvents('goals', 0, 10000)).events ?? [];
@@ -1563,6 +1576,7 @@ async function runSoak(stack, manifest, { durationSec, intervalSec, includeVisio
     },
     active_whisper_processes: wStatus.active_count ?? 0,
     sample_count: samples.length,
+    sustained_gate: (({ motion_per_window, ...rest }) => rest)(sustainedGate),
   };
 
   const soakOk =
@@ -1573,6 +1587,7 @@ async function runSoak(stack, manifest, { durationSec, intervalSec, includeVisio
     sustainedMotionLogProgress &&
     sustainedServoProgress &&
     sustainedVisionProgress &&
+    sustainedGate.ok &&
     Boolean(servoBounds.ok) &&
     (servoState.limit_violations ?? 0) === 0 &&
     distinctServoGoals >= 2 &&
@@ -1587,7 +1602,17 @@ async function runSoak(stack, manifest, { durationSec, intervalSec, includeVisio
     soakSummary,
   );
 
-  return { soakSummary, samples };
+  return {
+    soakSummary,
+    samples,
+    gateEvidence: {
+      clocks: sustainedGate.clocks,
+      thresholds: sustainedGate.thresholds,
+      ok: sustainedGate.ok,
+      failures: sustainedGate.failures,
+      motion_per_window: sustainedGate.motion_per_window,
+    },
+  };
 }
 
 function renderMarkdown(report) {
@@ -1599,6 +1624,9 @@ function renderMarkdown(report) {
     `- **Arch:** \`${report.provenance.arch}\``,
     `- **Git:** \`${report.provenance.git.head ?? 'unknown'}\` (\`${report.provenance.git.branch ?? 'unknown'}\`, dirty=${report.provenance.git.dirty})`,
     `- **Product Source Digest (\`apps/\` + \`crates/\` + \`Cargo.lock\`):** \`${report.provenance.product_source_digest.sha256}\` (${report.provenance.product_source_digest.file_count} files)`,
+    `- **Git source:** \`${report.provenance.git.source ?? 'unknown'}\`, dirty_paths=${JSON.stringify(report.provenance.git.dirty_paths ?? [])}`,
+    `- **Harness Digest (\`tests/pip-e2e\`):** \`${report.provenance.harness_digest?.sha256 ?? 'unknown'}\` (${report.provenance.harness_digest?.file_count ?? 0} files); entry points ${JSON.stringify(report.provenance.harness_digest?.entry_points ?? {})}`,
+    `- **Robot ELF:** build-id=\`${report.provenance.elf?.robotBin?.build_id ?? 'unknown'}\` (${report.provenance.elf?.robotBin?.machine ?? '?'}), expected sha256=\`${report.provenance.expected_robot_sha256 ?? 'not provided'}\`, matches=${report.provenance.robot_sha256_matches_expected}`,
     `- **Rivet Engine:** \`${report.provenance.engine_version ?? 'unknown'}\``,
     `- **Artifact Redaction Gate:** **${report.redaction_gate.ok ? 'PASS' : 'FAIL'}**`,
     `- **Overall Status:** **${report.ok ? 'PASS' : report.executable_gates_ok ? 'PARTIAL (missing_evidence)' : 'FAIL'}** (${report.passed} pass, ${report.missing_evidence} missing_evidence, ${report.failed} fail)`,
@@ -1679,6 +1707,23 @@ function renderMarkdown(report) {
       `- Robot FD growth: start=${s.file_descriptors_growth.robot.start}, end=${s.file_descriptors_growth.robot.end}, peak=${s.file_descriptors_growth.robot.peak}, delta=${s.file_descriptors_growth.robot.delta}`,
       `- Camera during soak: fixture=${s.camera.active_fixture}, frames_sent=${s.camera.frames_sent}, vision_frames_log=${s.camera.vision_frames_log_start} -> ${s.camera.vision_frames_log_mid} -> ${s.camera.vision_frames_log_end}, previews=${s.camera.preview_checks_ok}/${s.camera.preview_checks_total}`,
     );
+    const g = s.sustained_gate;
+    if (g) {
+      const ss = g.samples.stats;
+      const rss = (x) => (x?.robot_rss_kib != null ? `${(x.robot_rss_kib / 1024).toFixed(1)}MiB` : 'missing');
+      lines.push(
+        '',
+        `## Sustained Full-Run Gate: **${g.ok ? 'PASS' : 'FAIL'}** (${g.failure_count} failures)`,
+        '',
+        `- Window: \`${g.clocks.start}\` -> \`${g.clocks.end}\` (${g.clocks.elapsed_s}s); thresholds: motion/vision max gap ${g.thresholds.motion_window_max_gap_ms}ms, final freshness ${g.thresholds.motion_final_freshness_ms}ms, min rate ${g.thresholds.min_rate_fraction * 100}% of 50 Hz per window and per sample interval`,
+        `- Motion (in-run windows only): windows=${g.motion.stats.windows_in_run}, ticks=${g.motion.stats.run_ticks}/${g.motion.stats.expected_ticks_50hz} (${g.motion.stats.run_coverage_pct}%), min_window_hz=${g.motion.stats.min_window_hz}, first=\`${g.motion.stats.first_window_at}\`, last=\`${g.motion.stats.last_window_at}\`, missed=${g.motion.stats.missed_in_run} (${g.motion.stats.missed_rate_pct}%), stop_events=${g.motion.stats.stop_events}`,
+        `- Vision: windows=${g.vision.stats.windows_in_run ?? 'skipped'}, frames ${g.vision.stats.frames_first ?? '-'} -> ${g.vision.stats.frames_last ?? '-'}, last=\`${g.vision.stats.last_window_at ?? '-'}\``,
+        `- Samples: ${ss.samples} (missing_data=${ss.missing_data_samples}, torque_dropped=${ss.torque_dropped_samples}, neck-50hz absent=${ss.thread_missing_samples}), min servo interval rate=${ss.min_servo_interval_hz} Hz`,
+        `- Robot RSS first/mid/end: ${rss(ss.first)} / ${rss(ss.mid)} / ${rss(ss.end)}; threads first/end: ${JSON.stringify(ss.first?.robot_threads ?? null)} / ${JSON.stringify(ss.end?.robot_threads ?? null)}`,
+        `- Log integrity: lines=${g.log_integrity.lines}, partial_tail_bytes=${g.log_integrity.partial_tail_bytes}, malformed_telemetry=${g.log_integrity.malformed_telemetry_lines}, panics=${g.log_integrity.panics}`,
+        ...g.failures.slice(0, 20).map((f) => `- FAIL \`${f.kind}\` at \`${f.at ?? 'n/a'}\`: ${f.detail ?? ''}`),
+      );
+    }
   }
   return `${lines.join('\n')}\n`;
 }
@@ -1841,7 +1886,8 @@ if (import.meta.main) {
 
   let jsonStr = `${JSON.stringify(report, null, 2)}\n`;
   let mdStr = renderMarkdown(report);
-  const redaction = stack ? stack.checkRedaction([jsonStr, mdStr]) : { ok: true, findings: [] };
+  const gateEvidenceStr = soakResult?.gateEvidence ? `${JSON.stringify(soakResult.gateEvidence, null, 2)}\n` : '';
+  const redaction = stack ? stack.checkRedaction([jsonStr, mdStr, gateEvidenceStr]) : { ok: true, findings: [] };
   report.redaction_gate = redaction;
   if (!redaction.ok) {
     report.ok = false;
@@ -1859,6 +1905,12 @@ if (import.meta.main) {
   fs.writeFileSync(mdPath, mdStr);
   if (soakResult?.samples) {
     fs.writeFileSync(path.join(outDir, 'soak-telemetry.json'), `${JSON.stringify(soakResult.samples, null, 2)}\n`);
+  }
+  if (gateEvidenceStr) {
+    // Redacted timing evidence (timestamps, counters, redacted error templates). It shares the
+    // report's redaction gate: on any finding the report fails and the evidence is withheld.
+    if (redaction.ok) fs.writeFileSync(path.join(outDir, 'soak-gate-evidence.json'), gateEvidenceStr);
+    else log('soak gate evidence withheld because the artifact redaction gate failed');
   }
 
   log(`wrote redacted reports:\n  ${jsonPath}\n  ${mdPath}`);
