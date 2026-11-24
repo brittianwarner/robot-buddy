@@ -210,3 +210,179 @@ fn provisioning_needs_explicit_consent_before_hardware_access() {
             .contains("--write-eeprom")
     );
 }
+
+#[test]
+fn loop_timing_tracks_p95_and_missed_20ms_deadlines_across_windows() {
+    let origin = Instant::now();
+    let mut timing = LoopTiming::new(origin);
+    assert_eq!(timing.flush(origin), None);
+
+    // 20 on-time ticks: cycle_us = 1000..=20000 step 1000 (last is 19_500 so no miss).
+    for i in 0..20u64 {
+        let scheduled = origin + PERIOD * u32::try_from(i).unwrap();
+        let started = scheduled + Duration::from_micros(200);
+        let cycle = if i == 19 { 19_500 } else { (i + 1) * 1_000 };
+        let finished = scheduled + Duration::from_micros(cycle);
+        assert_eq!(timing.record(scheduled, started, finished), None);
+    }
+    let first = timing.flush(origin + Duration::from_millis(400)).unwrap();
+    assert_eq!(
+        first,
+        TimingReport {
+            ticks: 20,
+            missed: 0,
+            total_ticks: 20,
+            total_missed: 0,
+            p95_cycle_us: 19_000,
+            max_cycle_us: 19_500,
+            max_work_us: 19_300,
+            max_overrun_us: 0,
+        }
+    );
+
+    // Second window: one exact-boundary miss (20 ms) and one 7 ms overrun,
+    // plus a tick past TIMING_REPORT_INTERVAL that triggers automatic emission.
+    let w2 = origin + Duration::from_millis(400);
+    assert_eq!(
+        timing.record(
+            w2,
+            w2 + Duration::from_micros(500),
+            w2 + Duration::from_millis(20),
+        ),
+        None
+    );
+    assert_eq!(
+        timing.record(
+            w2 + PERIOD,
+            w2 + PERIOD + Duration::from_millis(2),
+            w2 + PERIOD + Duration::from_millis(27),
+        ),
+        None
+    );
+    let end = w2 + TIMING_REPORT_INTERVAL;
+    let second = timing
+        .record(
+            end,
+            end + Duration::from_micros(100),
+            end + Duration::from_millis(1),
+        )
+        .unwrap();
+    assert_eq!(
+        second,
+        TimingReport {
+            ticks: 3,
+            missed: 2,
+            total_ticks: 23,
+            total_missed: 2,
+            p95_cycle_us: 27_000,
+            max_cycle_us: 27_000,
+            max_work_us: 25_000,
+            max_overrun_us: 7_000,
+        }
+    );
+    assert_eq!(timing.flush(end), None);
+}
+
+#[test]
+fn run_emits_missed_deadline_warning_when_bus_exceeds_20ms_period() {
+    use std::collections::BTreeMap;
+    use tracing::field::{Field, Visit};
+    use tracing_subscriber::prelude::*;
+
+    struct SlowBus {
+        inner: Rc<RefCell<Mock>>,
+        stop: Arc<AtomicBool>,
+        delay_once: bool,
+    }
+    impl Bus for SlowBus {
+        fn ping(&mut self, id: u8) -> Result<()> {
+            self.inner.ping(id)
+        }
+        fn read(&mut self, id: u8, reg: u8, out: &mut [u8]) -> Result<()> {
+            self.inner.read(id, reg, out)
+        }
+        fn write(&mut self, id: u8, reg: u8, bytes: &[u8]) -> Result<()> {
+            self.inner.write(id, reg, bytes)
+        }
+        fn goals(&mut self, joints: &Joints, steps: [u16; 3]) -> Result<()> {
+            self.inner.goals(joints, steps)?;
+            if self.delay_once {
+                self.delay_once = false;
+                thread::sleep(Duration::from_millis(25));
+                self.stop.store(true, Ordering::Release);
+            }
+            Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct Fields(BTreeMap<String, String>);
+    impl Visit for Fields {
+        fn record_u64(&mut self, field: &Field, value: u64) {
+            self.0.insert(field.name().into(), value.to_string());
+        }
+        fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+            self.0.insert(
+                field.name().into(),
+                format!("{value:?}").trim_matches('"').into(),
+            );
+        }
+    }
+
+    type CapturedEvents = Arc<Mutex<Vec<(tracing::Level, BTreeMap<String, String>)>>>;
+
+    struct Capture(CapturedEvents);
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for Capture {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            let mut fields = Fields::default();
+            event.record(&mut fields);
+            self.0
+                .lock()
+                .unwrap()
+                .push((*event.metadata().level(), fields.0));
+        }
+    }
+
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let subscriber = tracing_subscriber::registry().with(Capture(events.clone()));
+    let mock = Rc::new(RefCell::new(Mock::new()));
+    let stop = Arc::new(AtomicBool::new(false));
+    let mut drive = Drive {
+        bus: SlowBus {
+            inner: mock,
+            stop: stop.clone(),
+            delay_once: false,
+        },
+        joints: fixture(),
+    };
+    let start = drive.arm().unwrap();
+    // Arm the slow tick only after `arm()` finishes its initial hold-pose write.
+    drive.bus.delay_once = true;
+    let input = MotionInput::default();
+    tracing::subscriber::with_default(subscriber, || {
+        run(&mut drive, &input, &stop, start).unwrap();
+    });
+    let recorded = events.lock().unwrap();
+    let (level, fields) = recorded
+        .iter()
+        .find(|(_, f)| {
+            f.get("message").map(String::as_str) == Some("neck loop missed 20ms deadline")
+        })
+        .expect("expected missed deadline timing event");
+    assert_eq!(*level, tracing::Level::WARN);
+    assert_eq!(fields.get("period_ms").map(String::as_str), Some("20"));
+    assert_eq!(fields.get("missed").map(String::as_str), Some("1"));
+    assert_eq!(fields.get("total_missed").map(String::as_str), Some("1"));
+    assert_eq!(fields.get("ticks").map(String::as_str), Some("1"));
+    assert!(
+        fields
+            .get("max_overrun_us")
+            .and_then(|v| v.parse::<u32>().ok())
+            .is_some_and(|v| v >= 4_000),
+        "expected >=4ms overrun: {fields:?}"
+    );
+}

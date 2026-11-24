@@ -20,6 +20,149 @@ use std::{
 use sts3215::{Bus, Serial};
 
 const PERIOD: Duration = Duration::from_millis(20);
+const TIMING_REPORT_INTERVAL: Duration = Duration::from_secs(5);
+const TIMING_SAMPLE_CAP: usize = 256;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TimingReport {
+    ticks: u64,
+    missed: u64,
+    total_ticks: u64,
+    total_missed: u64,
+    p95_cycle_us: u32,
+    max_cycle_us: u32,
+    max_work_us: u32,
+    max_overrun_us: u32,
+}
+
+fn duration_us(duration: Duration) -> u32 {
+    u32::try_from(duration.as_micros()).unwrap_or(u32::MAX)
+}
+
+/// Fixed-capacity loop timing accumulator for the 50 Hz neck worker.
+struct LoopTiming {
+    window_start: Instant,
+    window_ticks: u64,
+    window_missed: u64,
+    max_cycle_us: u32,
+    max_work_us: u32,
+    max_overrun_us: u32,
+    samples_us: Vec<u32>,
+    total_ticks: u64,
+    total_missed: u64,
+}
+
+impl LoopTiming {
+    fn new(now: Instant) -> Self {
+        Self {
+            window_start: now,
+            window_ticks: 0,
+            window_missed: 0,
+            max_cycle_us: 0,
+            max_work_us: 0,
+            max_overrun_us: 0,
+            samples_us: Vec::with_capacity(TIMING_SAMPLE_CAP),
+            total_ticks: 0,
+            total_missed: 0,
+        }
+    }
+
+    fn record(
+        &mut self,
+        scheduled: Instant,
+        started: Instant,
+        finished: Instant,
+    ) -> Option<TimingReport> {
+        let cycle_us = duration_us(finished.saturating_duration_since(scheduled));
+        let work_us = duration_us(finished.saturating_duration_since(started));
+        let next_deadline = scheduled + PERIOD;
+        let missed = finished >= next_deadline;
+        let overrun_us = if missed {
+            duration_us(finished.saturating_duration_since(next_deadline))
+        } else {
+            0
+        };
+        self.window_ticks = self.window_ticks.saturating_add(1);
+        self.total_ticks = self.total_ticks.saturating_add(1);
+        if missed {
+            self.window_missed = self.window_missed.saturating_add(1);
+            self.total_missed = self.total_missed.saturating_add(1);
+        }
+        self.max_cycle_us = self.max_cycle_us.max(cycle_us);
+        self.max_work_us = self.max_work_us.max(work_us);
+        self.max_overrun_us = self.max_overrun_us.max(overrun_us);
+        if self.samples_us.len() < TIMING_SAMPLE_CAP {
+            self.samples_us.push(cycle_us);
+        }
+        if finished.saturating_duration_since(self.window_start) >= TIMING_REPORT_INTERVAL {
+            self.flush(finished)
+        } else {
+            None
+        }
+    }
+
+    fn flush(&mut self, now: Instant) -> Option<TimingReport> {
+        if self.window_ticks == 0 {
+            return None;
+        }
+        let p95_cycle_us = if self.samples_us.is_empty() {
+            0
+        } else {
+            self.samples_us.sort_unstable();
+            let index = (self.samples_us.len() * 95).div_ceil(100).saturating_sub(1);
+            self.samples_us[index]
+        };
+        let report = TimingReport {
+            ticks: self.window_ticks,
+            missed: self.window_missed,
+            total_ticks: self.total_ticks,
+            total_missed: self.total_missed,
+            p95_cycle_us,
+            max_cycle_us: self.max_cycle_us,
+            max_work_us: self.max_work_us,
+            max_overrun_us: self.max_overrun_us,
+        };
+        self.window_start = now;
+        self.window_ticks = 0;
+        self.window_missed = 0;
+        self.max_cycle_us = 0;
+        self.max_work_us = 0;
+        self.max_overrun_us = 0;
+        self.samples_us.clear();
+        Some(report)
+    }
+}
+
+fn emit_timing(report: TimingReport) {
+    let period_ms = u64::try_from(PERIOD.as_millis()).unwrap_or(20);
+    if report.missed > 0 {
+        tracing::warn!(
+            period_ms,
+            ticks = report.ticks,
+            missed = report.missed,
+            total_ticks = report.total_ticks,
+            total_missed = report.total_missed,
+            p95_cycle_us = report.p95_cycle_us,
+            max_cycle_us = report.max_cycle_us,
+            max_work_us = report.max_work_us,
+            max_overrun_us = report.max_overrun_us,
+            "neck loop missed 20ms deadline"
+        );
+    } else {
+        tracing::info!(
+            period_ms,
+            ticks = report.ticks,
+            missed = 0u64,
+            total_ticks = report.total_ticks,
+            total_missed = report.total_missed,
+            p95_cycle_us = report.p95_cycle_us,
+            max_cycle_us = report.max_cycle_us,
+            max_work_us = report.max_work_us,
+            max_overrun_us = 0u32,
+            "neck loop timing"
+        );
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct MotionInput(Arc<Mutex<Inputs>>);
@@ -128,6 +271,7 @@ fn run(
     let mut deadline = Instant::now();
     let mut planner = Planner::new(drive.joints, start, deadline);
     let mut next_health = deadline + Duration::from_millis(200);
+    let mut timing = LoopTiming::new(deadline);
     let mut axis = 0;
     while !stop.load(Ordering::Acquire) {
         let now = Instant::now();
@@ -135,6 +279,7 @@ fn run(
             thread::park_timeout(deadline - now);
             continue;
         }
+        let scheduled = deadline;
         if now >= next_health {
             drive.health(axis)?;
             axis = (axis + 1) % 3;
@@ -142,10 +287,17 @@ fn run(
         }
         let state = input.0.lock().ok().context("neck input poisoned")?.clone();
         drive.bus.goals(&drive.joints, planner.step(now, &state))?;
-        deadline += PERIOD;
-        if deadline <= Instant::now() {
-            deadline = Instant::now() + PERIOD;
+        let finished = Instant::now();
+        if let Some(report) = timing.record(scheduled, now, finished) {
+            emit_timing(report);
         }
+        deadline += PERIOD;
+        if deadline <= finished {
+            deadline = finished + PERIOD;
+        }
+    }
+    if let Some(report) = timing.flush(Instant::now()) {
+        emit_timing(report);
     }
     Ok(())
 }
