@@ -2,7 +2,7 @@
 
 ## Pip hardware port (`feat/pip-hardware`, compared with `main`)
 
-`main` is at `07e75ce`, which is also the merge base. The branch adds 76 commits up to `d4ef544`, and the last code change is `82e8d5b`. `git diff --stat main...feat/pip-hardware`: 137 files, 58,147 insertions, 480 deletions. Most of that volume is tests, harnesses and committed matrix logs (`infra/evidence/`). For details, see `git log --oneline main..feat/pip-hardware`.
+`main` is at `07e75ce`, which is also the merge base. The last code, test or infra change is `82e8d5b`; later commits are docs and the refreshed benchmark data. Run `git diff --stat main...feat/pip-hardware` for current totals. Most of the volume is tests, harnesses and committed matrix logs (`infra/evidence/`). For details, see `git log --oneline main..feat/pip-hardware`.
 
 ### Robot device client (`apps/robot`)
 
@@ -48,7 +48,7 @@ Everything below ran **without a physical Pip**. All of it is at `82e8d5b` unles
 
 | Check | Result |
 | --- | --- |
-| 30-minute continuous E2E soak, virtual Pip (`tests/pip-e2e`, real ARM64 robot, server and Rivet 3.1.1, real whisper-cli, `hey_pip.onnx` mounted read-only) | **PASS.** 149/149 turns. 50 Hz neck motion at 99.9% in-run tick coverage, 0 neck stops. Robot RSS peaked at 185.9 MiB and plateaued. The rivet-engine process did **not** plateau: +2.6 to 3.7 MiB/min over the run. Robot ELF SHA-256 `be7cae4e42fda047f857d327af875e0dbf91b54af3a8076df84080e802e2768b` (GNU BuildID `c15c88b7594bd0919c5a0bf78609c2b01c6162e9`) from the pip-e2e image recipe. Soak report artifact `soak-30m-c5d7c08`: kept outside the repo; not needed for bring-up. [infra/toolchain-validation.md](infra/toolchain-validation.md) records this hash and BuildID and explains why the matrix's own ELFs differ. Clean rebuilds on 2026-11-24 from `82e8d5b` and from `c5d7c08` (the pip-e2e recipe) and from `82e8d5b` (`infra/pi-build.Dockerfile`) reproduced this ELF byte for byte ([DEPLOYMENT.md §2](DEPLOYMENT.md#2-build-the-linux-arm64-binary)) |
+| 30-minute continuous E2E soak, virtual Pip (`tests/pip-e2e`, real ARM64 robot, server and Rivet 3.1.1, real whisper-cli, `hey_pip.onnx` mounted read-only) | **PASS.** 149/149 turns. 50 Hz neck motion at 99.9% in-run tick coverage, 0 neck stops. Robot RSS peaked at 185.9 MiB and plateaued. The rivet-engine process did **not** plateau: about +2.6 to 3.1 MiB/min per engine instance over the run (one reviewer measured +3.7 over the final 10 minutes) over the run. Robot ELF SHA-256 `be7cae4e42fda047f857d327af875e0dbf91b54af3a8076df84080e802e2768b` (GNU BuildID `c15c88b7594bd0919c5a0bf78609c2b01c6162e9`) from the pip-e2e image recipe. Soak report artifact `soak-30m-c5d7c08`: kept outside the repo; not needed for bring-up. [infra/toolchain-validation.md](infra/toolchain-validation.md) records this hash and BuildID and explains why the matrix's own ELFs differ. Clean rebuilds on 2026-11-24 from `82e8d5b` and from `c5d7c08` (the pip-e2e recipe) and from `82e8d5b` (`infra/pi-build.Dockerfile`) reproduced this ELF byte for byte ([DEPLOYMENT.md §2](DEPLOYMENT.md#2-build-the-linux-arm64-binary)) |
 | ARM64 toolchain matrix, Bookworm and Trixie, default and full Pip features ([evidence](infra/toolchain-validation.md)) | **PASS**, no retries. Robot bin 254 passed and 2 ignored with full features |
 | Workstation e2e latency bench ([table](docs/research/e2e-latency.md)) | Refreshed. p95 submit → first PCM byte at the player was **699.8 ms** (Apple M4 Pro, `--simulate`, fake model and speech). The clock starts at transcript submission, so it excludes VAD, Whisper and acoustic I/O |
 | Fresh ARM64 systemd deployment rehearsal ([evidence](tests/pip-deploy-qa/EVIDENCE.md)) | **PASS** on the earlier candidate `5351762`: install, 1 GiB drop-in, OIDC claim, upgrade and rollback |
@@ -62,4 +62,4 @@ Everything below ran **without a physical Pip**. All of it is at `82e8d5b` unles
 - Pi 5 thermal and voltage behaviour under the real 1 GiB cgroup limits
 - Physical acoustic latency: end of speech → first audible, and wake → playback stop
 
-**Also open:** the rivet-engine RSS growth seen in the soak (+2.6 to 3.7 MiB/min) is unexplained. Watch engine memory on the real server host over longer runs.
+**Also open:** the rivet-engine RSS growth seen in the soak (about +2.6 to 3.1 MiB/min per engine instance over the run (one reviewer measured +3.7 over the final 10 minutes)) is unexplained. Watch engine memory on the real server host over longer runs.

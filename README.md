@@ -81,7 +81,7 @@ Pip started as **butty**, ToschLogic's repository at <https://github.com/ToschLo
 
 Both run the neck at 50 Hz, show Wi-Fi setup QR codes on the eyes when offline, and keep face recognition on the device. Run only one of them: stop butty's `pip.service` before you install robot-buddy.
 
-**Operating system.** The default is Raspberry Pi OS (64-bit) **Bookworm**, the OS Brittian's spec sheet and butty's `brain/README.md` name, with the robot built natively on the Pi. That build passed the ARM64 toolchain matrix ([evidence](infra/toolchain-validation.md)) but not the 30-minute soak. The alternative is **Trixie** with the soaked ELF (SHA-256 `be7cae4e42fda047f857d327af875e0dbf91b54af3a8076df84080e802e2768b`, GNU BuildID `c15c88b7594bd0919c5a0bf78609c2b01c6162e9`): the exact binary that passed the soak, on an OS other than the spec's. A Trixie binary does not run on Bookworm. [DEPLOYMENT.md §2](DEPLOYMENT.md#2-build-the-linux-arm64-binary) has both paths.
+**Operating system.** The default is Raspberry Pi OS (64-bit) **Bookworm**, the OS the Pip spec sheet (butty `SPEC.md`) and butty's `brain/README.md` name, with the robot built natively on the Pi. That build passed the ARM64 toolchain matrix ([evidence](infra/toolchain-validation.md)) but not the 30-minute soak. The alternative is **Trixie** with the soaked ELF (SHA-256 `be7cae4e42fda047f857d327af875e0dbf91b54af3a8076df84080e802e2768b`, GNU BuildID `c15c88b7594bd0919c5a0bf78609c2b01c6162e9`): the exact binary that passed the soak, on an OS other than the spec's. A Trixie binary does not run on Bookworm. [DEPLOYMENT.md §2](DEPLOYMENT.md#2-build-the-linux-arm64-binary) has both paths.
 
 ## Repository map
 
