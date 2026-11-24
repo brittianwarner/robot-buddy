@@ -267,13 +267,22 @@ impl Face {
     }
     pub fn gaze(&self, x: f32, y: f32) {
         if x.is_finite() && y.is_finite() {
-            let gaze = Some([x.clamp(-1., 1.), y.clamp(-1., 1.)]);
+            let gaze = [x, y].map(|v| (v.clamp(-1., 1.) * 100.).round() / 100. + 0.0);
             self.target.send_if_modified(|s| {
-                let changed = s.gaze != gaze;
-                s.gaze = gaze;
-                changed
+                if s.mood == Mood::Asleep
+                    || s.gaze.is_some_and(|last| {
+                        (gaze[0] - last[0]).abs() < 0.03 && (gaze[1] - last[1]).abs() < 0.03
+                    })
+                {
+                    return false;
+                }
+                s.gaze = Some(gaze);
+                true
             });
         }
+    }
+    pub fn clear_gaze(&self) {
+        self.target.send_if_modified(|s| s.gaze.take().is_some());
     }
     pub fn gesture(&self, g: FaceGesture) {
         let _ = self.impulses.try_send((Instant::now(), g));
@@ -323,6 +332,9 @@ impl Face {
                 t.expression = None;
             }
             t.mood = mood;
+            if mood == Mood::Asleep {
+                t.gaze = None;
+            }
             changed
         });
     }
@@ -335,6 +347,7 @@ impl Face {
                 return false;
             }
             t.flash = Some((mood, Instant::now() + duration));
+            t.expression = None;
             true
         });
     }
@@ -424,6 +437,7 @@ fn open_serial(path: &Path) -> io::Result<File> {
         .open(path)?;
     match termios::tcgetattr(&file) {
         Ok(mut settings) => {
+            file.try_lock().map_err(io::Error::other)?;
             serial_settings(&mut settings)?;
             termios::tcsetattr(&file, SetArg::TCSANOW, &settings)?;
         }
@@ -502,6 +516,9 @@ pub async fn run<O: Opener>(
                 }
             }
         };
+        if target.borrow().stopping {
+            return;
+        }
         let deadline = Instant::now() + wait;
         loop {
             tokio::select! {
@@ -567,6 +584,9 @@ async fn drive<S: LineSink>(
             return send(device, &reset).await;
         }
         let now = Instant::now();
+        if device.has_board() {
+            status.check_heartbeat(now);
+        }
         let mood = wanted.current(now);
         let expression = wanted.expression.filter(|(_, _, until)| *until > now);
         let desired = Display {
@@ -597,7 +617,7 @@ async fn drive<S: LineSink>(
             wake = wake.min(until);
         }
         if let Some((_, until)) = wanted.flash
-            && until > Instant::now()
+            && until > now
         {
             wake = wake.min(until);
         }
@@ -630,12 +650,40 @@ async fn send<S: LineSink>(sink: &mut S, frame: &[u8]) -> io::Result<()> {
 
 /// Boot ROM noise and truncated lines are normal after a USB reconnect. Never
 /// log raw board data: a misconfigured serial adapter could echo Wi-Fi QR text.
-#[derive(Default)]
 struct StatusLines {
     line: Vec<u8>,
     overflow: bool,
+    last_heartbeat: Instant,
+    last_warning: Option<Instant>,
+    missed: bool,
+}
+impl Default for StatusLines {
+    fn default() -> Self {
+        Self {
+            line: Vec::with_capacity(128),
+            overflow: false,
+            last_heartbeat: Instant::now(),
+            last_warning: None,
+            missed: false,
+        }
+    }
 }
 impl StatusLines {
+    fn check_heartbeat(&mut self, now: Instant) {
+        if !self.missed && now.duration_since(self.last_heartbeat) > Duration::from_secs(5) {
+            self.missed = true;
+            tracing::warn!("face board heartbeat missing");
+        }
+    }
+    fn warn(&mut self, reason: &'static str) {
+        if self
+            .last_warning
+            .is_none_or(|t| t.elapsed() >= Duration::from_secs(5))
+        {
+            self.last_warning = Some(Instant::now());
+            tracing::warn!(reason, "face board status");
+        }
+    }
     /// Returns true if this chunk completed a board boot announcement.
     fn push(&mut self, bytes: &[u8]) -> bool {
         let mut rebooted = false;
@@ -646,12 +694,44 @@ impl StatusLines {
                         && let Ok(v) = serde_json::from_slice::<serde_json::Value>(&self.line)
                     {
                         if v["hb"].is_u64() {
-                            tracing::debug!(fps = v["fps"].as_u64(), "face heartbeat");
+                            self.last_heartbeat = Instant::now();
+                            self.missed = false;
+                            if v["link"] == 0 {
+                                self.warn("firmware link idle");
+                            }
+                            tracing::debug!(
+                                fps = v["fps"].as_u64(),
+                                link = v["link"].as_u64(),
+                                "face heartbeat"
+                            );
                         } else if v["hello"] == "pip-face" {
                             rebooted = true;
-                            tracing::info!(version = v["v"].as_u64(), "face hello");
-                        } else if v["err"].is_string() {
-                            tracing::warn!("face board rejected command");
+                            self.last_heartbeat = Instant::now();
+                            self.missed = false;
+                            if v["eyes"] == 0 {
+                                self.warn("eyes unavailable");
+                            }
+                            tracing::info!(
+                                version = v["v"].as_u64(),
+                                eyes = v["eyes"].as_u64(),
+                                "face hello"
+                            );
+                        } else if let Some(err) = v["err"].as_str() {
+                            const KNOWN: [&str; 7] = [
+                                "bad json",
+                                "unknown emotion",
+                                "bad look",
+                                "unknown gesture",
+                                "unknown led mode",
+                                "unknown command",
+                                "line too long",
+                            ];
+                            self.warn(
+                                KNOWN
+                                    .into_iter()
+                                    .find(|known| *known == err)
+                                    .unwrap_or("unknown firmware error"),
+                            );
                         }
                     }
                     self.line.clear();
@@ -804,6 +884,35 @@ mod tests {
         for other in Mood::ALL.into_iter().filter(|m| *m != Mood::Confirming) {
             assert_ne!(other.frame(), Mood::Confirming.frame(), "{other:?}");
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_lost_face_releases_tracking_and_sorry_overrides_the_last_cue() {
+        let (face, rx) = Face::new();
+        let log = Log::default();
+        let task = tokio::spawn(run(
+            rx,
+            Memory {
+                log: log.clone(),
+                fail_opens: 0,
+                fail_writes: 0,
+            },
+        ));
+        face.set(Mood::Idle);
+        face.gaze(0.5, 0.3);
+        tokio::task::yield_now().await;
+        face.gaze(0.505, 0.31);
+        tokio::task::yield_now().await;
+        assert_eq!(lines(&log).concat().matches("\"look\"").count(), 1);
+        face.clear_gaze();
+        face.express(Expression::Happy, 1.);
+        face.flash(Mood::Sorry, SORRY);
+        tokio::time::sleep(HEARTBEAT * 3).await;
+        let wire = lines(&log).concat();
+        assert!(wire.contains("\"e\":\"sad\""));
+        assert_eq!(wire.matches("\"look\"").count(), 1);
+        drop(face);
+        task.await.unwrap();
     }
 
     #[tokio::test(start_paused = true)]

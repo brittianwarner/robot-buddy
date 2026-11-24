@@ -58,12 +58,17 @@ impl Devices {
                 (Some(port), Some(calibration)) => {
                     if let Some(face_port) = &settings.face_serial
                         && std::fs::canonicalize(face_port)
-                            .ok()
-                            .is_some_and(|f| std::fs::canonicalize(&port).ok().as_ref() == Some(&f))
+                            .is_ok_and(|f| std::fs::canonicalize(&port).ok().as_ref() == Some(&f))
                     {
                         bail!("face and neck require different serial ports");
                     }
-                    Some(Motion::start(&port, &calibration)?)
+                    match Motion::start(&port, &calibration) {
+                        Ok(neck) => Some(neck),
+                        Err(error) => {
+                            tracing::error!(%error,"neck disarmed; correct hardware or calibration and restart to enable motion");
+                            None
+                        }
+                    }
                 }
                 (None, None) => None,
                 _ => bail!("set both BUDDY_SERVO_PORT and BUDDY_SERVO_CALIBRATION"),
@@ -93,14 +98,15 @@ impl Devices {
                             } else if observation.target.is_none() {
                                 recognized.send_replace(None);
                             }
-                            let target = observation.target.unwrap_or((0., 0.));
                             // An outward-facing camera and the eye firmware use
                             // opposite horizontal frames (robot vs. viewer).
-                            face.gaze(-target.0, target.1);
-                            if let Some((x, y)) = observation.target
-                                && let Some(motion) = &tracking
-                            {
-                                motion.track(x, y);
+                            if let Some((x, y)) = observation.target {
+                                face.gaze(-x, y);
+                                if let Some(motion) = &tracking {
+                                    motion.track(x, y);
+                                }
+                            } else {
+                                face.clear_gaze();
                             }
                         })
                         .await;
@@ -198,8 +204,10 @@ impl Hardware for Panel {
     }
     fn wifi_eyes(&self, pair: Option<(&str, &str)>) {
         let (left, right) = pair.unwrap_or_default();
-        if self.face.qr(left, right, 180).is_err() {
-            let _ = self.face.qr("", "", 180);
+        // Leave a quiet zone within the round 240 px LCD and the physical bezel.
+        const WIDTH: u16 = 132;
+        if self.face.qr(left, right, WIDTH).is_err() {
+            let _ = self.face.qr("", "", WIDTH);
             tracing::warn!("Wi-Fi codes exceed face board capacity");
         }
     }

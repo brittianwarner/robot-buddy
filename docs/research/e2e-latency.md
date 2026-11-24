@@ -12,6 +12,8 @@ with a real provider. The floor for the first sentence is about 360 ms (250 ms f
 plus about 110 ms to stream the first sentence); first audio adds the 300 ms speech
 time to first byte.
 
+The initial Pip-port baseline was measured at `06fb153` on an Apple M4 Pro. Its clock starts **at transcript submission**, after the microphone, wake detection, the 800 ms VAD quiet window and Whisper transcription. Its barge-in clock starts at an injected control event, not the spoken wake word. Neither number measures sound at the robot's speaker or contention with tracking and neck motion. Use the [loaded Pip measurement procedure](../performance-pip.md) for those quantities.
+
 ## Latest run
 
 Generated from the raw JSON in [e2e-latency.json](e2e-latency.json), written by
