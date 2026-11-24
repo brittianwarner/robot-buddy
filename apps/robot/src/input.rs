@@ -1,15 +1,49 @@
-//! Line-delimited control input on stdin (from the wake word and speech
-//! recognition process). See docs/architecture/robot-client.md for the contract.
+//! Line-delimited control input from the wake word and speech recognition
+//! process. See docs/architecture/robot-client.md for the contract.
 //!
-//! The reader is a plain OS thread with blocking reads, not a Tokio task: a
-//! read on an open pipe never returns, and a blocking-pool task would make
-//! runtime shutdown wait for it (SIGTERM would then hang until SIGKILL).
+//! Lines arrive on stdin (`--simulate`, tests) and, on the device, on a Unix
+//! control socket (`BUDDY_CONTROL_SOCKET`) that accepts a new writer whenever
+//! the speech process restarts. If that path is an existing FIFO it is read
+//! instead and reopened after each writer closes it.
+//!
+//! Readers are plain OS threads with blocking reads, not Tokio tasks: a read
+//! on an open pipe never returns, and a blocking-pool task would make runtime
+//! shutdown wait for it (SIGTERM would then hang until SIGKILL).
 use serde_json::Value;
-use std::io::BufRead;
+use std::{
+    io::{BufRead, BufReader},
+    os::unix::{
+        fs::{FileTypeExt, PermissionsExt},
+        net::UnixListener,
+    },
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 use tokio::sync::mpsc;
 
 /// Longest accepted input line, in bytes, newline excluded.
 pub const MAX_LINE: usize = 8 * 1024;
+/// Socket writers connected at once. The speech process needs one; a few more
+/// let a restarted process connect before the old connection is noticed dead.
+const MAX_WRITERS: usize = 4;
+/// Owner and group (the speech process's account) may connect.
+const SOCKET_MODE: u32 = 0o660;
+const FIFO_RETRY: Duration = Duration::from_secs(1);
+
+/// The control socket path from `BUDDY_CONTROL_SOCKET`, if set and non-empty.
+fn control_path() -> Option<PathBuf> {
+    control_path_from(|key| std::env::var(key).ok())
+}
+
+fn control_path_from(get: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    get("BUDDY_CONTROL_SOCKET")
+        .filter(|v| !v.is_empty())
+        .map(Into::into)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Control {
@@ -92,6 +126,8 @@ fn utterance(text: &str) -> Result<String, Rejected> {
 pub enum Read {
     /// A complete line is in the buffer.
     Line,
+    /// The input ended after a line without its newline; it is in the buffer.
+    Unterminated,
     /// The line exceeded `max` bytes and was discarded through its newline.
     TooLong,
     Eof,
@@ -115,7 +151,7 @@ pub fn read_bounded<R: BufRead>(
             return Ok(match (overflow, line.is_empty()) {
                 (true, _) => Read::TooLong,
                 (false, true) => Read::Eof,
-                (false, false) => Read::Line,
+                (false, false) => Read::Unterminated,
             });
         }
         let newline = available.iter().position(|b| *b == b'\n');
@@ -136,48 +172,98 @@ pub fn read_bounded<R: BufRead>(
     }
 }
 
-/// Control commands from a reader thread. Once the input closes, `next` never
-/// resolves again, so a closed stdin cannot spin the session loop.
+/// How a source treats a last line without its newline. Stdin keeps it
+/// (a here-doc or `echo -n`); a socket or FIFO writer that dies mid-line must
+/// not have half an utterance submitted.
+#[derive(Clone, Copy)]
+enum Tail {
+    Keep,
+    Drop,
+}
+
+/// Why a source stopped.
+enum Stopped {
+    Eof,
+    /// The session side is gone; nothing will read again.
+    Closed,
+}
+
+/// Forward every valid line of `reader` until it ends.
+fn pump<R: BufRead>(reader: &mut R, tx: &mpsc::Sender<Control>, tail: Tail) -> Stopped {
+    let mut line = Vec::with_capacity(1024);
+    loop {
+        let parsed = match read_bounded(reader, &mut line, MAX_LINE) {
+            Ok(Read::Line) => parse(&line),
+            Ok(Read::Unterminated) => match tail {
+                Tail::Keep => parse(&line),
+                Tail::Drop => {
+                    tracing::warn!(bytes = line.len(), "control writer closed mid-line");
+                    return Stopped::Eof;
+                }
+            },
+            Ok(Read::TooLong) => Err(Rejected::TooLong),
+            Ok(Read::Eof) => return Stopped::Eof,
+            Err(error) => {
+                tracing::warn!(%error, "control input failed");
+                return Stopped::Eof;
+            }
+        };
+        match parsed {
+            Ok(command) => {
+                if tx.blocking_send(command).is_err() {
+                    return Stopped::Closed;
+                }
+            }
+            // Never log the line itself: it may be the user's speech.
+            Err(rejected) => tracing::warn!(
+                reason = rejected.reason(),
+                bytes = line.len(),
+                "ignored control input line"
+            ),
+        }
+    }
+}
+
+fn thread(name: &str, work: impl FnOnce() + Send + 'static) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name(name.into())
+        .spawn(work)
+        .map(drop)
+}
+
+/// Control commands from reader threads. Once every source has closed, `next`
+/// never resolves again, so a closed stdin cannot spin the session loop. A
+/// control socket or FIFO never closes.
 pub struct Input {
     commands: mpsc::Receiver<Control>,
     open: bool,
 }
 
 impl Input {
-    /// Read `reader` on a detached OS thread. The thread holds no state that
-    /// needs cleanup, so process exit may end it mid-read.
-    pub fn spawn<R: BufRead + Send + 'static>(mut reader: R) -> std::io::Result<Self> {
+    /// Read `reader` on a detached OS thread, plus the control socket or FIFO
+    /// named by `BUDDY_CONTROL_SOCKET` when it is set. Threads hold no state
+    /// that needs cleanup, so process exit may end them mid-read.
+    pub fn spawn<R: BufRead + Send + 'static>(reader: R) -> std::io::Result<Self> {
+        Self::open(reader, control_path().as_deref())
+    }
+
+    /// Read `stdin`, and also the control socket or FIFO at `control` when given.
+    pub fn open<R: BufRead + Send + 'static>(
+        mut stdin: R,
+        control: Option<&Path>,
+    ) -> std::io::Result<Self> {
         let (tx, commands) = mpsc::channel(16);
-        let reader_thread = move || {
-            let mut line = Vec::with_capacity(1024);
-            loop {
-                let parsed = match read_bounded(&mut reader, &mut line, MAX_LINE) {
-                    Ok(Read::Line) => parse(&line),
-                    Ok(Read::TooLong) => Err(Rejected::TooLong),
-                    Ok(Read::Eof) => break,
-                    Err(error) => {
-                        tracing::warn!(%error, "control input failed");
-                        break;
-                    }
-                };
-                match parsed {
-                    Ok(command) => {
-                        if tx.blocking_send(command).is_err() {
-                            break;
-                        }
-                    }
-                    // Never log the line itself: it may be the user's speech.
-                    Err(rejected) => tracing::warn!(
-                        reason = rejected.reason(),
-                        bytes = line.len(),
-                        "ignored control input line"
-                    ),
-                }
+        if let Some(path) = control {
+            let fifo = std::fs::metadata(path).is_ok_and(|m| m.file_type().is_fifo());
+            if fifo {
+                read_fifo(path.to_owned(), tx.clone())?;
+            } else {
+                listen(path, tx.clone())?;
             }
-        };
-        std::thread::Builder::new()
-            .name("control-input".into())
-            .spawn(reader_thread)?;
+        }
+        thread("control-input", move || {
+            pump(&mut stdin, &tx, Tail::Keep);
+        })?;
         Ok(Self {
             commands,
             open: true,
@@ -194,6 +280,84 @@ impl Input {
         }
         std::future::pending().await
     }
+}
+
+/// Bind the control socket, replacing a stale socket left by an earlier run
+/// (never any other kind of file), and accept writers for the process lifetime.
+fn listen(path: &Path, tx: mpsc::Sender<Control>) -> std::io::Result<()> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_socket() => std::fs::remove_file(path)?,
+        Ok(_) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "BUDDY_CONTROL_SOCKET exists and is not a socket or FIFO",
+            ));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    let listener = UnixListener::bind(path)?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(SOCKET_MODE))?;
+    tracing::info!(path = %path.display(), "control socket listening");
+    let writers = Arc::new(AtomicUsize::new(0));
+    thread("control-accept", move || {
+        for stream in listener.incoming() {
+            let stream = match stream {
+                Ok(stream) => stream,
+                Err(error) => {
+                    tracing::warn!(%error, "control socket accept failed");
+                    std::thread::sleep(FIFO_RETRY);
+                    continue;
+                }
+            };
+            if writers.fetch_add(1, Ordering::SeqCst) >= MAX_WRITERS {
+                writers.fetch_sub(1, Ordering::SeqCst);
+                tracing::warn!("control socket busy; refused a writer");
+                continue;
+            }
+            let (sender, count) = (tx.clone(), writers.clone());
+            let reader = move || {
+                let mut reader = BufReader::with_capacity(MAX_LINE, stream);
+                let stopped = pump(&mut reader, &sender, Tail::Drop);
+                count.fetch_sub(1, Ordering::SeqCst);
+                if matches!(stopped, Stopped::Eof) {
+                    tracing::info!("control writer disconnected");
+                }
+            };
+            if let Err(error) = thread("control-writer", reader) {
+                tracing::warn!(%error, "control writer thread failed");
+            }
+            if tx.is_closed() {
+                return;
+            }
+        }
+    })
+}
+
+/// Read a FIFO, reopening it after each writer closes it. Opening blocks until
+/// the next writer arrives, so an absent writer costs nothing.
+fn read_fifo(path: PathBuf, tx: mpsc::Sender<Control>) -> std::io::Result<()> {
+    thread("control-fifo", move || {
+        let mut warned = false;
+        loop {
+            match std::fs::File::open(&path) {
+                Ok(file) => {
+                    warned = false;
+                    let mut reader = BufReader::with_capacity(MAX_LINE, file);
+                    if matches!(pump(&mut reader, &tx, Tail::Drop), Stopped::Closed) {
+                        return;
+                    }
+                }
+                Err(error) => {
+                    if !warned {
+                        tracing::warn!(%error, "control FIFO unavailable; retrying");
+                        warned = true;
+                    }
+                    std::thread::sleep(FIFO_RETRY);
+                }
+            }
+        }
+    })
 }
 
 #[cfg(test)]
@@ -263,7 +427,7 @@ mod tests {
         assert_eq!(line, b"next");
         assert_eq!(
             read_bounded(&mut reader, &mut line, MAX_LINE).unwrap(),
-            Read::Line
+            Read::Unterminated
         );
         assert_eq!(line, b"last");
         assert_eq!(
@@ -307,5 +471,91 @@ mod tests {
         drop(runtime);
         assert!(stopping.elapsed() < Duration::from_millis(200));
         drop(writer);
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        // Unix socket paths are limited to ~104 bytes; macOS temp dirs are long.
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        PathBuf::from(format!("/tmp/buddy-{name}-{}", &id[..12]))
+    }
+
+    async fn next_within(input: &mut Input) -> Control {
+        tokio::time::timeout(Duration::from_secs(2), input.next())
+            .await
+            .expect("control line arrives")
+    }
+
+    #[test]
+    fn the_control_path_comes_from_the_environment() {
+        let path = control_path_from(|_| Some("/run/robot-buddy/control.sock".into()));
+        assert_eq!(path, Some(PathBuf::from("/run/robot-buddy/control.sock")));
+        assert_eq!(control_path_from(|_| Some(String::new())), None);
+        assert_eq!(control_path_from(|_| None), None);
+    }
+
+    #[tokio::test]
+    async fn the_control_socket_survives_its_writer_restarting() {
+        use std::{io::Write, os::unix::net::UnixStream};
+        let path = scratch("ctl");
+        let mut input = Input::open(std::io::empty(), Some(&path)).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, SOCKET_MODE);
+
+        let mut first = UnixStream::connect(&path).unwrap();
+        first.write_all(b"{\"wake\":true}\nhalf an utter").unwrap();
+        assert_eq!(next_within(&mut input).await, Control::Wake);
+        // The speech process dies mid-line and restarts.
+        drop(first);
+        let mut second = UnixStream::connect(&path).unwrap();
+        second.write_all(b"hello pip\n").unwrap();
+        assert_eq!(
+            next_within(&mut input).await,
+            Control::Say("hello pip".into())
+        );
+        // The dead writer's partial line was never submitted.
+        let extra = tokio::time::timeout(Duration::from_millis(100), input.next()).await;
+        assert!(extra.is_err());
+        drop(second);
+        let mut third = UnixStream::connect(&path).unwrap();
+        third.write_all(b"{\"mute\":true}\n").unwrap();
+        assert_eq!(next_within(&mut input).await, Control::Mute(true));
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_stale_socket_is_replaced_but_other_files_are_kept() {
+        let path = scratch("stale");
+        drop(UnixListener::bind(&path).unwrap());
+        let input = Input::open(std::io::empty(), Some(&path)).unwrap();
+        drop(input);
+        std::fs::remove_file(&path).unwrap();
+
+        std::fs::write(&path, b"keep me").unwrap();
+        let refused = Input::open(std::io::empty(), Some(&path));
+        assert!(refused.is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), b"keep me");
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_control_fifo_is_reopened_after_each_writer() {
+        use std::io::Write;
+        let path = scratch("fifo");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let mut input = Input::open(std::io::empty(), Some(&path)).unwrap();
+        for (line, expected) in [
+            (&b"{\"listening\":true}\n"[..], Control::Listening(true)),
+            (&b"good night\n"[..], Control::Say("good night".into())),
+        ] {
+            let mut writer = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+            writer.write_all(line).unwrap();
+            drop(writer);
+            assert_eq!(next_within(&mut input).await, expected);
+        }
+        std::fs::remove_file(&path).unwrap();
     }
 }

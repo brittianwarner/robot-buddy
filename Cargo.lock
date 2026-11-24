@@ -6470,6 +6470,7 @@ dependencies = [
  "anyhow",
  "axum 0.8.9",
  "futures-util",
+ "nix",
  "qrcode",
  "rand 0.8.8",
  "reqwest 0.12.28",
