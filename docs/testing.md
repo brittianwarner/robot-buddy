@@ -15,7 +15,7 @@ and wall time. `-- --from <step>` resumes at a step.
 
 ## Suites
 
-All-features check, lint and robot tests require OpenCV development headers/libraries, libclang and pkg-config. For default-profile robot tests (including mock camera, motor bus, face-board PTY and local speech controls), `cargo test -p robot-buddy-robot --locked` needs no OpenCV or models. The full Pi build and asset-dependent acceptance checks are in [DEPLOYMENT.md](../DEPLOYMENT.md).
+All-features check, lint and the `pip full features` test step require OpenCV development headers/libraries, libclang and pkg-config. For default-profile robot tests (including mock camera, motor bus, face-board PTY and local speech controls), `cargo test -p robot-buddy-robot --locked` needs no OpenCV or models. The [release qualification gates](testing-pip-release.md) distinguish ARM64 workspace checks, virtual peripherals, the soak, and the deployment rehearsal from the physical tests in [DEPLOYMENT.md](../DEPLOYMENT.md).
 
 | Command | Runs in CI | Needs | Proves |
 | --- | --- | --- | --- |
