@@ -3,6 +3,9 @@ use serde::Deserialize;
 use std::{io::Read, path::Path};
 
 pub(super) const DEG_PER_STEP: f32 = 360.0 / 4096.0;
+/// Planned goals stay inset from the hard EEPROM limits so servo settling jitter
+/// never trips the strict out-of-envelope disarm guard. Bounded by center clearance.
+pub(super) const PLAN_LIMIT_INSET_STEPS: u16 = 8;
 
 #[derive(Clone, Copy, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -79,6 +82,27 @@ impl Joint {
         let a = self.degrees(self.min_steps);
         let b = self.degrees(self.max_steps);
         angle.clamp(a.min(b), a.max(b))
+    }
+    pub fn plan_bounds_steps(self) -> (u16, u16) {
+        let lo = self
+            .min_steps
+            .saturating_add(PLAN_LIMIT_INSET_STEPS)
+            .min(self.center);
+        let hi = self
+            .max_steps
+            .saturating_sub(PLAN_LIMIT_INSET_STEPS)
+            .max(self.center);
+        (lo, hi)
+    }
+    pub fn plan_bounds_degrees(self) -> (f32, f32) {
+        let (min_steps, max_steps) = self.plan_bounds_steps();
+        let a = self.degrees(min_steps);
+        let b = self.degrees(max_steps);
+        (a.min(b), a.max(b))
+    }
+    pub fn clamp_planned(self, angle: f32) -> f32 {
+        let (lo, hi) = self.plan_bounds_degrees();
+        angle.clamp(lo, hi)
     }
     #[expect(
         clippy::cast_possible_truncation,

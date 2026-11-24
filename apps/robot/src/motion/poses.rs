@@ -1,5 +1,10 @@
 use super::calibration::Joints;
-use std::{f32::consts::PI, time::Instant};
+use std::{
+    f32::consts::PI,
+    time::{Duration, Instant},
+};
+
+pub(super) const CUE_TTL: Duration = Duration::from_secs(4);
 
 type Pose = [f32; 3];
 type Key = (f32, Pose);
@@ -122,9 +127,20 @@ pub(super) fn expression(s: &str, i: f32) -> (Pose, bool) {
 pub(super) struct Inputs {
     pub pose: Pose,
     pub sleeping: bool,
+    pub cue: Option<(Pose, bool, Instant)>,
     pub gesture: Option<(Gesture, Instant, f32)>,
     pub manual: Option<(Pose, Instant)>,
     pub face: Option<(Instant, f32, f32)>,
+}
+impl Inputs {
+    pub(super) fn effective_expression(&self, now: Instant) -> (Pose, bool) {
+        if let Some((pose, sleeping, until)) = self.cue
+            && until > now
+        {
+            return (pose, sleeping);
+        }
+        (self.pose, self.sleeping)
+    }
 }
 pub(super) struct Planner {
     joints: Joints,
@@ -147,22 +163,30 @@ impl Planner {
     }
     pub fn step(&mut self, now: Instant, inputs: &Inputs) -> [u16; 3] {
         let manual = inputs.manual.filter(|(_, until)| *until > now);
-        if inputs.sleeping {
+        let (pose, sleeping) = inputs.effective_expression(now);
+        let gesture = inputs.gesture.map_or(ZERO, |(g, t, i)| {
+            g.sample(now.saturating_duration_since(t).as_secs_f32())
+                .map(|v| v * i)
+        });
+        if sleeping {
             self.track = ZERO;
         }
         if let Some((t, x, y)) = inputs.face
             && self.seen != Some(t)
         {
             self.seen = Some(t);
-            if !inputs.sleeping
-                && manual.is_none()
-                && now.saturating_duration_since(t).as_secs_f32() < 0.5
+            if !sleeping && manual.is_none() && now.saturating_duration_since(t).as_secs_f32() < 0.5
             {
-                for (i, error) in [-60. * x, -45. * y].into_iter().enumerate() {
-                    if error.abs() > 6. {
-                        self.track[i] =
-                            self.joints[i].clamp(self.pos[i] - inputs.pose[i] + 0.35 * error);
-                    }
+                let yaw_err = -60. * x;
+                if yaw_err.abs() > 6. {
+                    self.track[0] = self.joints[0]
+                        .clamp_planned(self.pos[0] - pose[0] + 0.35 * yaw_err - gesture[0]);
+                }
+                let pitch_err = -45. * y;
+                if pitch_err.abs() > 6. {
+                    let (lo, hi) = self.joints[1].plan_bounds_degrees();
+                    let base = pose[1];
+                    self.track[1] = (self.track[1] + 0.35 * pitch_err).clamp(lo - base, hi - base);
                 }
             }
         }
@@ -172,12 +196,8 @@ impl Planner {
         {
             self.track = self.track.map(|v| v * 0.985);
         }
-        let gesture = inputs.gesture.map_or(ZERO, |(g, t, i)| {
-            g.sample(now.saturating_duration_since(t).as_secs_f32())
-                .map(|v| v * i)
-        });
         let phase = now.saturating_duration_since(self.epoch).as_secs_f32();
-        let sway = if inputs.sleeping { 0.15 } else { 1. };
+        let sway = if sleeping { 0.15 } else { 1. };
         let idle = [
             0.,
             (phase * 0.9).sin() * sway,
@@ -185,13 +205,22 @@ impl Planner {
         ];
         std::array::from_fn(|i| {
             let j = self.joints[i];
-            let goal = j.clamp(manual.map_or(
-                inputs.pose[i] + self.track[i] + gesture[i] + idle[i],
-                |(p, _)| p[i],
-            ));
+            let (plan_lo, plan_hi) = j.plan_bounds_degrees();
+            let goal = manual
+                .map_or(pose[i] + self.track[i] + gesture[i] + idle[i], |(p, _)| {
+                    p[i]
+                })
+                .clamp(plan_lo, plan_hi);
             let accel = 49. * (goal - self.pos[i]) - 14. * self.vel[i];
             self.vel[i] = (self.vel[i] + accel * 0.02).clamp(-j.max_speed_deg_s, j.max_speed_deg_s);
-            self.pos[i] = j.clamp(self.pos[i] + self.vel[i] * 0.02);
+            let next_lo = plan_lo.min(self.pos[i]);
+            let next_hi = plan_hi.max(self.pos[i]);
+            let next = self.pos[i] + self.vel[i] * 0.02;
+            let clamped = next.clamp(next_lo, next_hi);
+            if (clamped - next).abs() > f32::EPSILON {
+                self.vel[i] = 0.;
+            }
+            self.pos[i] = j.clamp(clamped);
             j.steps(self.pos[i])
         })
     }

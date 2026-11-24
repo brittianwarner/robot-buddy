@@ -4,6 +4,11 @@ use super::{
     sts3215::{Bus, GOAL, LIMITS, LOCK, MODE, PRESENT, TORQUE},
 };
 use anyhow::{Context, Result, ensure};
+use std::time::Duration;
+
+pub(super) const HEALTH_STEPS: usize = 15;
+const CONFIRM_ATTEMPTS: usize = 4;
+const CONFIRM_RETRY_DELAY: Duration = Duration::from_millis(10);
 
 fn read<const N: usize>(bus: &mut impl Bus, id: u8, reg: u8) -> Result<[u8; N]> {
     let mut bytes = [0; N];
@@ -19,12 +24,26 @@ fn check(bus: &mut impl Bus, id: u8, reg: u8, expected: &[u8]) -> Result<()> {
     );
     Ok(())
 }
+/// Bounded read-only confirmation retries for a write already transmitted. Never re-sends writes.
+fn confirm(bus: &mut impl Bus, id: u8, reg: u8, expected: &[u8]) -> Result<()> {
+    let mut last = None;
+    for attempt in 0..CONFIRM_ATTEMPTS {
+        if attempt > 0 {
+            std::thread::sleep(CONFIRM_RETRY_DELAY);
+        }
+        match check(bus, id, reg, expected) {
+            Ok(()) => return Ok(()),
+            Err(e) => last = Some(e),
+        }
+    }
+    Err(last.expect("CONFIRM_ATTEMPTS > 0"))
+}
 fn store(bus: &mut impl Bus, id: u8, reg: u8, data: &[u8]) -> Result<()> {
     bus.write(id, reg, data)?;
     if reg == LIMITS || reg == LOCK {
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::thread::sleep(Duration::from_millis(10));
     }
-    check(bus, id, reg, data)
+    confirm(bus, id, reg, data)
 }
 fn limits(joint: Joint) -> [u8; 4] {
     let [min_low, min_high] = joint.min_steps.to_le_bytes();
@@ -57,7 +76,7 @@ impl<B: Bus> Drive<B> {
             }
         }
         for j in self.joints {
-            if let Err(e) = check(&mut self.bus, j.id, TORQUE, &[0]) {
+            if let Err(e) = confirm(&mut self.bus, j.id, TORQUE, &[0]) {
                 failure = Some(e);
             }
         }
@@ -80,16 +99,24 @@ impl<B: Bus> Drive<B> {
         // pose and verify the addressed goals before enabling a single motor.
         self.bus.goals(&self.joints, current)?;
         for (j, p) in self.joints.iter().zip(current) {
-            check(&mut self.bus, j.id, GOAL, &p.to_le_bytes())?;
+            confirm(&mut self.bus, j.id, GOAL, &p.to_le_bytes())?;
         }
         for j in self.joints {
             store(&mut self.bus, j.id, TORQUE, &[1])?;
         }
         Ok(current)
     }
-    pub fn health(&mut self, i: usize) -> Result<()> {
-        self.verify_joint(i)?;
-        check(&mut self.bus, self.joints[i].id, TORQUE, &[1])
+    /// Staggered single-transaction health probe (3 axes x 5 checks = `HEALTH_STEPS`).
+    pub fn health_step(&mut self, step: usize) -> Result<()> {
+        let j = self.joints[step % 3];
+        match (step / 3) % 5 {
+            0 => present(&mut self.bus, j).map(|_| ()),
+            1 => check(&mut self.bus, j.id, TORQUE, &[1]),
+            2 => check(&mut self.bus, j.id, MODE, &[0]),
+            3 => check(&mut self.bus, j.id, LOCK, &[1]),
+            4 => check(&mut self.bus, j.id, LIMITS, &limits(j)),
+            _ => unreachable!(),
+        }
     }
     pub fn provision(&mut self, stop: &std::sync::atomic::AtomicBool) -> Result<()> {
         self.disable()?;

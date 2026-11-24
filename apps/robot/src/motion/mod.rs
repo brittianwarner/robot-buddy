@@ -164,24 +164,62 @@ fn emit_timing(report: TimingReport) {
     }
 }
 
-#[derive(Clone, Default)]
-pub struct MotionInput(Arc<Mutex<Inputs>>);
+const HEALTH_INTERVAL: Duration = Duration::from_millis(40);
+const CENTER_TOLERANCE_STEPS: u16 = 8;
+
+#[derive(Clone)]
+pub struct MotionInput(Arc<Mutex<Inputs>>, Arc<AtomicBool>);
+impl Default for MotionInput {
+    fn default() -> Self {
+        Self(
+            Arc::new(Mutex::new(Inputs::default())),
+            Arc::new(AtomicBool::new(false)),
+        )
+    }
+}
 impl MotionInput {
+    fn live() -> Self {
+        Self(
+            Arc::new(Mutex::new(Inputs::default())),
+            Arc::new(AtomicBool::new(true)),
+        )
+    }
+    /// False once the neck worker exits or panics (torque-off runs before clearing).
+    pub fn alive(&self) -> bool {
+        self.1.load(Ordering::Acquire)
+    }
     pub fn track(&self, x: f32, y: f32) {
         if x.is_finite()
             && y.is_finite()
             && let Ok(mut s) = self.0.lock()
-            && !s.sleeping
         {
-            s.face = Some((Instant::now(), x.clamp(-1., 1.), y.clamp(-1., 1.)));
+            let now = Instant::now();
+            if !s.effective_expression(now).1 {
+                s.face = Some((now, x.clamp(-1., 1.), y.clamp(-1., 1.)));
+            }
         }
     }
+    /// Permanent device-local expression or rest/sleep state (no TTL).
     pub fn express(&self, emotion: &str, intensity: f32) {
         if intensity.is_finite()
             && let Ok(mut s) = self.0.lock()
         {
             (s.pose, s.sleeping) = poses::expression(emotion, intensity.clamp(0., 1.));
+            s.cue = None;
             if s.sleeping {
+                s.face = None;
+                s.gesture = None;
+            }
+        }
+    }
+    /// Bounded-TTL expression/sleep cue from the model or operator (resets after 4s).
+    pub fn cue(&self, emotion: &str, intensity: f32) {
+        if intensity.is_finite()
+            && let Ok(mut s) = self.0.lock()
+        {
+            let (pose, sleeping) = poses::expression(emotion, intensity.clamp(0., 1.));
+            s.cue = Some((pose, sleeping, Instant::now() + poses::CUE_TTL));
+            if sleeping {
                 s.face = None;
                 s.gesture = None;
             }
@@ -213,6 +251,36 @@ impl MotionInput {
     }
 }
 
+struct AliveGuard(Arc<AtomicBool>);
+impl Drop for AliveGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+fn spawn_worker<B: Bus + Send + 'static>(drive: Drive<B>, start: [u16; 3]) -> Result<Motion> {
+    let input = MotionInput::live();
+    let worker_input = input.clone();
+    let stop = Arc::new(AtomicBool::new(false));
+    let worker_stop = stop.clone();
+    let worker = thread::Builder::new()
+        .name("neck-50hz".into())
+        .spawn(move || {
+            let _alive = AliveGuard(worker_input.1.clone());
+            let mut drive = drive;
+            let result = run(&mut drive, &worker_input, &worker_stop, start);
+            drop(drive); // Torque off before logging, including on an I/O fault.
+            if let Err(e) = result {
+                tracing::error!(error=%e,"neck motion stopped; restart requires verification");
+            }
+        })?;
+    Ok(Motion {
+        input,
+        stop,
+        worker: Some(worker),
+    })
+}
+
 pub struct Motion {
     input: MotionInput,
     stop: Arc<AtomicBool>,
@@ -227,24 +295,7 @@ impl Motion {
             joints,
         };
         let start = drive.arm()?;
-        let input = MotionInput::default();
-        let worker_input = input.clone();
-        let stop = Arc::new(AtomicBool::new(false));
-        let worker_stop = stop.clone();
-        let worker = thread::Builder::new()
-            .name("neck-50hz".into())
-            .spawn(move || {
-                let result = run(&mut drive, &worker_input, &worker_stop, start);
-                drop(drive); // Torque off before logging, including on an I/O fault.
-                if let Err(e) = result {
-                    tracing::error!(error=%e,"neck motion stopped; restart requires verification");
-                }
-            })?;
-        Ok(Self {
-            input,
-            stop,
-            worker: Some(worker),
-        })
+        spawn_worker(drive, start)
     }
     pub fn input(&self) -> MotionInput {
         self.input.clone()
@@ -270,9 +321,9 @@ fn run(
 ) -> Result<()> {
     let mut deadline = Instant::now();
     let mut planner = Planner::new(drive.joints, start, deadline);
-    let mut next_health = deadline + Duration::from_millis(200);
+    let mut next_health = deadline + HEALTH_INTERVAL;
     let mut timing = LoopTiming::new(deadline);
-    let mut axis = 0;
+    let mut health_step = 0;
     while !stop.load(Ordering::Acquire) {
         let now = Instant::now();
         if now < deadline {
@@ -281,9 +332,9 @@ fn run(
         }
         let scheduled = deadline;
         if now >= next_health {
-            drive.health(axis)?;
-            axis = (axis + 1) % 3;
-            next_health = now + Duration::from_millis(200);
+            drive.health_step(health_step)?;
+            health_step = (health_step + 1) % drive::HEALTH_STEPS;
+            next_health = now + HEALTH_INTERVAL;
         }
         let state = input.0.lock().ok().context("neck input poisoned")?.clone();
         drive.bus.goals(&drive.joints, planner.step(now, &state))?;
@@ -344,12 +395,55 @@ pub fn servo_cli(args: &[String]) -> Result<()> {
         .enable_all()
         .build()?
         .block_on(supervise_maintenance(
-            Drive { bus, joints },
+            CliDrive::new(Drive { bus, joints }, std::io::stderr()),
             command.clone(),
         ))
 }
 
-async fn supervise_maintenance(drive: Drive<Serial>, command: String) -> Result<()> {
+struct CliDrive<B: Bus, W: std::io::Write> {
+    drive: Drive<B>,
+    stderr: W,
+    reported_or_disarmed: bool,
+}
+impl<B: Bus, W: std::io::Write> CliDrive<B, W> {
+    fn new(drive: Drive<B>, stderr: W) -> Self {
+        Self {
+            drive,
+            stderr,
+            reported_or_disarmed: false,
+        }
+    }
+    fn finish(mut self) -> Result<()> {
+        let result = self.drive.disable();
+        self.reported_or_disarmed = true;
+        if let Err(ref e) = result {
+            let _ = writeln!(
+                self.stderr,
+                "error: could not confirm neck torque off: {e:#}"
+            );
+            let _ = self.stderr.flush();
+        }
+        result
+    }
+}
+impl<B: Bus, W: std::io::Write> Drop for CliDrive<B, W> {
+    fn drop(&mut self) {
+        if !self.reported_or_disarmed
+            && let Err(e) = self.drive.disable()
+        {
+            let _ = writeln!(
+                self.stderr,
+                "error: could not confirm neck torque off: {e:#}"
+            );
+            let _ = self.stderr.flush();
+        }
+    }
+}
+
+async fn supervise_maintenance(
+    drive: CliDrive<Serial, std::io::Stderr>,
+    command: String,
+) -> Result<()> {
     use tokio::signal::unix::{SignalKind, signal};
     let mut term = signal(SignalKind::terminate())?;
     let mut interrupt = signal(SignalKind::interrupt())?;
@@ -366,24 +460,28 @@ async fn supervise_maintenance(drive: Drive<Serial>, command: String) -> Result<
     bail!("servo maintenance interrupted")
 }
 
-fn maintenance(mut drive: Drive<impl Bus>, command: &str, stop: &AtomicBool) -> Result<()> {
-    let joints = drive.joints;
+fn maintenance(
+    mut cli: CliDrive<impl Bus, impl std::io::Write>,
+    command: &str,
+    stop: &AtomicBool,
+) -> Result<()> {
+    let joints = cli.drive.joints;
     ensure!(
         !stop.load(Ordering::Acquire),
         "servo maintenance interrupted"
     );
     match command {
         "verify" => {
-            drive.disable()?;
+            cli.drive.disable()?;
             for i in 0..3 {
-                drive.verify_joint(i)?;
+                cli.drive.verify_joint(i)?;
             }
         }
-        "provision" => drive.provision(stop)?,
+        "provision" => cli.drive.provision(stop)?,
         "center" => {
-            let initial = drive.arm()?;
+            let initial = cli.drive.arm()?;
             ensure!(!stop.load(Ordering::Acquire), "servo center interrupted");
-            drive.bus.goals(&joints, joints.map(|j| j.center))?;
+            cli.drive.bus.goals(&joints, joints.map(|j| j.center))?;
             let started = Instant::now();
             let mut last_progress = [started; 3];
             let mut closest =
@@ -398,12 +496,12 @@ fn maintenance(mut drive: Drive<impl Bus>, command: &str, stop: &AtomicBool) -> 
                 ensure!(!stop.load(Ordering::Acquire), "servo center interrupted");
                 let mut centered = true;
                 for (i, j) in joints.iter().enumerate() {
-                    let distance = drive.verify_joint(i)?.abs_diff(j.center);
+                    let distance = cli.drive.verify_joint(i)?.abs_diff(j.center);
                     if distance < closest[i] {
                         closest[i] = distance;
                         last_progress[i] = Instant::now();
                     }
-                    if distance > 3 {
+                    if distance > CENTER_TOLERANCE_STEPS {
                         centered = false;
                         ensure!(
                             last_progress[i].elapsed() < Duration::from_secs(1),
@@ -421,7 +519,7 @@ fn maintenance(mut drive: Drive<impl Bus>, command: &str, stop: &AtomicBool) -> 
         }
         _ => unreachable!(),
     }
-    drive.disable()?;
+    cli.finish()?;
     println!("{command}: verified, torque off");
     Ok(())
 }

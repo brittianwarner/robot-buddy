@@ -17,7 +17,16 @@ pub(super) const TORQUE: u8 = 40;
 pub(super) const GOAL: u8 = 42;
 pub(super) const LOCK: u8 = 55;
 pub(super) const PRESENT: u8 = 56;
+const INST_PING: u8 = 1;
+const INST_READ: u8 = 2;
+const INST_WRITE: u8 = 3;
+const INST_SYNC_WRITE: u8 = 0x83;
 const IO_TIMEOUT: Duration = Duration::from_millis(20);
+
+enum ReplyError {
+    Timeout,
+    Other(anyhow::Error),
+}
 
 pub(super) trait Bus {
     fn ping(&mut self, id: u8) -> Result<()>;
@@ -42,11 +51,10 @@ impl Serial {
             .insert(ControlFlags::CLOCAL | ControlFlags::CREAD);
         cfg.control_flags
             .remove(ControlFlags::HUPCL | ControlFlags::CRTSCTS);
-        #[cfg(target_os = "linux")]
-        termios::cfsetspeed(&mut cfg, termios::BaudRate::B1000000)?;
-        #[cfg(not(target_os = "linux"))]
         configure_megabaud(&mut cfg)?;
         termios::tcsetattr(&file, SetArg::TCSANOW, &cfg)?;
+        let applied = termios::tcgetattr(&file)?;
+        verify_megabaud(&applied)?;
         Ok(Self(file, IO_TIMEOUT))
     }
     fn send(&mut self, bytes: &[u8], until: Instant) -> Result<()> {
@@ -65,38 +73,89 @@ impl Serial {
         }
         Ok(())
     }
-    fn request(&mut self, id: u8, opcode: u8, args: &[u8], out: &mut [u8]) -> Result<()> {
-        let req = packet(id, opcode, args)?;
-        let deadline = Instant::now() + self.1;
-        termios::tcflush(&self.0, FlushArg::TCIFLUSH)?;
-        self.send(&req, deadline)?;
+    fn read_reply(
+        &mut self,
+        req: &[u8],
+        out: &mut [u8],
+        deadline: Instant,
+    ) -> std::result::Result<(), ReplyError> {
         let mut stream = Vec::with_capacity(64);
         loop {
-            ensure!(Instant::now() < deadline, "servo {id} status timeout");
+            if Instant::now() >= deadline {
+                return Err(ReplyError::Timeout);
+            }
             let mut chunk = [0; 64];
             match self.0.read(&mut chunk) {
                 Ok(n) if n > 0 => {
                     stream.extend_from_slice(&chunk[..n]);
-                    if let Some(data) = status(&stream, &req, out.len())? {
-                        out.copy_from_slice(data);
-                        return Ok(());
+                    match status(&stream, req, out.len()) {
+                        Ok(Some(data)) => {
+                            out.copy_from_slice(data);
+                            return Ok(());
+                        }
+                        Ok(None) => {
+                            if stream.len() >= 128 {
+                                return Err(ReplyError::Other(anyhow::anyhow!(
+                                    "oversize servo response"
+                                )));
+                            }
+                        }
+                        Err(e) => return Err(ReplyError::Other(e)),
                     }
-                    ensure!(stream.len() < 128, "oversize servo response");
                 }
                 Ok(_) => thread::sleep(Duration::from_micros(200)),
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_micros(200));
                 }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => (),
-                Err(e) => return Err(e.into()),
+                Err(e) => return Err(ReplyError::Other(e.into())),
             }
         }
     }
+    fn request(&mut self, id: u8, opcode: u8, args: &[u8], out: &mut [u8]) -> Result<()> {
+        let req = packet(id, opcode, args)?;
+        let deadline = Instant::now() + self.1;
+        termios::tcflush(&self.0, FlushArg::TCIFLUSH)?;
+        self.send(&req, deadline)?;
+        match self.read_reply(&req, out, deadline) {
+            Ok(()) => Ok(()),
+            Err(ReplyError::Timeout) => bail!("servo {id} status timeout"),
+            Err(ReplyError::Other(e)) => Err(e),
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn configure_megabaud(cfg: &mut termios::Termios) -> Result<()> {
+    termios::cfsetspeed(cfg, termios::BaudRate::B1000000)?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn verify_megabaud(cfg: &termios::Termios) -> Result<()> {
+    let ispeed = termios::cfgetispeed(cfg);
+    let ospeed = termios::cfgetospeed(cfg);
+    ensure!(
+        ispeed == termios::BaudRate::B1000000 && ospeed == termios::BaudRate::B1000000,
+        "servo port did not apply 1 Mbaud (in={ispeed:?}, out={ospeed:?})"
+    );
+    Ok(())
 }
 
 #[cfg(not(target_os = "linux"))]
 fn configure_megabaud(_: &mut termios::Termios) -> Result<()> {
     bail!("neck hardware requires Linux 1 Mbaud termios")
+}
+
+#[cfg(not(target_os = "linux"))]
+fn verify_megabaud(cfg: &termios::Termios) -> Result<()> {
+    let ispeed = termios::cfgetispeed(cfg);
+    let ospeed = termios::cfgetospeed(cfg);
+    ensure!(
+        ispeed == 1_000_000 && ospeed == 1_000_000,
+        "servo port did not apply 1 Mbaud (in={ispeed}, out={ospeed})"
+    );
+    Ok(())
 }
 
 fn checksum(bytes: &[u8]) -> u8 {
@@ -116,6 +175,11 @@ fn status<'a>(mut bytes: &'a [u8], req: &[u8], count: usize) -> Result<Option<&'
             return Ok(None);
         };
         bytes = &bytes[start..];
+        // Idle/turnaround bus noise can prepend extra 0xff bytes before the 0xff 0xff header;
+        // 0xff is never a valid servo ID.
+        while bytes.get(2) == Some(&255) {
+            bytes = &bytes[1..];
+        }
         if bytes.len() < 4 {
             return Ok(None);
         }
@@ -128,8 +192,12 @@ fn status<'a>(mut bytes: &'a [u8], req: &[u8], count: usize) -> Result<Option<&'
             checksum(&frame[2..frame.len() - 1]) == frame[frame.len() - 1],
             "STS checksum mismatch"
         );
-        // A half-duplex bridge can echo both this request and a preceding broadcast.
-        if frame == req || (frame[2] == 254 && frame[4] == 0x83) {
+        // A half-duplex bridge can echo this request, a preceding broadcast, or deliver
+        // a delayed zero-payload OK ACK from a preceding addressed write before a read reply.
+        if frame == req
+            || (frame[2] == 254 && frame[4] == INST_SYNC_WRITE)
+            || (count > 0 && frame[2] == req[2] && frame[4] == 0 && n == 2)
+        {
             bytes = &bytes[frame.len()..];
             continue;
         }
@@ -141,6 +209,13 @@ fn status<'a>(mut bytes: &'a [u8], req: &[u8], count: usize) -> Result<Option<&'
         );
         return Ok(Some(&frame[5..frame.len() - 1]));
     }
+}
+
+fn write_packet(id: u8, reg: u8, bytes: &[u8]) -> Result<Vec<u8>> {
+    let mut params = Vec::with_capacity(1 + bytes.len());
+    params.push(reg);
+    params.extend_from_slice(bytes);
+    packet(id, INST_WRITE, &params)
 }
 
 fn goals_packet(joints: &Joints, steps: [u16; 3]) -> Result<Vec<u8>> {
@@ -161,22 +236,28 @@ fn goals_packet(joints: &Joints, steps: [u16; 3]) -> Result<Vec<u8>> {
         let speed = (j.max_speed_deg_s / DEG_PER_STEP).floor() as u16;
         params.extend(speed.to_le_bytes());
     }
-    packet(254, 0x83, &params)
+    packet(254, INST_SYNC_WRITE, &params)
 }
 
 impl Bus for Serial {
     fn ping(&mut self, id: u8) -> Result<()> {
-        self.request(id, 1, &[], &mut [])
+        self.request(id, INST_PING, &[], &mut [])
     }
     fn read(&mut self, id: u8, reg: u8, out: &mut [u8]) -> Result<()> {
-        self.request(id, 2, &[reg, u8::try_from(out.len())?], out)
+        self.request(id, INST_READ, &[reg, u8::try_from(out.len())?], out)
     }
     fn write(&mut self, id: u8, reg: u8, bytes: &[u8]) -> Result<()> {
-        // Address only this ID in a sync write: no write-status ACK can be confused
-        // with the following register read. Control/EEPROM writes use readback.
-        let mut params = vec![reg, u8::try_from(bytes.len())?, id];
-        params.extend_from_slice(bytes);
-        self.send(&packet(254, 0x83, &params)?, Instant::now() + IO_TIMEOUT)
+        // Use addressed INST_WRITE for EEPROM/LOCK/TORQUE. Drain any half-duplex echo and
+        // optional status ACK without retrying the write; silent-ACK servos (response level 0)
+        // or delayed EEPROM commits are confirmed read-only by callers.
+        let req = write_packet(id, reg, bytes)?;
+        let deadline = Instant::now() + self.1;
+        termios::tcflush(&self.0, FlushArg::TCIFLUSH)?;
+        self.send(&req, deadline)?;
+        match self.read_reply(&req, &mut [], deadline) {
+            Ok(()) | Err(ReplyError::Timeout) => Ok(()),
+            Err(ReplyError::Other(e)) => Err(e),
+        }
     }
     fn goals(&mut self, joints: &Joints, steps: [u16; 3]) -> Result<()> {
         self.send(&goals_packet(joints, steps)?, Instant::now() + IO_TIMEOUT)
@@ -246,6 +327,119 @@ mod tests {
             packet(1, 0, &[8]),
         ] {
             assert!(status(&invalid.unwrap(), &req, 2).is_err());
+        }
+    }
+    #[test]
+    fn status_tolerates_extra_leading_0xff_before_header_and_echo() {
+        let req = packet(1, INST_READ, &[PRESENT, 2]).unwrap();
+        let reply = packet(1, 0, &[0, 8]).unwrap();
+        for extra in [1usize, 3] {
+            let mut wire = vec![0xff; extra];
+            wire.extend_from_slice(&req);
+            wire.extend(std::iter::repeat_n(0xff, extra));
+            wire.extend_from_slice(&reply);
+            for i in 0..wire.len() {
+                assert!(status(&wire[..i], &req, 2).unwrap().is_none());
+            }
+            assert_eq!(status(&wire, &req, 2).unwrap(), Some(&[0, 8][..]));
+            *wire.last_mut().unwrap() ^= 1;
+            assert!(status(&wire, &req, 2).is_err());
+        }
+    }
+    #[test]
+    fn write_uses_addressed_inst_write_and_handles_ack_silent_and_error() {
+        let frame = write_packet(2, TORQUE, &[1]).unwrap();
+        assert_eq!(frame, [0xff, 0xff, 2, 4, INST_WRITE, TORQUE, 1, 205]);
+        assert_eq!(
+            write_packet(1, LIMITS, &[96, 7, 160, 8]).unwrap(),
+            [0xff, 0xff, 1, 7, INST_WRITE, LIMITS, 96, 7, 160, 8, 220]
+        );
+        // Delayed OK write ACK before a subsequent READ reply is skipped; error ACK fails.
+        let read_req = packet(1, INST_READ, &[TORQUE, 1]).unwrap();
+        let mut wire = packet(1, 0, &[]).unwrap();
+        wire.extend_from_slice(&read_req);
+        wire.extend_from_slice(&packet(1, 0, &[1]).unwrap());
+        assert_eq!(status(&wire, &read_req, 1).unwrap(), Some(&[1][..]));
+        let mut bad = packet(1, 32, &[]).unwrap();
+        bad.extend_from_slice(&packet(1, 0, &[1]).unwrap());
+        assert!(status(&bad, &read_req, 1).is_err());
+
+        // PTY: echo + OK ACK succeeds cleanly.
+        let open_pty = |timeout| {
+            let pty = nix::pty::openpty(None, None).unwrap();
+            let mut config = termios::tcgetattr(&pty.slave).unwrap();
+            termios::cfmakeraw(&mut config);
+            termios::tcsetattr(&pty.slave, SetArg::TCSANOW, &config).unwrap();
+            nix::fcntl::fcntl(
+                &pty.slave,
+                nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
+            )
+            .unwrap();
+            (Serial(pty.slave.into(), timeout), File::from(pty.master))
+        };
+        let (mut driver, mut adapter) = open_pty(Duration::from_secs(5));
+        let (done, exit) = std::sync::mpsc::sync_channel(1);
+        let sim = thread::spawn(move || {
+            let mut cmd = [0; 8];
+            adapter.read_exact(&mut cmd).unwrap();
+            assert_eq!(cmd[2], 2);
+            assert_eq!(cmd[4], INST_WRITE);
+            adapter.write_all(&cmd).unwrap();
+            adapter.write_all(&packet(2, 0, &[]).unwrap()).unwrap();
+            let _ = exit.recv();
+        });
+        driver.write(2, TORQUE, &[1]).unwrap();
+        done.send(()).unwrap();
+        sim.join().unwrap();
+
+        // PTY: echo + silent write (response level 0) succeeds once without extra write.
+        let (mut driver, mut adapter) = open_pty(Duration::from_millis(20));
+        let (done, exit) = std::sync::mpsc::sync_channel(1);
+        let sim = thread::spawn(move || {
+            let mut cmd = [0; 8];
+            adapter.read_exact(&mut cmd).unwrap();
+            adapter.write_all(&cmd).unwrap();
+            let _ = exit.recv();
+            // Confirm no second write arrived.
+            let mut extra = [0; 1];
+            nix::fcntl::fcntl(
+                &adapter,
+                nix::fcntl::FcntlArg::F_SETFL(nix::fcntl::OFlag::O_NONBLOCK),
+            )
+            .unwrap();
+            assert_eq!(
+                adapter.read(&mut extra).unwrap_err().kind(),
+                io::ErrorKind::WouldBlock
+            );
+        });
+        driver.write(2, TORQUE, &[1]).unwrap();
+        done.send(()).unwrap();
+        sim.join().unwrap();
+
+        // PTY: error ACK is rejected immediately.
+        let (mut driver, mut adapter) = open_pty(Duration::from_secs(5));
+        let (done, exit) = std::sync::mpsc::sync_channel(1);
+        let sim = thread::spawn(move || {
+            let mut cmd = [0; 8];
+            adapter.read_exact(&mut cmd).unwrap();
+            adapter.write_all(&cmd).unwrap();
+            adapter.write_all(&packet(2, 32, &[]).unwrap()).unwrap();
+            let _ = exit.recv();
+        });
+        assert!(driver.write(2, TORQUE, &[1]).is_err());
+        done.send(()).unwrap();
+        sim.join().unwrap();
+    }
+    #[test]
+    fn baud_verification_fails_closed_when_rate_is_not_one_megabaud() {
+        let pty = nix::pty::openpty(None, None).unwrap();
+        let mut cfg = termios::tcgetattr(&pty.slave).unwrap();
+        termios::cfsetspeed(&mut cfg, termios::BaudRate::B115200).unwrap();
+        assert!(verify_megabaud(&cfg).is_err());
+        #[cfg(target_os = "linux")]
+        {
+            termios::cfsetspeed(&mut cfg, termios::BaudRate::B1000000).unwrap();
+            assert!(verify_megabaud(&cfg).is_ok());
         }
     }
 }
