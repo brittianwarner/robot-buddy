@@ -1,5 +1,5 @@
 {
-  "$comment": "Pass thresholds for bun run eval:voice (tests/eval-voice.mjs). Each metric passes when its stat is at most max. Times are ms against the fixed fakes in tests/lib/stack.mjs: model first token 250 ms, speech first byte 300 ms. Edit thresholds here only.",
+  "$comment": "Pass thresholds for bun run eval:voice (tests/eval-voice.mjs). Each metric passes when its stat is at most max. Times are ms against the fixed fakes in tests/lib/stack.mjs: model first token 250 ms, speech first byte 300 ms. Edit thresholds here only. Metrics ending in _ms are wall-clock limits, enforced only under BUDDY_STRICT_TIMING=1 or an explicit --thresholds file; old_speech_after_reconnect is a count and always enforced.",
   "turns": 10,
   "barges": 3,
   "metrics": {

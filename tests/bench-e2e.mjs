@@ -7,6 +7,13 @@
 //   bun tests/bench-e2e.mjs --publish       # also write docs/research/e2e-latency.json
 //   bun tests/bench-e2e.mjs --repo ../rb-baseline --label baseline
 //
+// Every run records its commit (full SHA, describe, dirty flag), the machine, the load
+// average at start and end, and a noise check (tests/lib/provenance.mjs): load per CPU and
+// how often the fakes fell behind their own schedule. --publish refuses a dirty tree or
+// another checkout before starting, and refuses to write the artifact when the noise
+// check fails (exit 3; the JSON still goes to stdout). `bun run bench:report:check` then
+// verifies the published artifact against HEAD.
+//
 // It fails (exit 1) when, with speech faked:
 //   - an ordinary turn plays no PCM, ends without a clean player exit, or plays a different
 //     number of samples than the fake provider sent for it;
@@ -18,7 +25,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { gitDescribe, rss, sleep, startStack, stats } from './lib/stack.mjs';
+import { gitState, loadAverage, machine, NOISE_LIMITS, noise } from './lib/provenance.mjs';
+import { rss, sleep, startStack, stats } from './lib/stack.mjs';
 import { voiceTurns } from './lib/voice-turns.mjs';
 
 const argv = process.argv.slice(2);
@@ -32,8 +40,26 @@ const repo = path.resolve(opt('repo', root));
 const label = opt('label', path.basename(repo));
 const TURNS = Number(opt('turns', process.env.BENCH_TURNS ?? 20));
 const BARGES = Number(opt('barge', process.env.BENCH_BARGE ?? 5));
-const out = opt('out', has('publish') ? path.join(root, 'docs/research/e2e-latency.json') : null);
+const PUBLISHED = path.join(root, 'docs/research/e2e-latency.json');
+const out = opt('out', has('publish') ? PUBLISHED : null);
+const publishing = out !== null && path.resolve(out) === PUBLISHED;
 const log = (...a) => console.error('bench:', ...a);
+
+const git = gitState(repo);
+const host = machine();
+const loadStart = loadAverage();
+if (publishing) {
+  // Published numbers must name one clean commit of this checkout.
+  const refuse = [];
+  if (repo !== root) refuse.push(`--publish measures this checkout, not ${repo}`);
+  if (git.dirty !== false) refuse.push(`the tree is dirty (${git.describe}); commit or clean it first`);
+  if (refuse.length) {
+    log(`refusing to publish: ${refuse.join('; ')}`);
+    process.exit(3);
+  }
+  const perCpu = loadStart[0] / host.cpus;
+  if (perCpu > NOISE_LIMITS.load_per_cpu) log(`warning: load average ${loadStart[0]} on ${host.cpus} CPUs; the noise check will likely refuse`);
+}
 
 let stack;
 try {
@@ -54,10 +80,12 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 
 const result = {
   label,
-  commit: gitDescribe(repo),
+  commit: git.describe,
+  git,
   date: new Date().toISOString(),
   platform: `${os.platform()} ${os.arch()} ${os.cpus()[0]?.model ?? ''}`.trim(),
-  load_average: os.loadavg().map((l) => Math.round(l * 10) / 10),
+  machine: host,
+  load_average: loadStart,
   rivetkit: stack.rivetVersion,
   turns: TURNS,
   barge_ins: BARGES,
@@ -139,6 +167,7 @@ try {
       engine: { after_warmup: rssStart[1], max: Math.max(...engine), end: engine.at(-1) },
     },
     fake_speech_fell_behind_ms: stats(speech.late.map((l) => l.ms)),
+    fake_model_fell_behind_ms: stats(model.late.map((l) => l.ms)),
     per_turn: turns.map((r) => ({
       kind: r.kind,
       ready: r.ready && Math.round(r.ready),
@@ -168,10 +197,17 @@ if (stack.leaks.length) log(`LEAK:\n  ${stack.leaks.join('\n  ')}`);
 result.failures = failures;
 result.leaks = stack.leaks;
 result.findings = stack.findings;
+result.load_average_end = loadAverage();
+result.noise = noise({ loadStart, loadEnd: result.load_average_end, cpus: host.cpus, late: [...speech.late, ...model.late] });
 if (failures.length || stack.leaks.length) exit = 1;
 
 const json = JSON.stringify(result, null, 2);
-if (out) fs.writeFileSync(out, `${json}\n`);
+if (publishing && (exit !== 0 || !result.noise.ok)) {
+  const why = exit !== 0 ? `${failures.length} failure(s), ${stack.leaks.length} leak(s)` : result.noise.reasons.join('; ');
+  log(`not publishing ${path.relative(root, PUBLISHED)}: ${why}`);
+  if (exit === 0) exit = 3;
+} else if (out) fs.writeFileSync(out, `${json}\n`);
+if (!result.noise.ok) log(`noise: ${result.noise.reasons.join('; ')}`);
 console.log(json);
 const m = result.metrics_ms;
 if (m) {

@@ -66,7 +66,7 @@ Residual risk: a person who opens an attacker's claim link and chooses to sign i
 |---|---|---|
 | The operator token and the guess are each MACed under the signing key, with the token as the message, and compared in constant time. | `token` and `token\0` colliding when the token was the HMAC key. | `lab::tests::lab_token_rejects_nul_padding`, `http_tests::lab_login_and_csrf_statuses` |
 | Mutations need `Origin` and the session's CSRF header, compared in constant time. Actions pass an allowlist. | Cross-site requests; admin actions from the browser. | `http_tests::lab_login_and_csrf_statuses` |
-| A failed poll or session check clears the watched turn. Catch-up events after reconnect apply silently; Replay still speaks on request. | Speaking a reply that completed during an outage. | `bun apps/server/tests/lab-reconnect.mjs` (browser, not in CI) |
+| A failed poll or session check clears the watched turn. Catch-up events after reconnect apply silently; Replay still speaks on request. | Speaking a reply that completed during an outage. | `bun run test:lab-reconnect` (`apps/server/tests/lab-reconnect.mjs`, headless Chromium in CI) |
 
 ### Actor bounds
 

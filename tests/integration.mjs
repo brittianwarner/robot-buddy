@@ -3,8 +3,10 @@
 // redaction) against isolated engines and proves nothing outlives them.
 //
 // Ports: BUDDY_TEST_ENGINE_PORT (default 16420; the engine also takes +1 and +10) and
-// BUDDY_TEST_MODEL_PORT (default 19091). Every credential here is a test-only literal.
+// BUDDY_TEST_MODEL_PORT (default 19091). Run directories go to BUDDY_TEST_STATE_DIR
+// (default $TMPDIR/robot-buddy-it/engine-<port>). Every credential here is a test-only literal.
 // Extra arguments go to every test binary, e.g. `bun run test:integration -- speech`.
+// Ends with each suite's exit code and wall time (cargo build included in the first).
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,7 +14,9 @@ import { join } from "node:path";
 
 const enginePort = Number(process.env.BUDDY_TEST_ENGINE_PORT ?? 16420);
 const modelPort = Number(process.env.BUDDY_TEST_MODEL_PORT ?? 19091);
-const stateDir = process.env.BUDDY_TEST_STATE_DIR ?? join(tmpdir(), "robot-buddy-it");
+// One state directory per engine port: harnesses on other ports (parallel checkouts) keep
+// their run directories elsewhere, so their runs are never counted as this run's leaks.
+const stateDir = process.env.BUDDY_TEST_STATE_DIR ?? join(tmpdir(), "robot-buddy-it", `engine-${enginePort}`);
 const ports = [enginePort, enginePort + 1, enginePort + 10, modelPort];
 
 const env = {
@@ -64,7 +68,8 @@ async function run(suite) {
   child = spawn("cargo", args, { env, stdio: "inherit" });
   const code = await new Promise((resolve) => child.on("exit", (c, s) => resolve(c ?? (s ? 1 : 0))));
   child = null;
-  console.log(`integration: ${suite} exited ${code} after ${((Date.now() - started) / 1000).toFixed(1)} s`);
+  const seconds = (Date.now() - started) / 1000;
+  console.log(`integration: ${suite} exited ${code} after ${seconds.toFixed(1)} s`);
 
   // The test binary's watchdog stops the engine when the binary exits, then removes the
   // run directory; give it time for both.
@@ -88,17 +93,27 @@ async function run(suite) {
     leaked = true;
     console.error(`integration: LEAK after ${suite}: run directories left in ${stateDir}: ${runs.join(", ")}`);
   }
-  return { code, leaked };
+  return { code, leaked, seconds };
 }
 
 let code = 0;
 let leaked = false;
+const times = [];
 for (const suite of SUITES) {
   const result = await run(suite);
+  times.push({ suite, ...result });
   code ||= result.code;
   leaked ||= result.leaked;
   // A leak would make the next suite refuse its ports.
   if (result.leaked) break;
 }
+const width = Math.max(...SUITES.map((s) => s.length));
+console.log("integration: wall time per suite");
+for (const suite of SUITES) {
+  const t = times.find((x) => x.suite === suite);
+  const status = !t ? "not run" : t.leaked ? "LEAK" : t.code === 0 ? "ok" : `exit ${t.code}`;
+  console.log(`  ${suite.padEnd(width)}  ${status.padEnd(8)} ${t ? `${t.seconds.toFixed(1).padStart(7)} s` : ""}`);
+}
+console.log(`  ${"total".padEnd(width)}  ${"".padEnd(8)} ${times.reduce((a, t) => a + t.seconds, 0).toFixed(1).padStart(7)} s`);
 if (!leaked) console.log(`integration: ${SUITES.join(", ")}: no listener on ${ports.join(", ")}; no run directory left`);
 process.exit(code !== 0 ? code : leaked ? 1 : 0);

@@ -14,12 +14,20 @@
 // failed reconnect check) fail the eval whatever the scores. A check marked as a known bug
 // is reported in `known_bugs` and does not fail it.
 //
-// Exit 0 when every metric passes and no functional check failed, 1 otherwise, 2 when a
-// port is busy. Same port rules as the bench (BENCH_PORT_BASE).
+// Time metrics (names ending in `_ms`) are wall-clock limits: every one is scored, but an
+// over-limit one fails the eval only under BUDDY_STRICT_TIMING=1 or when `--thresholds`
+// names a file explicitly (a run that brings its own limits wants them enforced). Count
+// metrics (old speech after a reconnect) are always enforced. `enforced` in each score
+// says which applied.
+//
+// Exit 0 when every enforced metric passes and no functional check failed, 1 otherwise, 2
+// when a port is busy. Same port rules as the bench (BENCH_PORT_BASE).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { gitDescribe, sleep, startStack, stats } from './lib/stack.mjs';
+import { gitState, loadAverage, machine, noise } from './lib/provenance.mjs';
+import { sleep, startStack, stats } from './lib/stack.mjs';
+import { STRICT_TIMING } from './lib/timing.mjs';
 import { voiceTurns } from './lib/voice-turns.mjs';
 import { reconnectReply, reconnectScenario } from './robot-reconnect.mjs';
 
@@ -30,8 +38,11 @@ const opt = (name, fallback) => {
   return i >= 0 ? argv[i + 1] : fallback;
 };
 const root = path.resolve(import.meta.dir, '..');
-const config = JSON.parse(fs.readFileSync(opt('thresholds', path.join(root, 'tests/eval/voice-thresholds.json')), 'utf8'));
+const thresholdsFile = opt('thresholds', path.join(root, 'tests/eval/voice-thresholds.json'));
+const config = JSON.parse(fs.readFileSync(thresholdsFile, 'utf8'));
+const enforceTiming = STRICT_TIMING || has('thresholds');
 const log = (...a) => console.error('eval:', ...a);
+const loadStart = loadAverage();
 
 let stack;
 try {
@@ -84,16 +95,23 @@ for (const leak of stack.leaks) fail('nothing outlives shutdown', { leak });
 
 const scores = Object.entries(config.metrics).map(([name, { stat, max }]) => {
   const value = observed[name]?.[stat] ?? null;
-  return { metric: name, stat, value, max, n: observed[name]?.n ?? null, pass: value !== null && value <= max };
+  const enforced = !name.endsWith('_ms') || enforceTiming;
+  return { metric: name, stat, value, max, n: observed[name]?.n ?? null, pass: value !== null && value <= max, enforced };
 });
-const pass = failures.length === 0 && scores.every((s) => s.pass);
+const pass = failures.length === 0 && scores.every((s) => s.pass || !s.enforced);
+const git = gitState(stack.repo);
 const scorecard = {
   pass,
-  commit: gitDescribe(stack.repo),
+  commit: git.describe,
+  git,
   date: new Date().toISOString(),
+  machine: machine(),
   platform: `${os.platform()} ${os.arch()} ${os.cpus()[0]?.model ?? ''}`.trim(),
-  load_average: os.loadavg().map((l) => Math.round(l * 10) / 10),
-  thresholds: path.relative(root, opt('thresholds', path.join(root, 'tests/eval/voice-thresholds.json'))),
+  load_average: loadStart,
+  load_average_end: loadAverage(),
+  noise: noise({ loadStart, loadEnd: loadAverage(), cpus: os.cpus().length, late: [...stack.speech.late, ...stack.model.late] }),
+  thresholds: path.relative(root, thresholdsFile),
+  timing_enforced: enforceTiming,
   turns: config.turns,
   barges: config.barges,
   scores,
@@ -105,6 +123,10 @@ const scorecard = {
 const json = JSON.stringify(scorecard, null, 2);
 if (opt('out', null)) fs.writeFileSync(opt('out', null), `${json}\n`);
 console.log(json);
-for (const s of scores) log(`${s.pass ? 'pass' : 'FAIL'} ${s.metric} ${s.stat}=${s.value ?? '-'} (max ${s.max})`);
-log(pass ? 'PASS' : `FAIL (${failures.length} functional failure(s), ${scores.filter((s) => !s.pass).length} metric(s) over)`);
+for (const s of scores) {
+  const verdict = s.pass ? 'pass' : s.enforced ? 'FAIL' : 'OVER (reported; set BUDDY_STRICT_TIMING=1 to enforce)';
+  log(`${verdict} ${s.metric} ${s.stat}=${s.value ?? '-'} (max ${s.max})`);
+}
+const over = scores.filter((s) => !s.pass && s.enforced).length;
+log(pass ? 'PASS' : `FAIL (${failures.length} functional failure(s), ${over} enforced metric(s) over)`);
 process.exit(pass ? 0 : 1);

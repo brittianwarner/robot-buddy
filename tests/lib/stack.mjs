@@ -182,7 +182,7 @@ export async function startStack(options = {}) {
   // -------------------------------------------------------------------------------------
   // Fakes
   // -------------------------------------------------------------------------------------
-  const model = { calls: 0, open: new Map(), aborted: [], streams: [] };
+  const model = { calls: 0, open: new Map(), aborted: [], streams: [], late: [] };
   let replyIndex = 0;
   const chunkFrame = (delta, finish) => {
     const chunk = {
@@ -239,6 +239,9 @@ export async function startStack(options = {}) {
           const wait = start + 250 + 15 * k - now();
           if (wait > 0) await sleep(wait);
           if (cancelled) return;
+          // Like the speech fake: a frame 20 ms or more behind its schedule is host noise.
+          const late = now() - (start + 250 + 15 * k);
+          if (late >= 20) model.late.push({ t: now(), ms: late });
           controller.enqueue(encoder.encode(frames[k++]));
           if (k === frames.length) {
             model.open.delete(id);
