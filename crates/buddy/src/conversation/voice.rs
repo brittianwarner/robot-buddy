@@ -1,18 +1,22 @@
 //! Versioned voice settings: the curated voice and delivery every speech request uses.
 use super::{
-    Context, Conversation, Ctx, Db, P, Receipt, Result, Tx, Value, auth, ensure,
-    ensure_receipt_running, integer, json, named, string, trim_versions, write_receipt,
+    Context, Conversation, Ctx, Db, Receipt, Result, Tx, Value, auth, ensure,
+    ensure_receipt_running, integer, json, named, persona::Setting, string, write_receipt,
 };
 use crate::voice::VoiceConfig;
 
 const VOICE_SQL: &str = "SELECT revision, config, updated FROM voice_settings WHERE singleton = 1";
-pub(super) const UPDATE_VOICE_SQL: &str = r"
-    UPDATE voice_settings SET revision = revision + 1, config = ?, updated = ?
-    WHERE singleton = 1 AND revision = ?
-    RETURNING revision";
-pub(super) const INSERT_VOICE_VERSION_SQL: &str = r"
-    INSERT INTO voice_versions(revision, config, reason, updated) VALUES (?, ?, ?, ?)";
-pub(super) const TRIM_VOICE_VERSIONS_SQL: &str = "DELETE FROM voice_versions WHERE revision < ?";
+/// The voice settings as a versioned setting.
+pub(super) const VOICE: Setting = Setting {
+    update: r"
+        UPDATE voice_settings SET revision = revision + 1, config = ?, updated = ?
+        WHERE singleton = 1 AND revision = ?
+        RETURNING revision",
+    insert_version: r"
+        INSERT INTO voice_versions(revision, config, reason, updated) VALUES (?, ?, ?, ?)",
+    trim: "DELETE FROM voice_versions WHERE revision < ?",
+    conflict: "voice revision conflict; read it again",
+};
 
 impl Conversation {
     pub(super) async fn voice_config(&self, ctx: &Ctx<Self>) -> Result<Value> {
@@ -45,25 +49,9 @@ impl Conversation {
         let encoded = serde_json::to_string(config)?;
         let write = |tx: Tx| async move {
             ensure_receipt_running(&tx, receipt).await?;
-            let now = auth::now();
-            let update = vec![
-                P::Text(encoded.clone()),
-                P::Integer(now),
-                P::Integer(expected_revision),
-            ];
-            let rows = tx.execute(UPDATE_VOICE_SQL, Some(update)).await?.rows;
-            let row = rows
-                .first()
-                .context("voice revision conflict; read it again")?;
-            let revision = integer(row, 0)?;
-            let version = vec![
-                P::Integer(revision),
-                P::Text(encoded),
-                P::Text(reason.into()),
-                P::Integer(now),
-            ];
-            tx.execute(INSERT_VOICE_VERSION_SQL, Some(version)).await?;
-            trim_versions(&tx, TRIM_VOICE_VERSIONS_SQL, revision).await?;
+            let revision = VOICE
+                .write(&tx, expected_revision, &encoded, reason, auth::now())
+                .await?;
             let result = json!({
                 "revision": revision,
                 "saved": true,

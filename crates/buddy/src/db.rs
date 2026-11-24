@@ -187,17 +187,33 @@ pub fn params(values: &[&str]) -> Option<Vec<BindParam>> {
     )
 }
 
-/// The bot ID: the first segment of the actor key.
+/// The bot ID: the actor key, which is exactly one string segment. Any other key, such
+/// as `[bot, extra]` or a number, is refused, so two key shapes never share a bot's grants.
 pub fn bot_key<A: Actor>(ctx: &Ctx<A>) -> Result<String> {
-    match ctx.key().first() {
-        Some(ActorKeySegment::String(key)) => Ok(key.clone()),
-        _ => bail!("bot requires a string key"),
+    key_bot(ctx.key()).map(str::to_owned)
+}
+
+fn key_bot(key: &[ActorKeySegment]) -> Result<&str> {
+    match key {
+        [ActorKeySegment::String(bot)] if !bot.is_empty() => Ok(bot),
+        _ => bail!("bot requires a single string key"),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bot_key_is_exactly_one_string_segment() {
+        let text = |value: &str| ActorKeySegment::String(value.to_owned());
+        assert_eq!(key_bot(&[text("bot-1")]).unwrap(), "bot-1");
+        assert!(key_bot(&[]).is_err());
+        assert!(key_bot(&[text("")]).is_err());
+        assert!(key_bot(&[text("bot-1"), text("extra")]).is_err());
+        assert!(key_bot(&[ActorKeySegment::Number(1.0)]).is_err());
+        assert!(key_bot(&[ActorKeySegment::Number(1.0), text("bot-1")]).is_err());
+    }
 
     #[test]
     fn readers_check_column_types() {

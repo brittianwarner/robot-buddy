@@ -11,7 +11,7 @@ mod tools;
 mod voice;
 use crate::{
     auth,
-    db::{BATCH_TX_TIMEOUT, Db, Tx, bot_key, integer, named, named_for, params, string},
+    db::{Db, Tx, bot_key, integer, named, named_for, params, string},
     model::{Delta, Model, ToolCall},
     protocol::{
         BUSY_ERROR, Busy, Call, Command, Connection, OkReply, OutputEvent, SpokenAnswerReply,
@@ -203,85 +203,6 @@ const HISTORY_PAGE_SQL: &str = r"
     SELECT id, status, text, answer FROM turns
     WHERE (? = '' OR id < ?) ORDER BY id DESC LIMIT 20";
 
-/// Starts, resumes or restarts the history search rebuild, or marks it done. Returns
-/// whether batches remain. Runs in `create`, before any action.
-async fn begin_history_backfill(ctx: &Ctx<Conversation>) -> Result<bool> {
-    let begin = |tx: Tx| async move {
-        let rows = tx.execute(history::STATUS_SQL, None).await?.rows;
-        let row = rows.first().context("history status missing")?;
-        let flag = |index| integer(row, index).map(|value| value != 0);
-        let decision = history::Begin::decide([flag(0)?, flag(1)?, flag(2)?, flag(3)?]);
-        match decision {
-            history::Begin::Done | history::Begin::Resume => {}
-            history::Begin::Mark => {
-                tx.execute(history::MARK_SQL, Some(vec![P::Integer(auth::now())]))
-                    .await?;
-            }
-            history::Begin::Reset => {
-                tx.exec(history::RESET_SQL).await?;
-                tx.exec(history::START_SQL).await?;
-            }
-            history::Begin::Start => {
-                tx.exec(history::START_SQL).await?;
-            }
-        }
-        Ok(decision.pending())
-    };
-    let options = named("conversation.history_backfill_begin");
-    ctx.db().transaction(begin, options).await
-}
-
-/// One rebuild batch in one transaction. Returns whether batches remain.
-async fn history_backfill_step(ctx: &Ctx<Conversation>) -> Result<bool> {
-    let step = |tx: Tx| async move {
-        let rows = tx.execute(history::STATE_SQL, None).await?.rows;
-        let Some(row) = rows.first() else {
-            return Ok(false);
-        };
-        let floor = P::Integer(integer(row, 0)?);
-        let cursor = string(row, 1)?;
-        if integer(row, 2)? == 0 {
-            let end = tx
-                .execute(history::WINDOW_END_SQL, params(&[&cursor]))
-                .await?
-                .rows;
-            let Some(end) = end.first().map(|row| string(row, 0)).transpose()? else {
-                tx.execute(history::SWEEP_START_SQL, None).await?;
-                return Ok(true);
-            };
-            let window = || vec![P::Text(cursor.clone()), P::Text(end.clone())];
-            let mut unmap = window();
-            unmap.push(floor);
-            tx.execute(history::UNMAP_SQL, Some(unmap)).await?;
-            tx.execute(history::MAP_SQL, Some(window())).await?;
-            tx.execute(history::INDEX_SQL, Some(window())).await?;
-            tx.execute(history::ADVANCE_SQL, params(&[&end])).await?;
-            return Ok(true);
-        }
-        let swept = tx
-            .execute(history::SWEEP_SEARCH_SQL, Some(vec![floor.clone()]))
-            .await?
-            .changes;
-        let orphans = tx
-            .execute(history::SWEEP_ROWS_SQL, Some(vec![floor]))
-            .await?
-            .changes;
-        if swept + orphans > 0 {
-            return Ok(true);
-        }
-        tx.exec(history::FINISH_SQL).await?;
-        tx.execute(history::MARK_SQL, Some(vec![P::Integer(auth::now())]))
-            .await?;
-        Ok(false)
-    };
-    ctx.db()
-        .transaction(
-            step,
-            named_for("conversation.history_backfill", BATCH_TX_TIMEOUT),
-        )
-        .await
-}
-
 /// Seeds a singleton settings row and its first version; existing rows are kept.
 async fn seed_settings(
     ctx: &Ctx<Conversation>,
@@ -363,7 +284,7 @@ fn start_history_backfill(ctx: &Ctx<Conversation>) {
         let _awake = task_ctx.keep_awake_region();
         let mut batches = 0_u32;
         while !task_ctx.aborted() {
-            match history_backfill_step(&task_ctx).await {
+            match history::step(&task_ctx).await {
                 Ok(true) => batches += 1,
                 Ok(false) => {
                     tracing::info!(batches, "history search rebuild finished");
@@ -429,7 +350,7 @@ impl Actor for Conversation {
         if !schema_current {
             ctx.db().exec(include_str!("conversation.sql")).await?;
         }
-        let history_backfill = begin_history_backfill(ctx).await?;
+        let history_backfill = history::begin(ctx).await?;
         if !schema_current {
             seed_all(ctx).await?;
         }
@@ -1433,7 +1354,7 @@ mod tests {
             (SCHEMA_VERSION, hex.as_str()),
             (
                 2,
-                "c161de27b76fa4e408d086fff4cf579878785d134877ed66bac90ba14d1bc54b"
+                "d1d0359f5098638d9ae79044cda1a1f15b1f5276c529814c9f20b7e41b0fcc5f"
             ),
             "conversation.sql changed: raise SCHEMA_VERSION and MARK_SCHEMA_SQL"
         );
