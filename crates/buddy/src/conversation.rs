@@ -11,7 +11,7 @@ mod tools;
 mod voice;
 use crate::{
     auth,
-    db::{BATCH_TX_TIMEOUT, Db, Tx, bot_key, integer, named, named_for, params, string},
+    db::{Db, Tx, bot_key, integer, named, named_for, params, string},
     model::{Delta, Model, ToolCall},
     protocol::{BUSY_ERROR, Busy, Call, Command, Connection, OutputEvent},
 };
@@ -77,7 +77,7 @@ const DRAIN_RETRY_BASE: Duration = Duration::from_millis(100);
 /// Attempts to mark a failed turn failed before the next drain must reconcile it.
 const FINISH_ATTEMPTS: u32 = 3;
 /// `PRAGMA user_version` once this code's schema, seeds and factory adoption are applied.
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 /// The schema version and whether a trigger of an older layout is present. Both readable
 /// before any table exists.
 const SCHEMA_STATE_SQL: &str = r"
@@ -85,7 +85,7 @@ const SCHEMA_STATE_SQL: &str = r"
         EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name IN (
             'turns_history_insert', 'turns_history_update',
             'turns_search_insert', 'turns_search_update'))";
-const MARK_SCHEMA_SQL: &str = "PRAGMA user_version = 1";
+const MARK_SCHEMA_SQL: &str = "PRAGMA user_version = 2";
 /// Lifetime of the agent session the conversation signs for memory and access checks.
 const AGENT_SESSION_SECONDS: i64 = 60;
 /// Settings keep their newest versions; older ones are deleted on each write.
@@ -183,85 +183,6 @@ const HISTORY_PAGE_SQL: &str = r"
     SELECT id, status, text, answer FROM turns
     WHERE (? = '' OR id < ?) ORDER BY id DESC LIMIT 20";
 
-/// Starts, resumes or restarts the history search rebuild, or marks it done. Returns
-/// whether batches remain. Runs in `create`, before any action.
-async fn begin_history_backfill(ctx: &Ctx<Conversation>) -> Result<bool> {
-    let begin = |tx: Tx| async move {
-        let rows = tx.execute(history::STATUS_SQL, None).await?.rows;
-        let row = rows.first().context("history status missing")?;
-        let flag = |index| integer(row, index).map(|value| value != 0);
-        let decision = history::Begin::decide([flag(0)?, flag(1)?, flag(2)?, flag(3)?]);
-        match decision {
-            history::Begin::Done | history::Begin::Resume => {}
-            history::Begin::Mark => {
-                tx.execute(history::MARK_SQL, Some(vec![P::Integer(auth::now())]))
-                    .await?;
-            }
-            history::Begin::Reset => {
-                tx.exec(history::RESET_SQL).await?;
-                tx.exec(history::START_SQL).await?;
-            }
-            history::Begin::Start => {
-                tx.exec(history::START_SQL).await?;
-            }
-        }
-        Ok(decision.pending())
-    };
-    let options = named("conversation.history_backfill_begin");
-    ctx.db().transaction(begin, options).await
-}
-
-/// One rebuild batch in one transaction. Returns whether batches remain.
-async fn history_backfill_step(ctx: &Ctx<Conversation>) -> Result<bool> {
-    let step = |tx: Tx| async move {
-        let rows = tx.execute(history::STATE_SQL, None).await?.rows;
-        let Some(row) = rows.first() else {
-            return Ok(false);
-        };
-        let floor = P::Integer(integer(row, 0)?);
-        let cursor = string(row, 1)?;
-        if integer(row, 2)? == 0 {
-            let end = tx
-                .execute(history::WINDOW_END_SQL, params(&[&cursor]))
-                .await?
-                .rows;
-            let Some(end) = end.first().map(|row| string(row, 0)).transpose()? else {
-                tx.execute(history::SWEEP_START_SQL, None).await?;
-                return Ok(true);
-            };
-            let window = || vec![P::Text(cursor.clone()), P::Text(end.clone())];
-            let mut unmap = window();
-            unmap.push(floor);
-            tx.execute(history::UNMAP_SQL, Some(unmap)).await?;
-            tx.execute(history::MAP_SQL, Some(window())).await?;
-            tx.execute(history::INDEX_SQL, Some(window())).await?;
-            tx.execute(history::ADVANCE_SQL, params(&[&end])).await?;
-            return Ok(true);
-        }
-        let swept = tx
-            .execute(history::SWEEP_SEARCH_SQL, Some(vec![floor.clone()]))
-            .await?
-            .changes;
-        let orphans = tx
-            .execute(history::SWEEP_ROWS_SQL, Some(vec![floor]))
-            .await?
-            .changes;
-        if swept + orphans > 0 {
-            return Ok(true);
-        }
-        tx.exec(history::FINISH_SQL).await?;
-        tx.execute(history::MARK_SQL, Some(vec![P::Integer(auth::now())]))
-            .await?;
-        Ok(false)
-    };
-    ctx.db()
-        .transaction(
-            step,
-            named_for("conversation.history_backfill", BATCH_TX_TIMEOUT),
-        )
-        .await
-}
-
 /// Seeds a singleton settings row and its first version; existing rows are kept.
 async fn seed_settings(
     ctx: &Ctx<Conversation>,
@@ -343,7 +264,7 @@ fn start_history_backfill(ctx: &Ctx<Conversation>) {
         let _awake = task_ctx.keep_awake_region();
         let mut batches = 0_u32;
         while !task_ctx.aborted() {
-            match history_backfill_step(&task_ctx).await {
+            match history::step(&task_ctx).await {
                 Ok(true) => batches += 1,
                 Ok(false) => {
                     tracing::info!(batches, "history search rebuild finished");
@@ -409,7 +330,7 @@ impl Actor for Conversation {
         if !schema_current {
             ctx.db().exec(include_str!("conversation.sql")).await?;
         }
-        let history_backfill = begin_history_backfill(ctx).await?;
+        let history_backfill = history::begin(ctx).await?;
         if !schema_current {
             seed_all(ctx).await?;
         }
@@ -1245,8 +1166,8 @@ mod tests {
         assert_eq!(
             (SCHEMA_VERSION, hex.as_str()),
             (
-                1,
-                "5112e83bda725a9215a50d6a8b9a75d87aa6e2b2f9704055fd0b10adb28d2f3d"
+                2,
+                "0c90fe34904fb00fa07583b04192f931d6b0139071014e0277af93b200db3182"
             ),
             "conversation.sql changed: raise SCHEMA_VERSION and MARK_SCHEMA_SQL"
         );

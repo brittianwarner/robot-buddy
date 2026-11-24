@@ -8,18 +8,37 @@ CREATE VIRTUAL TABLE IF NOT EXISTS history_search USING fts5(turn_id UNINDEXED,u
 -- Each turn's FTS row ID lives in an indexed table, so replacing a turn's search row is a
 -- keyed write. INTEGER PRIMARY KEY keeps the IDs stable across VACUUM.
 CREATE TABLE IF NOT EXISTS history_rows(fts_rowid INTEGER PRIMARY KEY,turn_id TEXT NOT NULL UNIQUE);
--- A turn's search row is written at its mapped row ID, replacing any row already there.
--- The rebuild in conversation/history.rs maps turns that predate this table; it drops the
--- version 1 triggers (turns_search_insert, turns_search_update) in its start transaction.
+-- A turn's search row is written at its mapped row ID, replacing any row already there,
+-- so the index keeps one row per turn. Version 1 code that runs again recreates its own
+-- triggers (turns_search_insert, turns_search_update); these stand down while those exist.
+-- The rebuild in conversation/history.rs drops the older triggers in its start transaction
+-- and maps rows that predate history_rows.
 DROP TRIGGER IF EXISTS turns_history_insert;
 DROP TRIGGER IF EXISTS turns_history_update;
-CREATE TRIGGER IF NOT EXISTS turns_index_insert AFTER INSERT ON turns BEGIN
+CREATE TRIGGER IF NOT EXISTS turns_fts_insert AFTER INSERT ON turns
+WHEN NOT EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='turns_search_insert')
+BEGIN
   INSERT OR IGNORE INTO history_rows(turn_id) VALUES(new.id);
   INSERT OR REPLACE INTO history_search(rowid,turn_id,user_text,assistant_text)
     SELECT fts_rowid,new.id,new.text,new.answer FROM history_rows WHERE turn_id=new.id;
 END;
-CREATE TRIGGER IF NOT EXISTS turns_index_update AFTER UPDATE OF answer ON turns BEGIN
-  INSERT OR IGNORE INTO history_rows(turn_id) VALUES(new.id);
+CREATE TRIGGER IF NOT EXISTS turns_fts_update AFTER UPDATE OF answer ON turns
+WHEN NOT EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='turns_search_update')
+  AND EXISTS(SELECT 1 FROM history_rows r JOIN history_search h ON h.rowid=r.fts_rowid
+    WHERE r.turn_id=new.id AND h.turn_id=new.id)
+BEGIN
+  INSERT OR REPLACE INTO history_search(rowid,turn_id,user_text,assistant_text)
+    SELECT fts_rowid,new.id,new.text,new.answer FROM history_rows WHERE turn_id=new.id;
+END;
+-- A turn whose row is not mapped yet (one in flight when the rebuild started) adopts its
+-- newest row, a short read from the top of the index, or a new row ID if it has none.
+CREATE TRIGGER IF NOT EXISTS turns_fts_adopt AFTER UPDATE OF answer ON turns
+WHEN NOT EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='turns_search_update')
+  AND NOT EXISTS(SELECT 1 FROM history_rows r JOIN history_search h ON h.rowid=r.fts_rowid
+    WHERE r.turn_id=new.id AND h.turn_id=new.id)
+BEGIN
+  INSERT OR REPLACE INTO history_rows(fts_rowid,turn_id) VALUES((SELECT rowid FROM history_search
+    WHERE turn_id=new.id ORDER BY rowid DESC LIMIT 1),new.id);
   INSERT OR REPLACE INTO history_search(rowid,turn_id,user_text,assistant_text)
     SELECT fts_rowid,new.id,new.text,new.answer FROM history_rows WHERE turn_id=new.id;
 END;

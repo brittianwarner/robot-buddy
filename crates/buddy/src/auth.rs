@@ -222,6 +222,13 @@ pub struct Challenge {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Device and issuer keys live in `SigningKey`, which clears its bytes on drop, and
+    /// their encoded and decoded forms in `Secret`. Fails to build without the feature.
+    #[test]
+    fn signing_keys_zeroize_on_drop() {
+        fn zeroized_on_drop<T: zeroize::ZeroizeOnDrop>() {}
+        zeroized_on_drop::<SigningKey>();
+    }
     #[test]
     fn tokens_are_bound_to_purpose_and_key() -> Result<()> {
         let token = sign([1; 32], "device", &"value")?;

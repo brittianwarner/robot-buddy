@@ -1,10 +1,7 @@
 //! Bounded persona library; selecting a profile updates prompt and voice atomically.
 use super::{
-    Context, Conversation, Ctx, Db, P, Receipt, Result, Tx, V, Value, auth, ensure,
-    ensure_receipt_running, integer, json, named, params,
-    persona::{INSERT_PROMPT_VERSION_SQL, TRIM_PROMPT_VERSIONS_SQL, UPDATE_PROMPT_SQL},
-    string, trim_versions,
-    voice::{INSERT_VOICE_VERSION_SQL, TRIM_VOICE_VERSIONS_SQL, UPDATE_VOICE_SQL},
+    Context, Conversation, Ctx, Db, KEPT_VERSIONS, P, Receipt, Result, Tx, Value, auth, ensure,
+    ensure_receipt_running, integer, json, named, params, persona::PROMPT, string, voice::VOICE,
     write_receipt,
 };
 use crate::{persona::PersonaDraft, voice::VoiceConfig};
@@ -38,11 +35,6 @@ const PROFILE_SQL: &str =
 const REVISIONS_SQL: &str = r"
     SELECT p.revision, v.revision FROM system_prompt p CROSS JOIN voice_settings v
     WHERE p.singleton = 1 AND v.singleton = 1";
-
-/// The settings revision a write moved to.
-fn revision(rows: &[Vec<V>], conflict: &'static str) -> Result<i64> {
-    integer(rows.first().context(conflict)?, 0)
-}
 
 impl Conversation {
     pub(super) async fn list_personas(&self, ctx: &Ctx<Self>) -> Result<Value> {
@@ -144,7 +136,7 @@ impl Conversation {
             tx.execute(INSERT_VERSION_SQL, Some(row)).await?;
             let trim = vec![
                 P::Text(draft.name.clone()),
-                P::Integer((version - 15).max(1)),
+                P::Integer((version - KEPT_VERSIONS).max(1)),
             ];
             tx.execute(TRIM_VERSIONS_SQL, Some(trim)).await?;
             let result = json!({
@@ -194,38 +186,8 @@ impl Conversation {
             let voice = serde_json::to_string(&config)?;
             let now = auth::now();
             let reason = format!("Activate {name} version {version}");
-            let update = vec![
-                P::Text(prompt.clone()),
-                P::Integer(now),
-                P::Integer(expected.0),
-            ];
-            let rows = tx.execute(UPDATE_PROMPT_SQL, Some(update)).await?.rows;
-            let prompt_revision = revision(&rows, "prompt revision conflict")?;
-            let update = vec![
-                P::Text(voice.clone()),
-                P::Integer(now),
-                P::Integer(expected.1),
-            ];
-            let rows = tx.execute(UPDATE_VOICE_SQL, Some(update)).await?.rows;
-            let voice_revision = revision(&rows, "voice revision conflict")?;
-            let prompt_version = vec![
-                P::Integer(prompt_revision),
-                P::Text(prompt),
-                P::Text(reason.clone()),
-                P::Integer(now),
-            ];
-            tx.execute(INSERT_PROMPT_VERSION_SQL, Some(prompt_version))
-                .await?;
-            let voice_version = vec![
-                P::Integer(voice_revision),
-                P::Text(voice),
-                P::Text(reason),
-                P::Integer(now),
-            ];
-            tx.execute(INSERT_VOICE_VERSION_SQL, Some(voice_version))
-                .await?;
-            trim_versions(&tx, TRIM_PROMPT_VERSIONS_SQL, prompt_revision).await?;
-            trim_versions(&tx, TRIM_VOICE_VERSIONS_SQL, voice_revision).await?;
+            let prompt_revision = PROMPT.write(&tx, expected.0, &prompt, &reason, now).await?;
+            let voice_revision = VOICE.write(&tx, expected.1, &voice, &reason, now).await?;
             let result = json!({
                 "name": name,
                 "version": version,

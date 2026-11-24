@@ -4,15 +4,59 @@ use super::{
     ensure_receipt_running, integer, json, named, string, trim_versions, write_receipt,
 };
 
+/// A singleton setting with a revision and a bounded version history: the system prompt,
+/// voice and context. Each write is a compare-and-set on the revision, one version row
+/// and a trim, inside the caller's transaction.
+pub(super) struct Setting {
+    /// Binds value, updated, expected revision; returns the new revision.
+    pub update: &'static str,
+    /// Binds revision, value, reason, updated.
+    pub insert_version: &'static str,
+    /// Binds the oldest revision kept.
+    pub trim: &'static str,
+    /// The error when the revision moved.
+    pub conflict: &'static str,
+}
+
+impl Setting {
+    /// Moves the setting from `expected` to the next revision with `value`, records the
+    /// version and trims the history. Returns the new revision.
+    pub(super) async fn write(
+        &self,
+        tx: &Tx,
+        expected: i64,
+        value: &str,
+        reason: &str,
+        now: i64,
+    ) -> Result<i64> {
+        let update = vec![P::Text(value.into()), P::Integer(now), P::Integer(expected)];
+        let rows = tx.execute(self.update, Some(update)).await?.rows;
+        let revision = integer(rows.first().context(self.conflict)?, 0)?;
+        let version = vec![
+            P::Integer(revision),
+            P::Text(value.into()),
+            P::Text(reason.into()),
+            P::Integer(now),
+        ];
+        tx.execute(self.insert_version, Some(version)).await?;
+        trim_versions(tx, self.trim, revision).await?;
+        Ok(revision)
+    }
+}
+
 pub(super) const PROMPT_SQL: &str =
     "SELECT revision, prompt, updated FROM system_prompt WHERE singleton = 1";
-pub(super) const UPDATE_PROMPT_SQL: &str = r"
-    UPDATE system_prompt SET revision = revision + 1, prompt = ?, updated = ?
-    WHERE singleton = 1 AND revision = ?
-    RETURNING revision";
-pub(super) const INSERT_PROMPT_VERSION_SQL: &str = r"
-    INSERT INTO prompt_versions(revision, prompt, reason, updated) VALUES (?, ?, ?, ?)";
-pub(super) const TRIM_PROMPT_VERSIONS_SQL: &str = "DELETE FROM prompt_versions WHERE revision < ?";
+/// The system prompt as a versioned setting.
+pub(super) const PROMPT: Setting = Setting {
+    update: r"
+        UPDATE system_prompt SET revision = revision + 1, prompt = ?, updated = ?
+        WHERE singleton = 1 AND revision = ?
+        RETURNING revision",
+    insert_version: r"
+        INSERT INTO prompt_versions(revision, prompt, reason, updated) VALUES (?, ?, ?, ?)",
+    trim: "DELETE FROM prompt_versions WHERE revision < ?",
+    conflict: "system prompt revision conflict; read it again",
+};
 const PROMPT_HISTORY_SQL: &str = r"
     SELECT revision, prompt, reason, updated FROM prompt_versions
     ORDER BY revision DESC LIMIT 16";
@@ -46,25 +90,9 @@ impl Conversation {
         );
         let write = |tx: Tx| async move {
             ensure_receipt_running(&tx, receipt).await?;
-            let now = auth::now();
-            let update = vec![
-                P::Text(prompt.into()),
-                P::Integer(now),
-                P::Integer(expected_revision),
-            ];
-            let rows = tx.execute(UPDATE_PROMPT_SQL, Some(update)).await?.rows;
-            let row = rows
-                .first()
-                .context("system prompt revision conflict; read it again")?;
-            let revision = integer(row, 0)?;
-            let version = vec![
-                P::Integer(revision),
-                P::Text(prompt.into()),
-                P::Text(reason.into()),
-                P::Integer(now),
-            ];
-            tx.execute(INSERT_PROMPT_VERSION_SQL, Some(version)).await?;
-            trim_versions(&tx, TRIM_PROMPT_VERSIONS_SQL, revision).await?;
+            let revision = PROMPT
+                .write(&tx, expected_revision, prompt, reason, auth::now())
+                .await?;
             let result = json!({ "revision": revision, "saved": true, "applies": "next_turn" });
             // The prompt and its tool receipt commit together; a recovery cannot apply it twice.
             write_receipt(&tx, receipt, &result).await?;
