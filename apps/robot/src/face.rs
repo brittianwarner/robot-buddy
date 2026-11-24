@@ -1286,74 +1286,88 @@ mod tests {
         }
     }
 
-    struct Counting {
-        device: Device,
-        opens: Arc<std::sync::atomic::AtomicUsize>,
-    }
-    impl Opener for Counting {
-        type Sink = DeviceSink;
-        async fn open(&mut self) -> io::Result<DeviceSink> {
-            let sink = self.device.open().await?;
-            self.opens.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Ok(sink)
-        }
-    }
-
-    /// Regression: writes ran on the blocking pool, so a stalled port parked a
-    /// thread in `write(2)` every heartbeat and kept the old fd open. With a
-    /// single blocking thread allowed, a leaked write would starve it.
+    /// A PTY's driver can move bytes into the unread master between writes:
+    /// EAGAIN on a 1 KiB write does *not* imply that a short mood frame stalls.
+    /// Use a single frame larger than the PTY can buffer, no master reader, and
+    /// a virtual deadline. Reserve the sole blocking worker before writing.
     #[test]
     fn a_stalled_port_times_out_without_leaking_threads_and_reopens_raw() {
-        use std::sync::atomic::Ordering;
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
+        let runtime = tokio::runtime::Builder::new_current_thread()
             .max_blocking_threads(1)
             .enable_all()
             .build()
             .unwrap();
         let (pty, path) = pty();
-        // Nobody reads the master: fill the line until a write would block.
-        let filler = std::fs::OpenOptions::new()
-            .write(true)
-            .custom_flags(nix::libc::O_NOCTTY | nix::libc::O_NONBLOCK)
-            .open(&path)
-            .unwrap();
-        let block = [b'x'; 1024];
-        while (&filler).write(&block).is_ok() {}
         runtime.block_on(async {
-            let opens = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-            let (face, rx) = Face::new();
-            let opener = Counting {
-                device: Device(path.clone()),
-                opens: opens.clone(),
+            let mut device = Device(path);
+            let mut port = device.open().await.unwrap();
+            let DeviceSink::Poll((writer, _)) = &port else {
+                panic!("PTY must use nonblocking reactor I/O")
             };
-            let task = tokio::spawn(run(rx, opener));
-            face.set(Mood::Listening);
-            let started = Instant::now();
-            while opens.load(Ordering::SeqCst) == 0 {
-                tokio::time::sleep(Duration::from_millis(5)).await;
+            writer.writable().await.unwrap();
+            let (occupied, started) = tokio::sync::oneshot::channel();
+            let (release, hold) = std::sync::mpsc::channel::<()>();
+            let blocker = tokio::task::spawn_blocking(move || {
+                occupied.send(()).unwrap();
+                let _ = hold.recv();
+            });
+            started.await.unwrap();
+            // A ready, empty PTY accepts a short frame on the reactor without
+            // scheduling any blocking job. Poll once while that pool is occupied.
+            assert!(matches!(
+                futures_util::poll!(Box::pin(port.write_frame(b"ping\n"))),
+                std::task::Poll::Ready(Ok(()))
+            ));
+            tokio::time::pause();
+            {
+                let frame = vec![b'x'; 4 * 1024 * 1024];
+                let mut write = Box::pin(send(&mut port, &frame));
+                assert!(futures_util::poll!(&mut write).is_pending());
+                // Blocking workers deliberately inhibit Tokio clock auto-advance.
+                drop(release);
+                blocker.await.unwrap();
+                tokio::time::advance(WRITE_DEADLINE + Duration::from_millis(1)).await;
+                assert_eq!(write.await.unwrap_err().kind(), io::ErrorKind::TimedOut);
             }
-            // The board re-enumerates: the kernel resets the line.
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            drop(port);
+            tokio::time::resume();
             kernel_defaults(&pty.slave);
-            while opens.load(Ordering::SeqCst) < 3 {
-                assert!(started.elapsed() < Duration::from_secs(6), "no reopen");
-                let probe = tokio::task::spawn_blocking(|| 7);
-                let free = tokio::time::timeout(Duration::from_secs(1), probe).await;
-                assert_eq!(free.expect("blocking pool starved").unwrap(), 7);
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-            // Two stalls of 500 ms plus two 1 s reopen delays.
-            let elapsed = started.elapsed();
-            assert!(elapsed < Duration::from_secs(4), "{elapsed:?}");
+            let _reopened = device.open().await.unwrap();
             assert_serial_settings(&pty.slave);
-            drop(face);
-            tokio::time::timeout(Duration::from_secs(2), task)
-                .await
-                .expect("writer task stops with the face")
-                .unwrap();
         });
-        drop(filler);
-        runtime.shutdown_timeout(Duration::from_millis(100));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn writer_reopens_only_after_the_stall_deadline_and_reopen_delay() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct Stalled;
+        impl LineSink for Stalled {
+            fn write_frame(&mut self, _: &[u8]) -> impl Future<Output = io::Result<()>> + Send {
+                std::future::pending()
+            }
+        }
+        struct Opens(Arc<AtomicUsize>);
+        impl Opener for Opens {
+            type Sink = Stalled;
+            fn open(&mut self) -> impl Future<Output = io::Result<Stalled>> + Send {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Ok(Stalled))
+            }
+        }
+        let opens = Arc::new(AtomicUsize::new(0));
+        let (face, rx) = Face::new();
+        let mut driver = Box::pin(run(rx, Opens(opens.clone())));
+        assert!(futures_util::poll!(&mut driver).is_pending());
+        assert_eq!(opens.load(Ordering::SeqCst), 1);
+        for expected in 2..=3 {
+            tokio::time::advance(WRITE_DEADLINE + Duration::from_millis(1)).await;
+            assert!(futures_util::poll!(&mut driver).is_pending());
+            assert_eq!(opens.load(Ordering::SeqCst), expected - 1);
+            tokio::time::advance(REOPEN_DELAY + Duration::from_millis(1)).await;
+            assert!(futures_util::poll!(&mut driver).is_pending());
+            assert_eq!(opens.load(Ordering::SeqCst), expected);
+        }
+        drop(face);
+        driver.await;
     }
 }

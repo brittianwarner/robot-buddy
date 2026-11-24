@@ -1686,9 +1686,32 @@ mod tests {
     fn drop_log_is_rate_limited_and_emits_only_safe_metadata() {
         use tracing_subscriber::prelude::*;
 
+        // Callsite interest is process-global. With one scoped dispatcher,
+        // tracing-core's JustOne fast path uses the *registering thread's*
+        // default. A parallel producer without our subscriber can register
+        // this exact INFO callsite as disabled even while our rate limiter
+        // correctly admits all three entries. Exercise the real macros and
+        // subscriber in a single-purpose child, once, with no retries.
+        const CHILD: &str = "BUDDY_TEST_DROP_LOG_CHILD";
+        const TEST: &str = "listen::tests::drop_log_is_rate_limited_and_emits_only_safe_metadata";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", TEST, "--test-threads=1"])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success() && stdout.contains("1 passed; 0 failed"),
+                "isolated log test: {stdout}\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
         let captured: CapturedEvents = Arc::new(Mutex::new(Vec::new()));
         let subscriber = tracing_subscriber::registry().with(CaptureLayer(Arc::clone(&captured)));
-        tracing::subscriber::with_default(subscriber, || {
+        tracing::subscriber::set_global_default(subscriber).unwrap();
+        {
             let mut log = DropLog::default();
             let t0 = Instant::now();
             let idle = State::default();
@@ -1728,7 +1751,7 @@ mod tests {
                 ),
                 Some(0)
             );
-        });
+        }
 
         let events = captured.lock().unwrap();
         assert_eq!(events.len(), 3);
