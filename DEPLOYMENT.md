@@ -447,8 +447,18 @@ PORT=/dev/serial/by-id/YOUR_SERVO_ADAPTER
    }
    ```
 
-3. **Ping, then read raw centres.** With all three servos on the bus, run `servo ping`, which prints `id <n>: ok` for each. Pose the head straight ahead by hand and run `servo read`, which prints `id <n>: <steps> steps`. Those are your centres. If a joint holds torque and resists, run `servo verify` once: it turns torque off on all three before it checks anything (and fails at this stage, which is expected). Then move each joint by hand to its cable-safe limits and `read` again.
-4. **Write the real limits** in `neck.json`: measured `center`, `min_steps` and `max_steps` inside the cable-safe range and the envelope above, `invert` where a joint turns the wrong way (butty inverts yaw and pitch), and a conservative `max_speed_deg_s` and `accel`.
+3. **Ping, then read raw centres.** With all three servos on the bus, run `servo ping`, which prints `id <n>: ok` for each. Pose the head straight ahead by hand and run `servo read`, which prints `id <n>: <steps> steps`. Those are your centres. If a joint holds torque and resists, run `servo verify` once: it turns torque off on all three before it checks anything (and fails at this stage, which is expected). Then move each joint by hand to its cable-safe limits and `read` again. Move one joint at a time: the ID whose steps change is that joint, which confirms the yaw, pitch and roll IDs. While you do it, note for each joint whether its steps **rise or fall** when you move it the positive way in step 4's convention.
+4. **Write the real limits** in `neck.json`: measured `center`, `min_steps` and `max_steps` inside the cable-safe range and the envelope above, `invert` per joint by the convention below, and a conservative `max_speed_deg_s` and `accel`.
+
+   **Sign convention.** robot-buddy plans in degrees from `center`: degrees = (steps − `center`) × 360/4096, negated when `invert` is `true`, and commands convert back the same way (`Joint::degrees` and `Joint::steps` in `apps/robot/src/motion/calibration.rs`). So with `invert: false`, positive degrees are rising raw steps. No robot-buddy comment states which way positive is, but the motion code fixes it, and it is the same as butty's (butty `brain/pipbrain/motion.py`). "Viewer" is someone standing in front of Pip, facing it:
+
+   | Joint | Positive means | Where robot-buddy fixes it |
+   | --- | --- | --- |
+   | `yaw` | Pip turns toward the viewer's right (Pip's own left) | Face tracking: yaw error = −60 × x, where x is the face's position in the camera image, right positive (`Planner::step` in `apps/robot/src/motion/poses.rs`; `Observation` in `apps/robot/src/vision/mod.rs`). An outward camera sees the viewer's right on the image's left, so x < 0 and yaw goes positive; the eyes get −x for the same reason (`apps/robot/src/hardware.rs`, the vision callback). butty maps the image the same way |
+   | `pitch` | The head looks up | Tracking: pitch error = −45 × y, image y down positive, so a face above centre raises pitch. Poses: `asleep` −19.5°, `sad` −12°, `surprised` +12° (`expression` in `poses.rs`) |
+   | `roll` | The head tilts toward the viewer's right | Only the poses, because nothing observes roll: gesture `tilt` +18°, `curious` +13°, `asleep` −6° (`poses.rs`). butty uses the same values with this convention |
+
+   Two things the code cannot settle for you. First, which way raw steps run depends on how each servo is mounted, so set `invert: false` for a joint whose steps rose when you moved it the positive way in step 3, and `invert: true` if they fell. butty's `brain/config.yaml` inverts yaw and pitch for butty's build; treat that as a hint, not proof for yours. Second, the yaw and pitch tracking directions also depend on the camera image being upright; step 8 separates a wrong `invert` from an upside-down camera.
 5. **Provision EEPROM:** `servo provision … --write-eeprom`. It needs every servo already in position mode and each joint physically inside its new range. It writes the limits, relocks EEPROM, then verifies.
 6. **Verify:** `servo verify` checks position mode, the EEPROM lock and limits against `neck.json`, and each joint's position, and leaves torque off.
 7. **Centre, under supervision:** `servo center` arms the neck, moves it to `center` at your speed limit, and turns torque off when it finishes or fails.
@@ -467,7 +477,21 @@ runuser -u robot-buddy -- robot-buddy-robot servo center "$PORT" "$CAL"
 
 Never widen limits to make a failed verification pass.
 
-After verification set `BUDDY_SERVO_PORT` and `BUDDY_SERVO_CALIBRATION` to those paths. Start the service, test a small pose from the operator panel (needs a claim; the claim-free alternative is in [What needs a claim](#what-needs-a-claim)), then `systemctl stop robot-buddy` and confirm the head can relax. Remove both settings to run without the neck. Consult the firmware's own assembly documentation for wiring and ear calibration.
+8. **Check each direction, before face tracking.** Set `BUDDY_SERVO_PORT` and `BUDDY_SERVO_CALIBRATION` in `device.env`, leave `BUDDY_VISION` unset so tracking cannot move the neck yet, start the service and stand in front of Pip with the 12 V cut-off in reach. An idle Pip lowers its head into a resting pose after a while, so send `{"wake":true}` first to start from neutral. Expected motion, in the viewer's frame:
+
+   | Joint | Claim-free check | Expect |
+   | --- | --- | --- |
+   | `pitch` | As root, `printf '{"sleep":true}\n' \| socat - UNIX-CONNECT:/run/robot-buddy/control.sock`. This holds the `asleep` pose, pitch −19.5° and roll −6°, clamped 8 steps inside your limits (`Control::Sleep` in `apps/robot/src/controller.rs`). `printf '{"wake":true}\n'` the same way returns to neutral | The head looks **down** |
+   | `roll` | The same `sleep` command | The head tilts a little toward the **viewer's left** |
+   | `yaw` | No claim-free pose moves yaw: the control socket has no pose or gesture command (`apps/robot/src/input.rs`). Use the operator panel below, or face tracking once the camera is on | — |
+
+   With a claim, open the operator panel (§4 camera) and use **Hold pose** with one slider at +10 and the others at 0, then **Release**. The panel holds a pose for 5 s and clamps it to your limits. Expect: yaw +10, Pip turns toward the **viewer's right**; pitch +10, it looks **up**; roll +10, the head tilts toward the **viewer's right**.
+
+   Without a claim, check yaw with tracking after you enable the camera: stand well to the viewer's right of centre (tracking ignores less than 6° of error) and expect Pip to turn toward you; then crouch below the camera and expect it to look down. If pitch passed the `sleep` check but tracking also moves pitch the wrong way, the image is upside down: set `BUDDY_VISION_ROTATE_180=1`, do not flip `invert`. If only yaw tracks the wrong way, flip yaw's `invert`.
+
+   For any joint that moves the wrong way: stop the service, flip that joint's `invert` in `neck.json`, run `servo verify` again and restart. `invert` changes no EEPROM limit, so no new `provision` is needed.
+
+After step 8, run `systemctl stop robot-buddy` and confirm the head can relax. Remove `BUDDY_SERVO_PORT` and `BUDDY_SERVO_CALIBRATION` to run without the neck. Consult the firmware's own assembly documentation for wiring and ear calibration.
 
 ### Microphone, transcription and speaker
 
@@ -565,7 +589,7 @@ A claim needs OIDC on the server (§0). Until the robot is claimed, the operator
 | Check | Needs a claim because | Claim-free check |
 | --- | --- | --- |
 | Talking: "Hey Pip", a reply and a follow-up (§4 microphone; gate 3 wake, echo and latency) | Pip refuses utterances until it has an owner | Capture: the `arecord` test as `robot-buddy` (§4). Wake and transcription: with the service running and connected, say "Hey Pip, hello". A journal line `utterance refused` with `reason="robot not owned"` means capture, endpointing, `whisper-cli` and wake matching all worked; Pip emits an utterance only after a wake. Speaker: the `aplay` test ("Confirm on your Pip" item 10). Replies, barge-in and latency have no claim-free check |
-| Small manual neck pose on the operator panel (§4 neck; gate 2) | Operator panel | With the service stopped and the head supported, `servo center` arms the neck, moves it to `center` and turns torque off when it exits (§4). Then start the service with the neck enabled, look for `neck loop timing` in the journal, stop it and feel all three axes by hand |
+| Small manual neck pose on the operator panel (§4 neck; gate 2) | Operator panel | With the service stopped and the head supported, `servo center` arms the neck, moves it to `center` and turns torque off when it exits (§4). Then start the service with the neck enabled, look for `neck loop timing` in the journal, and check pitch and roll direction with the control-socket `sleep` pose (§4 neck bootstrap step 8). Stop it and feel all three axes by hand. Yaw direction has no claim-free check except face tracking |
 | Camera preview and live events on the operator panel (§4 camera; gate 5) | Operator panel | `rpicam-hello --list-cameras` and the 165888-byte `rpicam-vid` frame check as `robot-buddy` (§4). With `BUDDY_VISION=1` and the service running, `camera inference active` in the journal. Tracking direction: watch the eyes and neck follow a face. There is no claim-free image preview |
 | Gallery enroll and Forget (gate 5) | Operator panel | None |
 | Operator panel auth (gate 5) | `403` for a claimed robot from a wrong origin | Wrong or missing password returns `401` before the claim check, and the right password on an unclaimed robot returns the `403` above |
