@@ -1027,17 +1027,29 @@ mod tests {
         termios::tcsetattr(fd, SetArg::TCSANOW, &t).unwrap();
     }
 
-    #[expect(
-        clippy::useless_conversion,
-        reason = "cfgetospeed is a u32 on Apple targets and a BaudRate on Linux"
-    )]
     fn assert_serial_settings(fd: &impl std::os::fd::AsFd) {
         use termios::{LocalFlags, OutputFlags};
         let t = termios::tcgetattr(fd).unwrap();
-        assert_eq!(
-            u32::from(termios::cfgetospeed(&t)),
-            u32::from(BaudRate::B115200)
-        );
+        // nix exposes raw rates on BSD/macOS and BaudRate on Linux.
+        #[cfg(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd",
+            target_os = "dragonfly"
+        ))]
+        let expected = u32::from(BaudRate::B115200);
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd",
+            target_os = "dragonfly"
+        )))]
+        let expected = BaudRate::B115200;
+        assert_eq!(termios::cfgetospeed(&t), expected);
         assert!(
             !t.local_flags
                 .intersects(LocalFlags::ECHO | LocalFlags::ICANON)

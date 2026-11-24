@@ -202,3 +202,34 @@ impl Hardware for Panel {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use robot_buddy::protocol::Emotion;
+
+    #[test]
+    fn face_controls_work_without_a_neck_and_match_labels_expire() {
+        let (face, _board) = Face::new();
+        let (matches, last_match) = watch::channel(None);
+        let panel = Panel {
+            face,
+            motion: None,
+            camera: vision::Panel::default(),
+            last_match,
+        };
+        panel.control(Control::Emotion("surprised".into())).unwrap();
+        assert_eq!(panel.face.override_emotion(), Some(Emotion::Surprised));
+        assert!(panel.control(Control::Gesture("nod".into())).is_err());
+        assert!(panel.control(Control::Gesture("ear_wiggle".into())).is_ok());
+        assert!(panel.jpeg().unwrap().is_none());
+        let now = std::time::Instant::now();
+        matches.send_replace(Some((now, "Ada".into())));
+        assert_eq!(panel.recognized().unwrap().as_deref(), Some("Ada"));
+        matches.send_replace(Some((
+            now.checked_sub(Duration::from_secs(3)).unwrap(),
+            "Ada".into(),
+        )));
+        assert!(panel.recognized().unwrap().is_none());
+    }
+}
