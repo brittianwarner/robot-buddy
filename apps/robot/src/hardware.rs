@@ -42,7 +42,6 @@ impl Devices {
         let mut tasks = JoinSet::new();
         let mut controller = Peripherals::default();
         let camera = vision::Panel::default();
-        let (recognized, last_match) = watch::channel(None);
         let neck = if settings.simulate {
             None
         } else {
@@ -93,11 +92,6 @@ impl Devices {
                 tasks.spawn(async move {
                     let result =
                         vision::run(config, camera, move |observation: vision::Observation| {
-                            if let Some(name) = observation.person {
-                                recognized.send_replace(Some((std::time::Instant::now(), name)));
-                            } else if observation.target.is_none() {
-                                recognized.send_replace(None);
-                            }
                             // An outward-facing camera and the eye firmware use
                             // opposite horizontal frames (robot vs. viewer).
                             if let Some((x, y)) = observation.target {
@@ -120,7 +114,6 @@ impl Devices {
             face: face.clone(),
             motion: controller.motion.clone(),
             camera,
-            last_match,
         });
         Ok(Self {
             panel,
@@ -134,7 +127,7 @@ impl Devices {
 pub fn apply(face: &Face, motion: Option<&MotionInput>, cue: ExpressionCue) {
     face.express(cue.emotion, cue.intensity);
     if let Some(neck) = motion {
-        neck.express(cue.emotion.as_str(), cue.intensity);
+        neck.cue(cue.emotion.as_str(), cue.intensity);
     }
     if let Some(g) = cue.gesture {
         gesture(face, motion, g, cue.intensity);
@@ -157,11 +150,15 @@ pub struct Panel {
     face: Face,
     motion: Option<MotionInput>,
     camera: vision::Panel,
-    last_match: watch::Receiver<Option<(std::time::Instant, String)>>,
 }
 impl Hardware for Panel {
     fn control(&self, cmd: Control) -> Result<()> {
-        let neck = || self.motion.as_ref().context("neck disabled");
+        let neck = || {
+            self.motion
+                .as_ref()
+                .filter(|n| n.alive())
+                .context("neck disabled or disarmed")
+        };
         match cmd {
             Control::Pose { yaw, pitch, roll } => {
                 neck()?.manual([yaw, pitch, roll], Duration::from_secs(5));
@@ -195,17 +192,12 @@ impl Hardware for Panel {
         self.camera.people()
     }
     fn recognized(&self) -> Result<Option<String>> {
-        Ok(self
-            .last_match
-            .borrow()
-            .as_ref()
-            .filter(|(at, _)| at.elapsed() < Duration::from_secs(2))
-            .map(|(_, name)| name.clone()))
+        self.camera.recognized()
     }
     fn wifi_eyes(&self, pair: Option<(&str, &str)>) {
-        let (left, right) = pair.unwrap_or_default();
         // Leave a quiet zone within the round 240 px LCD and the physical bezel.
         const WIDTH: u16 = 132;
+        let (left, right) = pair.unwrap_or_default();
         if self.face.qr(left, right, WIDTH).is_err() {
             let _ = self.face.qr("", "", WIDTH);
             tracing::warn!("Wi-Fi codes exceed face board capacity");
@@ -219,27 +211,18 @@ mod tests {
     use robot_buddy::protocol::Emotion;
 
     #[test]
-    fn face_controls_work_without_a_neck_and_match_labels_expire() {
+    fn face_controls_work_without_a_neck_or_camera() {
         let (face, _board) = Face::new();
-        let (matches, last_match) = watch::channel(None);
         let panel = Panel {
             face,
             motion: None,
             camera: vision::Panel::default(),
-            last_match,
         };
         panel.control(Control::Emotion("surprised".into())).unwrap();
         assert_eq!(panel.face.override_emotion(), Some(Emotion::Surprised));
         assert!(panel.control(Control::Gesture("nod".into())).is_err());
         assert!(panel.control(Control::Gesture("ear_wiggle".into())).is_ok());
         assert!(panel.jpeg().unwrap().is_none());
-        let now = std::time::Instant::now();
-        matches.send_replace(Some((now, "Ada".into())));
-        assert_eq!(panel.recognized().unwrap().as_deref(), Some("Ada"));
-        matches.send_replace(Some((
-            now.checked_sub(Duration::from_secs(3)).unwrap(),
-            "Ada".into(),
-        )));
         assert!(panel.recognized().unwrap().is_none());
     }
 }
