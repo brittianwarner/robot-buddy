@@ -2,7 +2,7 @@
 # Benchmark-only shim for Variant 2 (warm resident whisper-server).
 # Implements the exact stdin-WAV / stdout-text contract invoked by
 # apps/robot/src/listen/io.rs:
-#   <whisper> -m <model> -l en -t 2 -np -nt -f -
+#   <whisper> -m <model> -l en -t 2 -np -nt -of /dev/null -f -
 #
 # Because listen/io.rs clears child env (retaining PATH and HOME), the loopback
 # endpoint defaults to http://127.0.0.1:8178/inference and may be overridden via

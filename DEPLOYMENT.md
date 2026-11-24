@@ -278,6 +278,8 @@ Open `http://127.0.0.1:8091/` locally; Basic auth username `operator`, password 
 
 ## 5. Hardware bring-up checklist, upgrades and recovery
 
+Include speaker alerts and music in the negative wake set, not just room noise and conversation. An ARM64 fixture with the selected classifier crossed the busy threshold on an artificial two-tone signal. That identifies a test case, not a false-trigger rate for the assembled robot. Disable acoustic interruption if playback or alerts wake Pip during the physical check.
+
 Before leaving a robot unattended, record the binary revision/checksum, OS and model versions, calibration file revision, and outcomes on **that robot**.
 
 **Open release gates:** verify physical servo calibration and torque release, wake accuracy and echo rejection, tracking/recognition accuracy, and latency under simultaneous camera inference and 50 Hz neck motion. Follow the [loaded Pip measurement procedure](docs/performance-pip.md) (driven by `scripts/pip-perf.py`) and the release qualification gates in [docs/testing-pip-release.md](docs/testing-pip-release.md). The M4 Pro benchmark starts with a submitted transcript and uses simulated audio I/O; its numbers do not measure endpointing, Whisper model startup, an acoustic wake, or audible playback.

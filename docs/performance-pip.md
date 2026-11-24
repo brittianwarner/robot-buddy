@@ -93,7 +93,7 @@ Run all three variants back-to-back on the same Pi 5, same room position, same p
 
 Uses the shipped defaults without modification:
 - `END_FRAMES = 40` (800 ms VAD trailing silence in `apps/robot/src/listen/vad.rs`)
-- Cold per-clip `/usr/local/bin/whisper-cli -m <model> -l en -t 2 -np -nt -f -`
+- Cold per-clip `/usr/local/bin/whisper-cli -m <model> -l en -t 2 -np -nt -of /dev/null -f -`. The explicit output base enables transcript stdout with piped input on v1.9.6; no output-file format is enabled.
 
 ```sh
 sudo systemctl restart robot-buddy
@@ -118,7 +118,7 @@ Tests eliminating per-utterance `whisper-cli` spawn and ggml model-load latency 
 
 1. Build `whisper-server` from the same reviewed `whisper.cpp` release as `whisper-cli` and install to `/usr/local/bin/whisper-server`.
 2. Install both benchmark-only scripts with mode `0755`:
-   - `scripts/pip-perf-whisper-shim.sh` → `/usr/local/bin/pip-perf-whisper-shim.sh` (accepts the exact `whisper-cli -m <model> -l en -t 2 -np -nt -f -` arguments under `env_clear()`, refuses non-loopback URLs, forwards stdin WAV to `http://127.0.0.1:8178/inference`, and cleans up its `PrivateTmp` temp file on exit).
+   - `scripts/pip-perf-whisper-shim.sh` → `/usr/local/bin/pip-perf-whisper-shim.sh` (accepts the same CLI arguments under `env_clear()`, refuses non-loopback URLs, forwards stdin WAV to `http://127.0.0.1:8178/inference`, and cleans up its `PrivateTmp` temp file on exit).
    - `scripts/pip-perf-warm-whisper-exec.sh` → `/usr/local/bin/pip-perf-warm-whisper-exec.sh` (external `ExecStart=` wrapper avoiding inline systemd `$` expansion: starts `whisper-server` inside the same cgroup, waits for loopback readiness, runs `/usr/local/bin/robot-buddy-robot`, and terminates `whisper-server` cleanly on exit).
 3. Add a temporary benchmark-only drop-in pointing `ExecStart=` at the wrapper and `BUDDY_LISTEN_WHISPER` at the shim:
 
