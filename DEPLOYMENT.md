@@ -217,7 +217,7 @@ This announces a fixed offline status locally, not model replies. Ordinary speec
 
 ### Camera, gallery and operator controls
 
-With the service stopped check `rpicam-hello --list-cameras` and `rpicam-vid --nopreview -t 1000 --width 320 --height 240 --framerate 15 --codec yuv420 -o /dev/null`. Use the `pi-vision` binary; matching occurs in-process with CPU OpenCV. Install the authorized [YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) 2023mar ONNX model for detection. Only for opt-in recognition also install the matching [SFace](https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface) 2021dec model. Fetch the actual LFS object, not its text pointer. No external vision worker is required.
+With the service stopped check `rpicam-hello --list-cameras`. Then check `rpicam-vid --nopreview --frames 1 -t 0 --width 384 --height 288 --framerate 15 --codec yuv420 -o - | wc -c`: a full packed frame is **165888 bytes**. Use the `pi-vision` binary; matching occurs in-process with CPU OpenCV. Install the authorized YuNet 2023mar ONNX model for detection. Only for opt-in recognition also install SFace 2021dec. The [vision guide](apps/robot/src/vision/README.md) gives pinned upstream revisions, checksums and a private recognition fixture test. Fetch the actual LFS object, not its text pointer. No external vision worker is required.
 
 ```ini
 BUDDY_VISION=1
