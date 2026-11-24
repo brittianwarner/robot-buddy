@@ -1239,12 +1239,45 @@ async function runSoak(stack, manifest, { durationSec, intervalSec, includeVisio
   }
 
   const startWall = Date.now();
+  const startIso = new Date(startWall).toISOString();
   const deadline = startWall + durationSec * 1000;
   const micToStarted = [];
   const startedToAudio = [];
   const micToAudio = [];
   const micToCompleted = [];
-  const samples = [stack.sampleMetrics()];
+  const sampleWithPeripherals = async () => {
+    const base = stack.sampleMetrics();
+    let servoSnap = null;
+    let camSnap = null;
+    try {
+      const s = await stack.periph.servoState();
+      const joints = Object.values(s.joints ?? {});
+      servoSnap = {
+        goal_frames_count: s.goal_frames_count ?? 0,
+        cadence_hz: s.cadence_hz ?? 0,
+        all_torque_on: joints.length === 3 && joints.every((j) => j.torque === 1),
+        torques: joints.map((j) => j.torque),
+        limit_violations: s.limit_violations ?? 0,
+        checksum_errors: s.checksum_errors ?? 0,
+      };
+    } catch {}
+    try {
+      const c = await stack.periph.cameraStatus();
+      camSnap = { frames_sent: c.frames_sent ?? 0 };
+    } catch {}
+    const logNow = stack.parseLogTelemetry();
+    return {
+      ...base,
+      wall_ms: Date.now(),
+      servo: servoSnap,
+      camera: camSnap,
+      motion_ticks_log: logNow.motion_20ms.total_ticks,
+      motion_missed_log: logNow.motion_20ms.total_missed,
+      neck_stopped_errors: logNow.health.neck_motion_stopped_errors,
+      vision_frames_log: logNow.health.vision_frames_max,
+    };
+  };
+  const samples = [await sampleWithPeripherals()];
   let turnsAttempted = 0;
   let turnsSucceeded = 0;
   let generatedWakeTurns = 0;
@@ -1350,7 +1383,7 @@ async function runSoak(stack, manifest, { durationSec, intervalSec, includeVisio
       } catch {}
     }
 
-    samples.push(stack.sampleMetrics());
+    samples.push(await sampleWithPeripherals());
 
     // Inject periodic network proxy drop fault during soak.
     if (Date.now() >= nextFaultAt.network && deadline - Date.now() > 45_000) {
@@ -1389,9 +1422,10 @@ async function runSoak(stack, manifest, { durationSec, intervalSec, includeVisio
       log(
         `soak progress: ${Math.round((Date.now() - startWall) / 1000)}s/${durationSec}s ` +
           `turns=${turnsSucceeded}/${turnsAttempted} (wake=${generatedWakeTurns}, human_followup=${humanFollowupTurns}, express=${expressTurns}) ` +
+          `ticks=${latest?.motion_ticks_log ?? '?'} goals=${latest?.servo?.goal_frames_count ?? '?'} torque_on=${latest?.servo?.all_torque_on ?? '?'} ` +
+          `vframes=${latest?.vision_frames_log ?? '?'} ` +
           `robot_rss=${latest?.robot?.rss_kib ? (latest.robot.rss_kib / 1024).toFixed(1) : '?'}MiB ` +
-          `children_rss=${latest?.robot_children?.rss_kib != null ? (latest.robot_children.rss_kib / 1024).toFixed(1) : '?'}MiB ` +
-          `fds=${latest?.robot?.fds ?? '?'} failures=${failures.length}`,
+          `fds=${latest?.robot?.fds ?? '?'} neck_stops=${latest?.neck_stopped_errors ?? '?'} failures=${failures.length}`,
       );
     }
 
@@ -1403,7 +1437,9 @@ async function runSoak(stack, manifest, { durationSec, intervalSec, includeVisio
     }
   }
 
-  const elapsedSec = Math.round((Date.now() - startWall) / 1000);
+  const endWall = Date.now();
+  const endIso = new Date(endWall).toISOString();
+  const elapsedSec = Math.round((endWall - startWall) / 1000);
   const servoBounds = await stack.periph.servoAssertBounds({});
   const servoState = await stack.periph.servoState();
   const servoGoalsAll = (await stack.periph.servoEvents('goals', 0, 10000)).events ?? [];
@@ -1411,6 +1447,35 @@ async function runSoak(stack, manifest, { durationSec, intervalSec, includeVisio
   const camStatus = await stack.periph.cameraStatus();
   const wStatus = await stack.periph.whisperStatus();
   const logTelemetry = stack.parseLogTelemetry();
+
+  // Sustained progress verification across first half, second half, and final sample.
+  const firstSample = samples[0];
+  const midSample = samples[Math.floor(samples.length / 2)];
+  const lastSample = samples[samples.length - 1];
+  const expectedTicks50Hz = Math.round(elapsedSec * 50);
+  const expectedWindows5s = Math.floor(elapsedSec / 5);
+  const minExpectedTicks = Math.floor(expectedTicks50Hz * 0.9);
+  const minExpectedWindows = Math.max(1, Math.floor(expectedWindows5s * 0.88));
+  const goalFramesStart = firstSample?.servo?.goal_frames_count ?? 0;
+  const goalFramesMid = midSample?.servo?.goal_frames_count ?? 0;
+  const goalFramesEnd = lastSample?.servo?.goal_frames_count ?? 0;
+  const goalFramesDelta = goalFramesEnd - goalFramesStart;
+  const torqueDroppedSamples = samples.filter((s) => s.servo && !s.servo.all_torque_on).length;
+  const sustainedServoProgress =
+    goalFramesDelta >= minExpectedTicks &&
+    goalFramesMid > goalFramesStart &&
+    goalFramesEnd > goalFramesMid &&
+    torqueDroppedSamples === 0;
+  const sustainedMotionLogProgress =
+    logTelemetry.motion_20ms.total_ticks >= minExpectedTicks &&
+    logTelemetry.motion_20ms.windows >= minExpectedWindows &&
+    logTelemetry.health.neck_motion_stopped_errors === 0 &&
+    logTelemetry.health.neck_disarmed_errors === 0;
+  const visionFramesStart = firstSample?.vision_frames_log ?? 0;
+  const visionFramesMid = midSample?.vision_frames_log ?? 0;
+  const visionFramesEnd = lastSample?.vision_frames_log ?? 0;
+  const sustainedVisionProgress =
+    !visionFrame || (visionFramesMid > visionFramesStart && visionFramesEnd > visionFramesMid);
 
   const robotRss = growthStats(samples.map((s) => s.robot?.rss_kib), 1024);
   const childrenRss = growthStats(samples.map((s) => s.robot_children?.rss_kib), 1024);
@@ -1423,6 +1488,13 @@ async function runSoak(stack, manifest, { durationSec, intervalSec, includeVisio
   const cgroupOomVals = samples.map((s) => s.cgroup_memory?.oom_kill).filter((x) => typeof x === 'number');
 
   const soakSummary = {
+    clocks: {
+      started_at_iso: startIso,
+      ended_at_iso: endIso,
+      started_epoch_ms: startWall,
+      ended_epoch_ms: endWall,
+      elapsed_s: elapsedSec,
+    },
     duration_requested_s: durationSec,
     duration_elapsed_s: elapsedSec,
     turns_attempted: turnsAttempted,
@@ -1453,11 +1525,26 @@ async function runSoak(stack, manifest, { durationSec, intervalSec, includeVisio
     file_descriptors_growth: {
       robot: robotFds,
     },
-    motion_20ms: logTelemetry.motion_20ms,
+    motion_20ms: {
+      ...logTelemetry.motion_20ms,
+      expected_ticks_50hz: expectedTicks50Hz,
+      min_required_ticks_90pct: minExpectedTicks,
+      expected_windows_5s: expectedWindows5s,
+      min_required_windows: minExpectedWindows,
+      tick_coverage_pct: expectedTicks50Hz > 0 ? Math.round((logTelemetry.motion_20ms.total_ticks / expectedTicks50Hz) * 1000) / 10 : null,
+      neck_motion_stopped_errors: logTelemetry.health.neck_motion_stopped_errors,
+      neck_disarmed_errors: logTelemetry.health.neck_disarmed_errors,
+      neck_stop_reasons: logTelemetry.health.neck_stop_reasons,
+      sustained_motion_log_progress: sustainedMotionLogProgress,
+    },
     panics: logTelemetry.panics,
     camera: {
       active_fixture: visionFrame ? path.basename(visionFrame.path) : null,
       frames_sent: camStatus.frames_sent ?? camStatus.frames_emitted ?? null,
+      vision_frames_log_start: visionFramesStart,
+      vision_frames_log_mid: visionFramesMid,
+      vision_frames_log_end: visionFramesEnd,
+      sustained_vision_progress: sustainedVisionProgress,
       preview_checks_ok: cameraPreviewOk,
       preview_checks_total: cameraPreviewChecks,
     },
@@ -1465,7 +1552,14 @@ async function runSoak(stack, manifest, { durationSec, intervalSec, includeVisio
       bounds_ok: Boolean(servoBounds.ok),
       limit_violations: servoState.limit_violations ?? 0,
       eeprom_lock_violations: servoState.eeprom_lock_violations ?? 0,
+      checksum_errors: servoState.checksum_errors ?? 0,
       distinct_goals_written: distinctServoGoals,
+      goal_frames_start: goalFramesStart,
+      goal_frames_mid: goalFramesMid,
+      goal_frames_end: goalFramesEnd,
+      goal_frames_delta: goalFramesDelta,
+      torque_dropped_samples: torqueDroppedSamples,
+      sustained_servo_progress: sustainedServoProgress,
     },
     active_whisper_processes: wStatus.active_count ?? 0,
     sample_count: samples.length,
@@ -1476,7 +1570,9 @@ async function runSoak(stack, manifest, { durationSec, intervalSec, includeVisio
     turnsSucceeded === turnsAttempted &&
     failures.length === 0 &&
     logTelemetry.panics.total === 0 &&
-    logTelemetry.motion_20ms.total_ticks > 0 &&
+    sustainedMotionLogProgress &&
+    sustainedServoProgress &&
+    sustainedVisionProgress &&
     Boolean(servoBounds.ok) &&
     (servoState.limit_violations ?? 0) === 0 &&
     distinctServoGoals >= 2 &&
@@ -1486,7 +1582,7 @@ async function runSoak(stack, manifest, { durationSec, intervalSec, includeVisio
     (robotFds.peak == null || robotFds.peak < 256);
 
   record(
-    `continuous conversation soak (${durationSec}s): 100% turns, 0 panics, active camera + 50Hz neck ticks, bounded memory/FD growth`,
+    `continuous conversation soak (${durationSec}s): 100% turns, 0 panics, sustained 50Hz neck + camera across full duration, bounded memory/FD growth`,
     soakOk,
     soakSummary,
   );
@@ -1562,9 +1658,11 @@ function renderMarkdown(report) {
       '',
       '## Continuous Conversation Soak Summary',
       '',
-      `- Duration: ${s.duration_elapsed_s}s / ${s.duration_requested_s}s`,
-      `- Turns: ${s.turns_succeeded}/${s.turns_attempted} (generated_wake=${s.generated_wake_turns}, human_recorded_followup=${s.human_recorded_followup_turns}, express=${s.express_turns_verified}, failures=${s.failures.length})`,
+      `- Clocks: start=\`${s.clocks?.started_at_iso ?? 'unknown'}\` (${s.clocks?.started_epoch_ms ?? 'n/a'}), end=\`${s.clocks?.ended_at_iso ?? 'unknown'}\` (${s.clocks?.ended_epoch_ms ?? 'n/a'}), elapsed=${s.duration_elapsed_s}s / ${s.duration_requested_s}s`,
+      `- Turns: ${s.turns_succeeded}/${s.turns_attempted} (wake=${s.generated_wake_turns}, human_recorded_followup=${s.human_recorded_followup_turns}, express=${s.express_turns_verified}, failures=${s.failures.length})`,
       `- Faults survived: ${s.network_faults_injected} TLS proxy blackholes, ${s.server_engine_restarts_injected} BOTH server+rivet-engine 3.1.1 restarts`,
+      `- Sustained 50 Hz motion: ticks=${s.motion_20ms?.total_ticks} / expected~${s.motion_20ms?.expected_ticks_50hz} (${s.motion_20ms?.tick_coverage_pct}%), windows=${s.motion_20ms?.windows} / expected~${s.motion_20ms?.expected_windows_5s}, missed=${s.motion_20ms?.total_missed}, skipped_slots=${s.motion_20ms?.total_skipped_slots}, neck_stops=${s.motion_20ms?.neck_motion_stopped_errors}, reasons=${JSON.stringify(s.motion_20ms?.neck_stop_reasons ?? [])}`,
+      `- Sustained servo PTY: goal_frames ${s.servo.goal_frames_start} -> ${s.servo.goal_frames_mid} -> ${s.servo.goal_frames_end} (delta=${s.servo.goal_frames_delta}), torque_dropped_samples=${s.servo.torque_dropped_samples}, distinct_goals=${s.servo.distinct_goals_written}, limit_violations=${s.servo.limit_violations}, checksum_errors=${s.servo.checksum_errors}`,
       `- Timing endpoints (ms):`,
       `  - mic_inject -> turn.started: p50=${s.timing_endpoints_ms.mic_inject_to_turn_started.p50}, p95=${s.timing_endpoints_ms.mic_inject_to_turn_started.p95}, max=${s.timing_endpoints_ms.mic_inject_to_turn_started.max}`,
       `  - turn.started -> first_audio: p50=${s.timing_endpoints_ms.turn_started_to_first_audio.p50}, p95=${s.timing_endpoints_ms.turn_started_to_first_audio.p95}, max=${s.timing_endpoints_ms.turn_started_to_first_audio.max}`,
@@ -1579,8 +1677,7 @@ function renderMarkdown(report) {
       `  - server RSS: start=${mg.server_rss.start}, end=${mg.server_rss.end}, peak=${mg.server_rss.peak}, delta=${mg.server_rss.delta}`,
       `  - rivet-engine RSS: start=${mg.engine_rss.start}, end=${mg.engine_rss.end}, peak=${mg.engine_rss.peak}, delta=${mg.engine_rss.delta}`,
       `- Robot FD growth: start=${s.file_descriptors_growth.robot.start}, end=${s.file_descriptors_growth.robot.end}, peak=${s.file_descriptors_growth.robot.peak}, delta=${s.file_descriptors_growth.robot.delta}`,
-      `- Camera during soak: fixture=${s.camera.active_fixture}, frames=${s.camera.frames_sent}, previews=${s.camera.preview_checks_ok}/${s.camera.preview_checks_total}`,
-      `- Servo during soak: bounds_ok=${s.servo.bounds_ok}, limit_violations=${s.servo.limit_violations}, distinct_goals=${s.servo.distinct_goals_written}`,
+      `- Camera during soak: fixture=${s.camera.active_fixture}, frames_sent=${s.camera.frames_sent}, vision_frames_log=${s.camera.vision_frames_log_start} -> ${s.camera.vision_frames_log_mid} -> ${s.camera.vision_frames_log_end}, previews=${s.camera.preview_checks_ok}/${s.camera.preview_checks_total}`,
     );
   }
   return `${lines.join('\n')}\n`;
@@ -1651,11 +1748,17 @@ if (import.meta.main) {
     // Parse 50 Hz motion periodic telemetry & panic counts before final stop.
     logTelemetry = stack.parseLogTelemetry();
     record(
-      'runtime health: 0 panics and valid 50 Hz neck actuator ticks recorded',
-      logTelemetry.panics.total === 0 && logTelemetry.motion_20ms.total_ticks > 0,
+      'runtime health: 0 panics, 0 neck worker stops, and valid 50 Hz neck actuator ticks recorded',
+      logTelemetry.panics.total === 0 &&
+        logTelemetry.health.neck_motion_stopped_errors === 0 &&
+        logTelemetry.health.neck_disarmed_errors === 0 &&
+        logTelemetry.motion_20ms.total_ticks > 0,
       {
         panics: logTelemetry.panics,
         motion_20ms: logTelemetry.motion_20ms,
+        neck_motion_stopped_errors: logTelemetry.health.neck_motion_stopped_errors,
+        neck_disarmed_errors: logTelemetry.health.neck_disarmed_errors,
+        neck_stop_reasons: logTelemetry.health.neck_stop_reasons,
       },
     );
 

@@ -301,6 +301,10 @@ export function parseLogTelemetry(workDir) {
   let serverPanics = 0;
   let cameraErrors = 0;
   let neckDisarmedErrors = 0;
+  let neckMotionStoppedErrors = 0;
+  const neckStopReasons = [];
+  let visionWindows = 0;
+  let visionFramesMax = 0;
   let neuralWakeFallbackWarnings = 0;
   let neuralWakeLoaded = false;
 
@@ -314,6 +318,21 @@ export function parseLogTelemetry(workDir) {
   for (const line of robotText.split('\n')) {
     if (isPanic(line)) robotPanics += 1;
     if (line.includes('neck disarmed')) neckDisarmedErrors += 1;
+    if (
+      line.includes('neck motion stopped') ||
+      line.includes('neck worker panicked') ||
+      line.includes('could not confirm neck torque off')
+    ) {
+      neckMotionStoppedErrors += 1;
+      if (neckStopReasons.length < 10) {
+        neckStopReasons.push(line.trim().slice(0, 260));
+      }
+    }
+    if (line.includes('camera inference active')) {
+      visionWindows += 1;
+      const vf = kvNum(line, 'vision_frames');
+      if (vf != null) visionFramesMax = Math.max(visionFramesMax, vf);
+    }
     if (line.includes('camera stopped') || line.includes('camera error')) cameraErrors += 1;
     if (line.includes('local wake model unavailable; falling back')) {
       neuralWakeFallbackWarnings += 1;
@@ -380,7 +399,11 @@ export function parseLogTelemetry(workDir) {
     },
     health: {
       camera_errors: cameraErrors,
+      vision_windows: visionWindows,
+      vision_frames_max: visionFramesMax,
       neck_disarmed_errors: neckDisarmedErrors,
+      neck_motion_stopped_errors: neckMotionStoppedErrors,
+      neck_stop_reasons: neckStopReasons,
       neural_wake_fallback_warnings: neuralWakeFallbackWarnings,
       neural_wake_log_seen: neuralWakeLoaded,
     },
