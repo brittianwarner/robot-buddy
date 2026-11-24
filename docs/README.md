@@ -4,7 +4,7 @@ Start with the [README](../README.md). To bring up hardware, go to [DEPLOYMENT.m
 
 ## Bring-up and release
 
-- [DEPLOYMENT.md](../DEPLOYMENT.md): physical Pi 5 bring-up, from hardware and firmware to the go/no-go checklist, troubleshooting and rollback. §0 lists what comes from butty, what you create, the one decision to make with Brittian (own backend or his), OIDC owner sign-in (needed before Pip talks), and the "Confirm on your Pip" checks
+- [DEPLOYMENT.md](../DEPLOYMENT.md): physical Pi 5 bring-up, from hardware and firmware to the go/no-go checklist, troubleshooting and rollback. §0 lists what comes from butty, what you create, what you need from Brittian (repository access, and the decision to run your own backend or reuse his, which then takes the identity file, two URLs and an accepted sign-in account), OIDC owner sign-in (needed before Pip talks), and the "Confirm on your Pip" checks
 - [README: butty and robot-buddy](../README.md#butty-and-robot-buddy): how this Rust port differs from ToschLogic's butty (Python brain), and the Bookworm/Trixie binary choice
 - [testing-pip-release.md](testing-pip-release.md): evidence a Pip release candidate needs, and the asset-dependent checks run so far
 - [performance-pip.md](performance-pip.md): on-device acoustic and hardware-budget benchmark (`scripts/pip-perf.py`) and its provisional thresholds

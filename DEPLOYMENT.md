@@ -24,12 +24,15 @@ Nothing from butty is copied into this repository ([NOTICE.md](NOTICE.md)).
 - **Or an OpenAI-compatible endpoint.** Set `AI_PROVIDER=openai_compatible` and `AI_BASE_URL`, plus `AI_API_KEY` if your endpoint needs one. Spoken replies then need `TTS_API_KEY=<your-openrouter-key>`, because the server reuses `AI_API_KEY` for speech only with `AI_PROVIDER=openrouter`.
 - The server secrets and this robot's identity, from `init` and `provision` in §1.
 
-### Decide with Brittian: reuse his backend, or run your own
+### What you need from Brittian
 
-This is the only question that needs Brittian. Everything else in this guide comes from this repository, your butty checkout, or your own Pip.
+robot-buddy is Brittian's repository. What you need from him is this list and nothing more. Everything else in this guide comes from this repository, your butty checkout, or your own Pip.
+
+1. **Access to the robot-buddy GitHub repository** (<https://github.com/brittianwarner/robot-buddy>, private), or a copy of it. §2 shows how to get the source onto the Pi either way.
+2. **The decision: run your own backend, or reuse his.** If you reuse his, he also gives you this robot's identity file, his two public URLs and a sign-in account his OIDC provider accepts (below).
 
 - **Run your own backend.** You need a domain and a public-CA certificate for two names ([TLS in front of the server](#tls-in-front-of-the-server) has a Caddy recipe). Run `init` fresh in §1, point the two HTTPS names at a TLS proxy in front of `:8080` (`BUDDY_PUBLIC_URL`) and `:6420` (`BUDDY_PUBLIC_RIVET_URL`), and set up OIDC (below).
-- **Reuse Brittian's running backend.** Brittian runs `provision` with his issuer key and sends you two things: this robot's device identity file, privately (it holds the robot's private key), and his two public URLs, `BUDDY_PUBLIC_URL` (registration) and `BUDDY_PUBLIC_RIVET_URL` (Rivet). His OIDC is already configured, so you claim by signing in through his provider. On the Pi, set `BUDDY_SERVER_URL` to his `BUDDY_PUBLIC_URL` and install the identity file (§3); those are the only two values the robot reads for its server (`apps/robot/src/config.rs`, [infra/device.env.example](infra/device.env.example)). The robot learns the Rivet URL from the server at enrollment, so you need it only to check that the Pi can reach it. You need no access to his host and never the issuer key. Skip §1, and do not run `init` or `provision` yourself.
+- **Reuse Brittian's running backend.** Brittian runs `provision` with his issuer key and sends you this robot's device identity file, privately (it holds the robot's private key), and his two public URLs, `BUDDY_PUBLIC_URL` (registration) and `BUDDY_PUBLIC_RIVET_URL` (Rivet). His OIDC is already configured, so you claim by signing in through his provider. That only works with an account his provider accepts: for example, if his OIDC client is a Google OAuth app in testing mode, he adds your Google account as a test user. Agree which account you will sign in with when you decide. On the Pi, set `BUDDY_SERVER_URL` to his `BUDDY_PUBLIC_URL` and install the identity file (§3); those are the only two values the robot reads for its server (`apps/robot/src/config.rs`, [infra/device.env.example](infra/device.env.example)). The robot learns the Rivet URL from the server at enrollment, so you need it only to check that the Pi can reach it. You need no access to his host and never the issuer key. Skip §1, and do not run `init` or `provision` yourself.
 
 **Set up OIDC owner sign-in before bring-up.** The server starts with `OIDC_ISSUER` empty (`apps/server/src/config.rs`), and Pip still enrolls and connects. But then nobody can claim the robot, and an unclaimed Pip does not talk or open its operator panel:
 
@@ -221,7 +224,7 @@ sudo apt-get install build-essential git curl cmake ninja-build clang libclang-d
 # Rust through rustup (https://rustup.rs), then the pinned toolchain from rust-toolchain.toml.
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
 . "$HOME/.cargo/env"
-git clone --branch feat/pip-hardware <robot-buddy repository URL> robot-buddy
+git clone --branch feat/pip-hardware https://github.com/brittianwarner/robot-buddy.git robot-buddy  # private: needs your GitHub access (§0)
 (cd robot-buddy && rustup toolchain install 1.100.0 --profile minimal --component rustfmt,clippy && rustc --version)  # expect rustc 1.100.0
 # Use a fresh directory on a drive with space to compile; -j2 limits peak memory.
 git clone --depth 1 --branch 4.10.0 https://github.com/opencv/opencv.git opencv-4.10.0
@@ -246,6 +249,18 @@ cargo build -j2 --release --locked -p robot-buddy-robot --features pi-vision,onn
 ldd target/release/robot-buddy-robot | grep opencv  # paths under /opt/robot-buddy/opencv-4.10/lib
 sha256sum target/release/robot-buddy-robot          # record it; it will not match the soaked Trixie ELF
 ```
+
+The `git clone` over HTTPS asks for your GitHub credentials (your GitHub username and a personal access token as the password), because the repository is private. **Without GitHub on the Pi**, copy the source from a machine that has a checkout, and run the block above without its `git clone` line:
+
+```sh
+# On the machine with the checkout. A bundle carries only committed files, so no .env, secrets/ or identity file.
+git bundle create robot-buddy.bundle feat/pip-hardware
+scp robot-buddy.bundle pi@pip.local:
+# On the Pi:
+git clone --branch feat/pip-hardware robot-buddy.bundle robot-buddy
+```
+
+Or copy the working tree with `rsync -a --exclude target --exclude node_modules --exclude secrets --exclude '.env' --exclude '.env.*' --exclude '*.identity.json' --exclude '*.key' ./ pi@pip.local:robot-buddy/` from the checkout root. Keep those excludes: the Pi never needs the server secrets or the issuer key.
 
 If building for another **matching Bookworm Pi**, deploy the contents of that OpenCV prefix at the same absolute path, including SONAME symlinks (`tar`/`rsync -a`), then install the same linker entry, run `ldconfig` and inspect `ldd` **on the target**. This path does not require `libopencv-dev` 4.6 or a copied Trixie system library. Install the ONNX Runtime for optional neural wake separately (§4).
 
@@ -277,7 +292,7 @@ cargo build --locked --release -p robot-buddy-robot --target aarch64-unknown-lin
 
 ## 3. Prepare the Pi and install the service
 
-Flash **Raspberry Pi OS Lite (64-bit) Bookworm** (the default), or Trixie if you chose the soaked ELF in §2. For the default native build, flash and boot the Pi first, then run the §2 build on it. Enable SSH on a trusted provisioning network. The Wi-Fi interface must support AP mode under NetworkManager. Keep initial access over Ethernet if you can. Run the administrative steps below as root. If the Pi previously ran butty's Python brain, stop its `pip.service` (`systemctl disable --now pip.service`). Two processes must never own the mic, serial ports or camera at the same time.
+Flash **Raspberry Pi OS Lite (Legacy, 64-bit), Bookworm** (the default). Raspberry Pi Imager now lists Bookworm under "Legacy". Flash Trixie instead only if you chose the soaked ELF in §2. After first boot, `cat /etc/os-release` must show `VERSION_CODENAME=bookworm` (or `trixie` for the soaked ELF), as in "Confirm on your Pip" item 3. For the default native build, flash and boot the Pi first, then run the §2 build on it. Enable SSH on a trusted provisioning network. The Wi-Fi interface must support AP mode under NetworkManager. Keep initial access over Ethernet if you can. Run the administrative steps below as root. If the Pi previously ran butty's Python brain, stop its `pip.service` (`systemctl disable --now pip.service`). Two processes must never own the mic, serial ports or camera at the same time.
 
 ```sh
 apt-get update
@@ -389,6 +404,8 @@ The base unit has a 256 MiB budget and 128 tasks. The drop-in adds `video` and s
   To flash it from a Mac or the Pi:
 
   ```sh
+  sudo apt install pipx             # on the Pi: Raspberry Pi OS Lite does not ship pipx (on a Mac: brew install pipx)
+  pipx ensurepath                   # then open a new shell so ~/.local/bin is on PATH
   pipx install platformio           # or: uv tool install platformio. Plain pip install fails on Bookworm (PEP 668)
   cd <butty checkout>/firmware
   pio run                           # build the default pip-face env
