@@ -19,6 +19,8 @@ jobs:
       - run: bun run format:check && bun run check && bun run lint && bun run test
       # The robot's feature profile (no actor runtime, no Rig): unit tests, not only a check.
       - run: bun run test:robot-features
+      # Full Pip robot feature profile (pi-vision, onnx-wake) tests using the installed OpenCV/clang packages.
+      - run: cargo test --locked --all-features -p robot-buddy-robot
       # Owns an isolated engine on BUDDY_TEST_ENGINE_PORT (+1, +10) and a mock model on
       # BUDDY_TEST_MODEL_PORT, and fails if anything still listens afterwards.
       - run: bun run test:integration

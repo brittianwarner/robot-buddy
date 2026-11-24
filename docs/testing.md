@@ -15,14 +15,15 @@ and wall time. `-- --from <step>` resumes at a step.
 
 ## Suites
 
-All-features check and lint now require OpenCV development headers/libraries, libclang and pkg-config. For default-profile robot tests (including mock camera, motor bus, face-board PTY and local speech controls), `cargo test -p robot-buddy-robot --locked` needs no OpenCV or models. The full Pi build and asset-dependent acceptance checks are in [DEPLOYMENT.md](../DEPLOYMENT.md).
+All-features check, lint and robot tests require OpenCV development headers/libraries, libclang and pkg-config. For default-profile robot tests (including mock camera, motor bus, face-board PTY and local speech controls), `cargo test -p robot-buddy-robot --locked` needs no OpenCV or models. The full Pi build and asset-dependent acceptance checks are in [DEPLOYMENT.md](../DEPLOYMENT.md).
 
 | Command | Runs in CI | Needs | Proves |
 | --- | --- | --- | --- |
 | `bun run format:check`, `bun run check`, `bun run lint` | yes | Rust toolchain | Formatting, type check of every target, Clippy with `-D warnings`. |
 | `bun run lint:pedantic` | via `lint` | Rust toolchain | Clippy pedantic with the four noisy lints allowed. `[workspace.lints.clippy]` already enables the same set, so `bun run lint` (`-D warnings`) gates it; this script only spells it out. |
-| `bun run test` | yes | Rust toolchain | Unit tests plus the offline integration-test crates below. Tests that need an engine are `#[ignore]`d here. |
+| `bun run test` | yes | Rust toolchain | Unit tests plus the offline integration-test crates below (default features). Tests that need an engine are `#[ignore]`d here. |
 | `bun run test:robot-features` | yes | Rust toolchain | `cargo test -p robot-buddy --no-default-features --locked`: the shared crate's tests in the feature profile the robot links (no actor runtime, no Rig). |
+| `cargo test --locked --all-features -p robot-buddy-robot` | yes | Rust toolchain, OpenCV dev packages, libclang, pkg-config | Full Pip robot feature profile (`pi-vision`, `onnx-wake`) unit tests alongside default workspace tests; asset-dependent vision/wake tests remain `#[ignore]`d. |
 | `bun run test:integration` | yes | Network once (engine download), free ports | Four engine-backed test binaries, one after another: the actor scenarios (`actors`), plus `core_sql_counts`, `core_retention` and `core_logs`, against a real Rivet engine, including output-event fixtures captured from the actor and the version 1 history upgrade. Ends with each suite's wall time. Timing limits are reported, not enforced (see [timing limits](#timing-limits)). |
 | `cargo build --release`, `cargo bench --no-run` | yes | Rust toolchain | Release builds link; the three benches in `crates/buddy/Cargo.toml` compile (`autobenches = false`, so `benches/legacy_sentences.rs` is only a module of `sentences`). |
 | `bun tests/early-player.mjs` | yes | Chromium (`bunx playwright install chromium`) | The lab voice player plays streamed PCM and stops on demand. Offline and deterministic. |
