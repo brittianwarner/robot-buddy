@@ -111,7 +111,11 @@ impl Serial {
                     }
                     thread::sleep(Duration::from_micros(200));
                 }
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => (),
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {
+                    if expired {
+                        return Err(ReplyError::Timeout);
+                    }
+                }
                 Err(e) => return Err(ReplyError::Other(e.into())),
             }
         }
@@ -325,6 +329,13 @@ mod tests {
         assert!(matches!(
             driver.read_reply(&req, &mut out, expired),
             Err(ReplyError::Timeout)
+        ));
+        // Draining after the deadline is bounded: unparseable buffered noise ends as oversize.
+        std::fs::write(&buffered, [0x55u8; 4096]).unwrap();
+        let mut driver = Serial(File::open(&buffered).unwrap(), IO_TIMEOUT);
+        assert!(matches!(
+            driver.read_reply(&req, &mut out, expired),
+            Err(ReplyError::Other(_))
         ));
         // A corrupt buffered reply still fails closed after the deadline.
         let mut corrupt = packet(2, 0, &[1]).unwrap();
