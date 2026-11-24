@@ -1412,7 +1412,11 @@ async fn restart_interrupts_streams_and_fails_closed_on_unresolved_tools() -> Re
 
     // Stopped inside the effect: the new process resumes the ready checkpoint, finds the
     // intent without a receipt and fails closed instead of running the effect again.
-    let done = tool.events.wait_terminal(&tool.turn, WAIT).await?;
+    tool.events.wait_terminal(&tool.turn, WAIT).await?;
+    // The new registry can emit its second start before the client resubscribes.
+    // A terminal push is not evidence that this socket saw the entire sequence.
+    tool.events.pull().await?;
+    let done = tool.events.of_turn(&tool.turn);
     assert_eq!(
         kinds(&done),
         [
