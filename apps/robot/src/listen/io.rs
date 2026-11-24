@@ -218,9 +218,23 @@ async fn run_recognizer(mut cmd: Command, pcm: &[i16]) -> Result<String> {
 impl Recognizer for Config {
     async fn transcript(&self, pcm: &[i16]) -> Result<String> {
         let mut cmd = local_command(&self.whisper);
+        // `-of /dev/null` keeps whisper.cpp >= 1.8 from defaulting `--output-file` to `-`
+        // (which suppresses segment stdout printing without an `-o*` flag) while never
+        // opening an output file on either older or newer releases.
         cmd.arg("-m")
             .arg(&self.model)
-            .args(["-l", "en", "-t", "2", "-np", "-nt", "-f", "-"])
+            .args([
+                "-l",
+                "en",
+                "-t",
+                "2",
+                "-np",
+                "-nt",
+                "-of",
+                "/dev/null",
+                "-f",
+                "-",
+            ])
             .stdin(Stdio::piped());
         run_recognizer(cmd, pcm).await
     }
