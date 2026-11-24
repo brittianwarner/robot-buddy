@@ -63,7 +63,6 @@ pub const WAIT: Duration = Duration::from_secs(20);
 pub struct Harness {
     pub endpoint: String,
     pub engine_port: u16,
-    pub model_port: u16,
     pub run_dir: PathBuf,
     pub mock: Arc<Mock>,
     runtime: tokio::runtime::Runtime,
@@ -176,7 +175,6 @@ impl Harness {
         let harness = Self {
             endpoint: format!("http://127.0.0.1:{engine_port}"),
             engine_port,
-            model_port,
             run_dir,
             mock,
             runtime,
@@ -1305,6 +1303,7 @@ impl Events {
 
     /// One raw `Replay` page after `after`, exactly as the actor returns it.
     pub async fn replayed(&self, after: i64) -> Result<Vec<OutputEvent>> {
+        REPLAYS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let page = self
             .conversation
             .send(Call {
@@ -1436,6 +1435,10 @@ pub fn init_tracing() {
         .with_test_writer()
         .try_init();
 }
+
+/// `Replay` calls the event streams made, including their 250 ms catch-up polls. The SQL
+/// count test charges these to the harness: how many run depends on wall-clock gaps.
+pub static REPLAYS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Fixed turn ID and sequence in the output event fixtures.
 pub const GOLDEN_TURN: &str = "0195f0a2-7c1e-7d2b-9a40-3f1c2b8e9d10";

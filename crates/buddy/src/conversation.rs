@@ -13,13 +13,15 @@ use crate::{
     auth,
     db::{BATCH_TX_TIMEOUT, Db, Tx, bot_key, integer, named, named_for, params, string},
     model::{Delta, Model, ToolCall},
-    protocol::{BUSY_ERROR, Busy, Call, Command, Connection, OutputEvent},
+    protocol::{
+        BUSY_ERROR, Busy, Call, Command, Connection, OkReply, OutputEvent, SpokenAnswerReply,
+        SubmitReply,
+    },
 };
 use anyhow::{Context, Result, bail, ensure};
 use async_trait::async_trait;
-use rivetkit::{
-    BindParam as P, ColumnValue as V, SqliteDbExt, SqliteTransaction, action, prelude::*,
-};
+pub use harness::RECENT_TURNS_SQL;
+use rivetkit::{BindParam as P, ColumnValue as V, action, prelude::*};
 use serde_json::{Value, json};
 use std::{
     sync::{
@@ -77,7 +79,7 @@ const DRAIN_RETRY_BASE: Duration = Duration::from_millis(100);
 /// Attempts to mark a failed turn failed before the next drain must reconcile it.
 const FINISH_ATTEMPTS: u32 = 3;
 /// `PRAGMA user_version` once this code's schema, seeds and factory adoption are applied.
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 /// The schema version and whether a trigger of an older layout is present. Both readable
 /// before any table exists.
 const SCHEMA_STATE_SQL: &str = r"
@@ -85,7 +87,7 @@ const SCHEMA_STATE_SQL: &str = r"
         EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name IN (
             'turns_history_insert', 'turns_history_update',
             'turns_search_insert', 'turns_search_update'))";
-const MARK_SCHEMA_SQL: &str = "PRAGMA user_version = 1";
+const MARK_SCHEMA_SQL: &str = "PRAGMA user_version = 2";
 /// Lifetime of the agent session the conversation signs for memory and access checks.
 const AGENT_SESSION_SECONDS: i64 = 60;
 /// Settings keep their newest versions; older ones are deleted on each write.
@@ -158,7 +160,25 @@ const FINISH_SQL: &str = r"
 const TERMINAL_EVENT_SQL: &str = "INSERT INTO events(turn_id, kind, payload) VALUES (?, ?, ?)";
 const DELETE_RUN_SQL: &str = "DELETE FROM runs WHERE turn_id = ?";
 
-const PRIOR_REQUEST_SQL: &str = "SELECT id, text FROM turns WHERE request_id = ?";
+/// The turn a request ID made, else its cancel tombstone as a row with an empty ID. Binds
+/// the request ID twice.
+const PRIOR_REQUEST_SQL: &str = r"
+    SELECT id, text FROM turns WHERE request_id = ?
+    UNION ALL SELECT '', '' FROM cancelled_requests WHERE request_id = ?
+    LIMIT 1";
+const REQUEST_TURN_SQL: &str = "SELECT id FROM turns WHERE request_id = ?";
+const TOMBSTONE_SQL: &str = r"
+    INSERT INTO cancelled_requests(request_id, created) VALUES (?, ?)
+    ON CONFLICT(request_id) DO NOTHING";
+/// Keeps the newest tombstones, as many as the turns whose events are kept.
+const TRIM_TOMBSTONES_SQL: &str = r"
+    DELETE FROM cancelled_requests WHERE rowid NOT IN (
+        SELECT rowid FROM cancelled_requests ORDER BY rowid DESC LIMIT ?)";
+const CLEAR_TOMBSTONE_SQL: &str = "DELETE FROM cancelled_requests WHERE request_id = ?";
+const INSERT_CANCELLED_TURN_SQL: &str = r"
+    INSERT INTO turns(id, request_id, text, status, created) VALUES (?, ?, ?, 'cancelled', ?)";
+/// Turn and request IDs a client sends are at most this long.
+const MAX_ID_BYTES: usize = 128;
 const BUSY_SQL: &str = "SELECT id FROM turns WHERE status IN ('queued', 'running') LIMIT 1";
 const INSERT_TURN_SQL: &str =
     "INSERT INTO turns(id, request_id, text, created) VALUES (?, ?, ?, ?)";
@@ -451,6 +471,7 @@ impl Actor for Conversation {
         if self.history_backfill {
             start_history_backfill(&ctx);
         }
+        retention::prune_if_overdue(&ctx);
         Ok(())
     }
     async fn on_before_connect(self: Arc<Self>, ctx: Ctx<Self>, p: &Connection) -> Result<()> {
@@ -757,8 +778,8 @@ impl Conversation {
         claimed: &harness::Claimed,
         stop: &CancellationToken,
     ) -> (Result<()>, Option<Halt>) {
-        let generation = self.generate(ctx, claimed, stop);
-        tokio::pin!(generation);
+        // Boxed: a turn's future holds every phase's state, too large for the stack.
+        let mut generation = Box::pin(self.generate(ctx, claimed, stop));
         let deadline = tokio::time::sleep(TURN_DEADLINE);
         tokio::pin!(deadline);
         let abort = ctx.abort_signal();
@@ -984,7 +1005,7 @@ impl Conversation {
     async fn submit(&self, ctx: &Ctx<Self>, request_id: String, text: String) -> Result<Value> {
         ensure!(
             !request_id.is_empty()
-                && request_id.len() <= 128
+                && request_id.len() <= MAX_ID_BYTES
                 && !text.trim().is_empty()
                 && text.len() <= 8192,
             "invalid turn"
@@ -993,15 +1014,50 @@ impl Conversation {
         let created = auth::now();
         let submit = |tx: Tx| async move {
             let prior = tx
-                .execute(PRIOR_REQUEST_SQL, params(&[&request_id]))
+                .execute(PRIOR_REQUEST_SQL, params(&[&request_id, &request_id]))
                 .await?
                 .rows;
-            if let Some(row) = prior.first() {
-                ensure!(
-                    string(row, 1)? == text,
-                    "request id reused with different text"
-                );
-                return Ok(json!({ "turn_id": string(row, 0)?, "duplicate": true }));
+            let tombstoned = match prior.first() {
+                Some(row) if string(row, 0)?.is_empty() => true,
+                Some(row) => {
+                    ensure!(
+                        string(row, 1)? == text,
+                        "request id reused with different text"
+                    );
+                    let turn_id = string(row, 0)?;
+                    return Ok((
+                        SubmitReply {
+                            turn_id,
+                            duplicate: true,
+                            cancelled: false,
+                        },
+                        None,
+                    ));
+                }
+                None => false,
+            };
+            if tombstoned {
+                // Cancelled before it arrived: recorded as a cancelled turn that never runs.
+                tx.execute(CLEAR_TOMBSTONE_SQL, params(&[&request_id]))
+                    .await?;
+                let turn = vec![
+                    P::Text(id.clone()),
+                    P::Text(request_id),
+                    P::Text(text),
+                    P::Integer(created),
+                ];
+                tx.execute(INSERT_CANCELLED_TURN_SQL, Some(turn)).await?;
+                let event = params(&[&id, "turn.cancelled", "{}"]);
+                let sequence = tx
+                    .execute(TERMINAL_EVENT_SQL, event)
+                    .await?
+                    .last_insert_row_id;
+                let reply = SubmitReply {
+                    turn_id: id,
+                    duplicate: false,
+                    cancelled: true,
+                };
+                return Ok((reply, sequence));
             }
             let busy = tx.execute(BUSY_SQL, None).await?.rows;
             if let Some(row) = busy.first() {
@@ -1014,11 +1070,62 @@ impl Conversation {
                 P::Integer(created),
             ];
             tx.execute(INSERT_TURN_SQL, Some(turn)).await?;
-            Ok(json!({ "turn_id": id, "duplicate": false }))
+            Ok((
+                SubmitReply {
+                    turn_id: id,
+                    duplicate: false,
+                    cancelled: false,
+                },
+                None,
+            ))
         };
-        ctx.db()
+        let (reply, cancelled) = ctx
+            .db()
             .transaction(submit, named("conversation.submit"))
-            .await
+            .await?;
+        if let Some(sequence) = cancelled {
+            let event = OutputEvent {
+                sequence,
+                turn_id: reply.turn_id.clone(),
+                kind: "turn.cancelled".into(),
+                payload: json!({}),
+            };
+            self.deliver(ctx, &event).await;
+        }
+        Ok(serde_json::to_value(reply)?)
+    }
+
+    /// Cancels the turn `request_id` made, or leaves a tombstone so its submit resolves
+    /// cancelled. Idempotent; a turn that already ended is left as it is.
+    async fn cancel_request(&self, ctx: &Ctx<Self>, request_id: &str) -> Result<()> {
+        ensure!(
+            !request_id.is_empty() && request_id.len() <= MAX_ID_BYTES,
+            "invalid request id"
+        );
+        let created = auth::now();
+        let cancel = |tx: Tx| async move {
+            let rows = tx
+                .execute(REQUEST_TURN_SQL, params(&[request_id]))
+                .await?
+                .rows;
+            if let Some(row) = rows.first() {
+                return Ok(Some(string(row, 0)?));
+            }
+            let tombstone = vec![P::Text(request_id.into()), P::Integer(created)];
+            tx.execute(TOMBSTONE_SQL, Some(tombstone)).await?;
+            let kept = Some(vec![P::Integer(retention::KEPT_TURNS)]);
+            tx.execute(TRIM_TOMBSTONES_SQL, kept).await?;
+            Ok(None)
+        };
+        let turn = ctx
+            .db()
+            .transaction(cancel, named("conversation.cancel_request"))
+            .await?;
+        if let Some(turn) = turn {
+            self.finish_turn(ctx, &turn, "cancelled", "", json!({}))
+                .await?;
+        }
+        Ok(())
     }
 
     async fn replay(&self, ctx: &Ctx<Self>, after: i64) -> Result<Value> {
@@ -1063,7 +1170,7 @@ impl Conversation {
     }
 
     async fn spoken_answer(&self, ctx: &Ctx<Self>, turn_id: String) -> Result<Value> {
-        ensure!(turn_id.len() <= 128, "invalid turn id");
+        ensure!(turn_id.len() <= MAX_ID_BYTES, "invalid turn id");
         let rows = ctx.db().query(ANSWER_SQL, params(&[&turn_id])).await?.rows;
         let row = rows
             .first()
@@ -1074,10 +1181,16 @@ impl Conversation {
             "answer outside speech budget"
         );
         let voice = self.speech_voice(ctx, &turn_id).await?;
-        Ok(json!({ "turn_id": turn_id, "text": answer, "voice": voice }))
+        let reply = SpokenAnswerReply {
+            turn_id,
+            text: answer,
+            voice,
+        };
+        Ok(serde_json::to_value(reply)?)
     }
 
     async fn history_page(&self, ctx: &Ctx<Self>, before: String) -> Result<Value> {
+        ensure!(before.len() <= MAX_ID_BYTES, "invalid history cursor");
         let cursor = params(&[&before, &before]);
         let rows = ctx.db().query(HISTORY_PAGE_SQL, cursor).await?.rows;
         let turns = rows
@@ -1106,9 +1219,14 @@ impl Handler<Call> for Conversation {
                 output
             }
             Command::Cancel { turn_id } => {
+                ensure!(turn_id.len() <= MAX_ID_BYTES, "invalid turn id");
                 self.finish_turn(&ctx, &turn_id, "cancelled", "", json!({}))
                     .await?;
-                Ok(json!({ "ok": true }))
+                Ok(serde_json::to_value(OkReply { ok: true })?)
+            }
+            Command::CancelRequest { request_id } => {
+                self.cancel_request(&ctx, &request_id).await?;
+                Ok(serde_json::to_value(OkReply { ok: true })?)
             }
             Command::Replay { after } => self.replay(&ctx, after).await,
             Command::Snapshot => self.snapshot(&ctx).await,
@@ -1172,6 +1290,75 @@ impl Handler<Call> for Conversation {
             Command::SearchHistory { query } => self.search_history(&ctx, &query).await,
             _ => bail!("command is not owned by conversation actor"),
         }
+    }
+}
+
+/// Test seam: integration tests stop a turn at a named point deterministically, instead of
+/// racing a network timeout. With no hook registered each point costs one atomic load.
+#[doc(hidden)]
+pub mod seam {
+    use std::{
+        future::Future,
+        pin::Pin,
+        sync::{
+            Mutex,
+            atomic::{AtomicU64, AtomicUsize, Ordering},
+        },
+    };
+
+    /// Where a turn may be held.
+    #[derive(Debug)]
+    pub enum Point<'a> {
+        /// A tool effect, after its intent committed and before its receipt.
+        Tool { name: &'a str, arguments: &'a str },
+        /// The spoken phase's memory search, after its voice is pinned.
+        SpokenFacts { text: &'a str },
+    }
+
+    /// What a hook runs in place of the work at its point.
+    pub type Held = Pin<Box<dyn Future<Output = anyhow::Result<serde_json::Value>> + Send>>;
+    type Hook = Box<dyn Fn(&Point<'_>) -> Option<Held> + Send + Sync>;
+
+    static HOOKS: Mutex<Vec<(u64, Hook)>> = Mutex::new(Vec::new());
+    static ACTIVE: AtomicUsize = AtomicUsize::new(0);
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+
+    /// Removes its hook when dropped.
+    #[must_use = "the hook is removed when the guard drops"]
+    pub struct Guard(u64);
+
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            let mut hooks = HOOKS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            hooks.retain(|(id, _)| *id != self.0);
+            ACTIVE.store(hooks.len(), Ordering::SeqCst);
+        }
+    }
+
+    /// Registers `hook`. It answers `Some` for the points it takes over; tests running in
+    /// parallel match on their own tool arguments or turn text.
+    pub fn hook(hook: impl Fn(&Point<'_>) -> Option<Held> + Send + Sync + 'static) -> Guard {
+        let id = NEXT.fetch_add(1, Ordering::SeqCst);
+        let mut hooks = HOOKS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        hooks.push((id, Box::new(hook)));
+        ACTIVE.store(hooks.len(), Ordering::SeqCst);
+        Guard(id)
+    }
+
+    /// The work a hook substitutes at `point`, if any.
+    pub(crate) fn at(point: &Point<'_>) -> Option<Held> {
+        if ACTIVE.load(Ordering::SeqCst) == 0 {
+            return None;
+        }
+        HOOKS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .find_map(|(_, hook)| hook(point))
     }
 }
 
@@ -1245,8 +1432,8 @@ mod tests {
         assert_eq!(
             (SCHEMA_VERSION, hex.as_str()),
             (
-                1,
-                "5112e83bda725a9215a50d6a8b9a75d87aa6e2b2f9704055fd0b10adb28d2f3d"
+                2,
+                "c161de27b76fa4e408d086fff4cf579878785d134877ed66bac90ba14d1bc54b"
             ),
             "conversation.sql changed: raise SCHEMA_VERSION and MARK_SCHEMA_SQL"
         );

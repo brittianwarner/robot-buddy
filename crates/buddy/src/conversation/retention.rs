@@ -3,7 +3,9 @@
 //! rows are kept.
 //!
 //! A pass runs on its own task every [`PRUNE_EVERY`] finished turns and deletes in
-//! transactions of a bounded number of rows, so no commit grows with history. A cursor
+//! transactions of a bounded number of rows, so no commit grows with history. The count
+//! lives in memory, and an actor that sleeps after a few turns may never reach it, so every
+//! start also probes for rows past the window ([`OVERDUE_SQL`]) and runs a pass if any remain. A cursor
 //! older than the window replays from the oldest kept event. A pruned turn has no speech
 //! chunks, so a speech poll for it reads `done` and nothing old is spoken again.
 use super::{Conversation, Ctx, Db, Ordering, P, Result, Tx, named_for};
@@ -33,6 +35,14 @@ pub const PRUNE_SPEECH_SQL: &str = r"
 pub const PRUNE_TOOLS_SQL: &str = r"
     DELETE FROM tool_calls WHERE rowid IN (
         SELECT rowid FROM tool_calls WHERE turn_id < ? ORDER BY turn_id LIMIT 512)";
+/// Whether any table still holds rows of turns older than the oldest kept turn. Binds
+/// `KEPT_TURNS - 1`. Each probe stops at its first row of the turn ID index.
+pub const OVERDUE_SQL: &str = r"
+    WITH cutoff(id) AS (SELECT id FROM turns ORDER BY id DESC LIMIT 1 OFFSET ?)
+    SELECT EXISTS(SELECT 1 FROM events, cutoff WHERE events.turn_id < cutoff.id)
+        OR EXISTS(SELECT 1 FROM speech_chunks, cutoff WHERE speech_chunks.turn_id < cutoff.id)
+        OR EXISTS(SELECT 1 FROM speech_turns, cutoff WHERE speech_turns.turn_id < cutoff.id)
+        OR EXISTS(SELECT 1 FROM tool_calls, cutoff WHERE tool_calls.turn_id < cutoff.id)";
 const PRUNE_SQL: [&str; 4] = [
     PRUNE_EVENTS_SQL,
     PRUNE_CHUNKS_SQL,
@@ -78,28 +88,58 @@ impl Conversation {
             return;
         }
         self.since_prune.store(0, Ordering::SeqCst);
-        let task_ctx = ctx.clone();
-        ctx.register_task(async move {
-            let _awake = task_ctx.keep_awake_region();
-            let mut deleted = 0;
-            while !task_ctx.aborted() {
-                match prune_batch(&task_ctx).await {
-                    Ok(0) => break,
-                    Ok(rows) => deleted += rows,
-                    Err(error) => {
-                        // The next pass continues; nothing depends on old rows going.
-                        tracing::warn!(deleted, %error, "retention pass paused");
-                        return;
-                    }
-                }
-                // Turn writes and actions run between batches.
-                tokio::task::yield_now().await;
-            }
-            if deleted > 0 {
-                tracing::debug!(deleted, "retention pass finished");
-            }
-        });
+        start_pass(ctx, false);
     }
+}
+
+/// At start: runs the pass an earlier lifetime owed, if rows past the window remain.
+pub(super) fn prune_if_overdue(ctx: &Ctx<Conversation>) {
+    start_pass(ctx, true);
+}
+
+/// Runs a retention pass on its own task, batch by batch. With `probe`, only when
+/// [`OVERDUE_SQL`] finds rows past the window.
+fn start_pass(ctx: &Ctx<Conversation>, probe: bool) {
+    let task_ctx = ctx.clone();
+    ctx.register_task(async move {
+        let _awake = task_ctx.keep_awake_region();
+        if probe {
+            let offset = Some(vec![P::Integer(KEPT_TURNS - 1)]);
+            match task_ctx.db().query(OVERDUE_SQL, offset).await {
+                Ok(result) if overdue(&result.rows) => {}
+                Ok(_) => return,
+                Err(error) => {
+                    tracing::warn!(%error, "retention probe failed");
+                    return;
+                }
+            }
+        }
+        let mut deleted = 0;
+        while !task_ctx.aborted() {
+            match prune_batch(&task_ctx).await {
+                Ok(0) => break,
+                Ok(rows) => deleted += rows,
+                Err(error) => {
+                    // The next pass continues; nothing depends on old rows going.
+                    tracing::warn!(deleted, %error, "retention pass paused");
+                    return;
+                }
+            }
+            // Turn writes and actions run between batches.
+            tokio::task::yield_now().await;
+        }
+        if deleted > 0 {
+            tracing::debug!(deleted, "retention pass finished");
+        }
+    });
+}
+
+/// Reads [`OVERDUE_SQL`]'s one boolean.
+fn overdue(rows: &[Vec<V>]) -> bool {
+    matches!(
+        rows.first().and_then(|row| row.first()),
+        Some(V::Integer(1))
+    )
 }
 
 #[cfg(test)]
@@ -234,5 +274,31 @@ mod tests {
             count(&db, "SELECT count(DISTINCT turn_id) FROM events"),
             KEPT_TURNS
         );
+    }
+
+    fn is_overdue(db: &Connection) -> bool {
+        db.query_row(OVERDUE_SQL, [KEPT_TURNS - 1], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn the_start_probe_finds_rows_past_the_window_until_a_pass_clears_them() {
+        let kept = usize::try_from(KEPT_TURNS).unwrap();
+        assert!(!is_overdue(&database(0)));
+        assert!(!is_overdue(&database(kept)));
+        let db = database(kept + 3);
+        assert!(is_overdue(&db));
+        while prune(&db) > 0 {}
+        assert!(!is_overdue(&db));
+        // A pass interrupted after the events went still leaves work the probe sees.
+        db.execute(
+            "INSERT INTO speech_chunks(turn_id, chunk_index, text) VALUES ('turn-0000', 1, 'x')",
+            [],
+        )
+        .unwrap();
+        assert!(is_overdue(&db));
+        assert!(overdue(&[vec![V::Integer(1)]]));
+        assert!(!overdue(&[vec![V::Integer(0)]]));
+        assert!(!overdue(&[]));
     }
 }

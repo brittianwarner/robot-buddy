@@ -166,12 +166,16 @@ impl Handler<Call> for Bot {
                         Some(vec![P::Integer(auth::now())]),
                     )
                     .await?;
-                ctx.db()
+                // A replayed nonce is a refusal, not a constraint error.
+                let inserted = ctx
+                    .db()
                     .execute(
-                        "INSERT INTO challenges(nonce,expires) VALUES(?,?)",
+                        "INSERT INTO challenges(nonce,expires) VALUES(?,?) \
+                         ON CONFLICT(nonce) DO NOTHING RETURNING nonce",
                         Some(vec![P::Text(nonce), P::Integer(expires)]),
                     )
                     .await?;
+                ensure!(!inserted.rows.is_empty(), "challenge already used");
                 Ok(json!({"consumed":true}))
             }
             Command::CheckAccess => Ok(json!({"authorized":true})),

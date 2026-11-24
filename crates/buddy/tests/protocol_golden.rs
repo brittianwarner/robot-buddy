@@ -15,7 +15,10 @@ use robot_buddy::{
     auth::{Certificate, Challenge, Session},
     context::ContextConfig,
     persona::PersonaDraft,
-    protocol::{Bundle, Call, Command, Connection, EnrollmentRequest, OutputEvent, SpeechRequest},
+    protocol::{
+        Bundle, Busy, Call, Command, Connection, EnrollmentRequest, OkReply, OutputEvent,
+        SpeechChunkReply, SpeechRequest, SpokenAnswerReply, SubmitReply, busy_turn,
+    },
     voice::{Latency, SpeechRule, Synthesis, Voice, VoiceConfig, WordStyle},
 };
 use serde::{Serialize, de::DeserializeOwned};
@@ -80,6 +83,7 @@ fn command_type(command: &Command) -> &'static str {
         Command::SearchMemory { .. } => "search_memory",
         Command::Submit { .. } => "submit",
         Command::Cancel { .. } => "cancel",
+        Command::CancelRequest { .. } => "cancel_request",
         Command::Replay { .. } => "replay",
         Command::Remember { .. } => "remember",
         Command::Forget { .. } => "forget",
@@ -197,6 +201,9 @@ fn all_commands() -> Vec<Command> {
         Command::Cancel {
             turn_id: TURN.into(),
         },
+        Command::CancelRequest {
+            request_id: "req-1".into(),
+        },
         Command::Replay { after: 41 },
         Command::Remember {
             key: "favorite_color".into(),
@@ -228,7 +235,7 @@ fn every_command_variant_has_a_golden_fixture() {
         assert_eq!(wire["type"], kind, "wire tag for {kind}");
         golden(&format!("command.{kind}"), command);
     }
-    assert_eq!(seen.len(), 29, "one fixture per Command variant");
+    assert_eq!(seen.len(), 30, "one fixture per Command variant");
 }
 
 #[test]
@@ -437,6 +444,115 @@ fn messages_a_client_reads_ignore_additive_fields() {
             accepts::<Command>(&name),
             "{name} rejects an additive field"
         );
+    }
+}
+
+fn speech_voice() -> Value {
+    json!({"config": voice_config(), "revision": 2, "updated": 1_790_000_000,
+        "voice_id": "voice-id", "name": "Will"})
+}
+
+/// Action replies: what the conversation actor writes as the action output, in the shapes
+/// `SubmitReply`, `OkReply`, `SpeechChunkReply` and `SpokenAnswerReply` decode.
+#[test]
+fn action_replies_are_pinned() {
+    let submit = |duplicate, cancelled| SubmitReply {
+        turn_id: TURN.into(),
+        duplicate,
+        cancelled,
+    };
+    golden("reply.submit", &submit(false, false));
+    golden("reply.submit.duplicate", &submit(true, false));
+    golden("reply.submit.cancelled", &submit(false, true));
+    golden("reply.ok", &OkReply { ok: true });
+    golden(
+        "reply.speech_chunk.ready",
+        &SpeechChunkReply::Ready {
+            index: 0,
+            text: "Hello there.".into(),
+            voice: speech_voice(),
+        },
+    );
+    golden("reply.speech_chunk.pending", &SpeechChunkReply::Pending);
+    golden("reply.speech_chunk.done", &SpeechChunkReply::Done);
+    golden(
+        "reply.spoken_answer",
+        &SpokenAnswerReply {
+            turn_id: TURN.into(),
+            text: "Hello there.".into(),
+            voice: speech_voice(),
+        },
+    );
+    golden(
+        "busy",
+        &Busy {
+            turn_id: TURN.into(),
+        },
+    );
+}
+
+#[test]
+fn replies_older_clients_read_are_unchanged() {
+    // A submit that was not cancelled first has exactly the reply older servers sent.
+    let reply = command_fixture("reply.submit");
+    assert_eq!(reply, json!({"turn_id": TURN, "duplicate": false}));
+    assert_eq!(command_fixture("reply.ok"), json!({"ok": true}));
+    let chunk = command_fixture("reply.speech_chunk.ready");
+    assert_eq!(chunk["state"], "ready");
+    assert_eq!(
+        command_fixture("reply.speech_chunk.pending"),
+        json!({"state": "pending"})
+    );
+    assert_eq!(
+        command_fixture("reply.speech_chunk.done"),
+        json!({"state": "done"})
+    );
+    // An older reply without `cancelled` still decodes.
+    let old: SubmitReply = serde_json::from_value(json!({"turn_id": TURN, "duplicate": true}))
+        .expect("older submit reply");
+    assert!(old.duplicate && !old.cancelled);
+    for name in [
+        "reply.submit",
+        "reply.submit.cancelled",
+        "reply.speech_chunk.ready",
+        "reply.spoken_answer",
+        "busy",
+    ] {
+        assert!(
+            serde_json::from_value::<Value>(with_additive_field(name)).is_ok(),
+            "{name}"
+        );
+    }
+    assert!(accepts::<SubmitReply>("reply.submit"));
+    assert!(accepts::<OkReply>("reply.ok"));
+    assert!(accepts::<SpeechChunkReply>("reply.speech_chunk.ready"));
+    assert!(accepts::<SpeechChunkReply>("reply.speech_chunk.pending"));
+    assert!(accepts::<SpokenAnswerReply>("reply.spoken_answer"));
+    assert!(accepts::<Busy>("busy"));
+}
+
+/// The busy refusal as `rivetkit-client` renders it over an actor connection. The real
+/// engine round trip is `actors.rs::running_turn_pins_voice_rejects_busy_and_cancels_cleanly`.
+#[test]
+fn busy_refusals_name_the_open_turn() {
+    let metadata = serde_json::to_string(&Busy {
+        turn_id: TURN.into(),
+    })
+    .expect("ser");
+    let refused = format!("RPC Error(user/busy): Another turn is still open., {metadata}");
+    assert_eq!(busy_turn(&refused).as_deref(), Some(TURN));
+    // Additive metadata fields from a newer server still name the turn.
+    let newer = format!(
+        "RPC Error(user/busy): Another turn is still open., {{\"turn_id\":\"{TURN}\",\"x\":1}}"
+    );
+    assert_eq!(busy_turn(&newer).as_deref(), Some(TURN));
+    for other in [
+        "RPC Error(user/busy): Another turn is still open., null",
+        "RPC Error(actor/internal_error): busy, {\"turn_id\":\"t\"}",
+        "RPC Error(user/busy): Connection closed: gone",
+        "timed out",
+    ] {
+        assert_eq!(busy_turn(other), None, "{other}");
     }
 }
 

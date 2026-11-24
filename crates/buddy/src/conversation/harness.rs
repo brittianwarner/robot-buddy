@@ -27,7 +27,8 @@ const CHECKPOINT_SQL: &str = r"
     RETURNING turn_id";
 const SAVED_RUN_SQL: &str = "SELECT version, state, preamble FROM runs WHERE turn_id = ?";
 /// The latest completed turns, oldest first. Served by the `turns_completed` index.
-const RECENT_TURNS_SQL: &str = r"
+/// Public for the history SQL tests and benches.
+pub const RECENT_TURNS_SQL: &str = r"
     SELECT text, answer FROM (
         SELECT id, substr(text, 1, 4000) AS text, substr(answer, 1, 6000) AS answer
         FROM turns WHERE status = 'completed'
@@ -519,8 +520,16 @@ impl Conversation {
                         name: call.name().to_string(),
                         arguments: call.arguments().to_string(),
                     };
-                    // The intent insert is guarded on the running turn.
-                    let result = self.tool(turn.ctx, turn.id, &tool).await?;
+                    // Refused without an intent: nothing ran, so nothing is unresolved.
+                    let result = if let Some(refusal) =
+                        super::tools::refused_after_web(&agent.effects, &tool.name)
+                    {
+                        tracing::warn!(tool = %tool.name, "tool refused after web results");
+                        refusal
+                    } else {
+                        // The intent insert is guarded on the running turn.
+                        self.tool(turn.ctx, turn.id, &tool).await?
+                    };
                     let known = agent.effects.iter().any(|(id, _)| *id == tool.id);
                     if !known && agent.effects.len() < MAX_EFFECTS {
                         agent.effects.push((tool.id, tool.name));
@@ -540,14 +549,24 @@ impl Conversation {
     /// Spoken phase: the tool-disabled call after tool work.
     async fn speak(&self, turn: &Turn<'_>, agent: &mut Agent) -> Result<()> {
         self.checkpoint(turn, agent, "speech_pending").await?;
-        // `begin_speech` is a transaction, so all three run to completion (`join!`, not
-        // `try_join!`): dropping it mid-flight would hold the write gate until its timeout.
-        let (persona, context, facts) = tokio::join!(
-            self.begin_speech(turn.ctx, turn.id),
-            self.context_config(turn.ctx),
-            self.search_facts(turn.ctx, turn.text),
+        // `begin_spoken` is a short local transaction, so it runs to completion: dropping it
+        // mid-flight would hold the write gate until its timeout. The memory search is a
+        // cross-actor call and stops with the turn, so a cancel frees the worker at once.
+        let facts = async {
+            let point = super::seam::Point::SpokenFacts { text: turn.text };
+            match super::seam::at(&point) {
+                Some(held) => held.await,
+                None => self.search_facts(turn.ctx, turn.text).await,
+            }
+        };
+        let (settings, facts) = tokio::join!(
+            self.begin_spoken(turn.ctx, turn.id),
+            self.interruptible(turn.id, facts),
         );
-        let final_prompt = spoken_preamble(&persona?, &context?, &facts?);
+        let (persona, context) = settings?;
+        let facts = facts?;
+        self.ensure_not_stopped(turn.id)?;
+        let final_prompt = spoken_preamble(&persona, &context, &facts);
         let request = CompletionRequest::new(turn.text)
             .messages(spoken_history(&agent.run))
             .preamble(final_prompt)

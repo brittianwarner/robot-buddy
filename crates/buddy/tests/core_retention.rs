@@ -124,3 +124,70 @@ async fn old_turns_lose_events_and_speech_but_replay_still_works() -> Result<()>
     );
     Ok(())
 }
+
+/// Turns per actor lifetime in the short-lifetime test: fewer than one retention pass of 8.
+const PER_LIFETIME: usize = 5;
+/// Eleven lifetimes of five turns: past the kept window, though no lifetime reached a pass.
+const SHORT_TURNS: usize = 55;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs the isolated engine; run with the integration environment"]
+async fn retention_catches_up_across_short_actor_lifetimes() -> Result<()> {
+    const TAG: &str = "Short lifetime retention turn";
+    init_tracing();
+    let h = harness().await;
+    let _alone = h.exclusive().await;
+    h.mock.script(TAG, |_| sse::text("Short. Done."));
+    let b = TestBot::enroll(h).await?;
+    let mut turns = Vec::with_capacity(SHORT_TURNS);
+    for lifetime in 0..SHORT_TURNS / PER_LIFETIME {
+        let mut events = b.events().await?;
+        for n in 0..PER_LIFETIME {
+            let n = lifetime * PER_LIFETIME + n;
+            let turn = b
+                .submit(&format!("short-{n}"), &format!("{TAG} {n}"))
+                .await?;
+            let done = events.wait_terminal(&turn, support::WAIT).await?;
+            ensure!(
+                support::terminal(&done).is_some_and(|e| e.event.kind == "turn.completed"),
+                "turn {n} completed"
+            );
+            turns.push(turn);
+        }
+        drop(events);
+        // A deploy: every actor stops and wakes on its next request with its storage.
+        h.swap_registry(robot_buddy::registry).await?;
+    }
+    let oldest = turns.first().context("turns")?;
+    // The wake's probe finds the rows past the window and runs the pass the in-memory
+    // counter never reached.
+    let started = Instant::now();
+    let first = loop {
+        let page = replay(&b, 0).await?;
+        let first = page.first().context("kept events")?.clone();
+        if first.turn_id != *oldest {
+            break first;
+        }
+        ensure!(
+            started.elapsed() < Duration::from_secs(20),
+            "retention never caught up after short lifetimes"
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    };
+    let index = turns.iter().position(|turn| *turn == first.turn_id);
+    ensure!(
+        index == Some(SHORT_TURNS - 50),
+        "the 50 newest turns keep their events; replay starts at {index:?}"
+    );
+    let chunk = b
+        .conv(Command::SpeechChunk {
+            turn_id: oldest.clone(),
+            index: 0,
+        })
+        .await?;
+    ensure!(
+        chunk["state"] == "done",
+        "pruned speech reads done: {chunk}"
+    );
+    Ok(())
+}

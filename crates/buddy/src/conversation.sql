@@ -58,3 +58,6 @@ CREATE TABLE IF NOT EXISTS persona_versions(name TEXT COLLATE NOCASE NOT NULL,ve
 
 CREATE TABLE IF NOT EXISTS speech_turns(turn_id TEXT PRIMARY KEY,voice TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS speech_chunks(turn_id TEXT NOT NULL,chunk_index INTEGER NOT NULL,text TEXT NOT NULL,PRIMARY KEY(turn_id,chunk_index));
+-- Request IDs cancelled before their submit arrived (CancelRequest). A later submit with the
+-- ID records a cancelled turn and deletes the row; only the newest 50 are kept.
+CREATE TABLE IF NOT EXISTS cancelled_requests(request_id TEXT PRIMARY KEY,created INTEGER NOT NULL);

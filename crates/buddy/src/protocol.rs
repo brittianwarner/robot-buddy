@@ -121,6 +121,12 @@ pub enum Command {
     Cancel {
         turn_id: String,
     },
+    /// Cancels the turn a `Submit` with this request ID made, or, before that submit
+    /// arrives, makes it resolve cancelled without running. For a submit whose reply was
+    /// lost. Replies like `Cancel`.
+    CancelRequest {
+        request_id: String,
+    },
     Replay {
         after: i64,
     },
@@ -161,6 +167,65 @@ pub const BUSY_ERROR: (&str, &str) = ("user", "busy");
 pub struct Busy {
     pub turn_id: String,
 }
+/// The open turn named by a [`BUSY_ERROR`] as `rivetkit-client` renders a refused call
+/// over an actor connection: `RPC Error(user/busy): <message>, <metadata JSON>`. The client
+/// exposes no structured error, so this is the one place that reads its text; the real
+/// engine round trip is pinned by `tests/actors.rs`. Anything else is not a busy refusal.
+#[must_use]
+pub fn busy_turn(error: &str) -> Option<String> {
+    let (group, code) = BUSY_ERROR;
+    let rest = error.strip_prefix(&format!("RPC Error({group}/{code}): "))?;
+    let metadata = &rest[rest.find('{')?..];
+    let busy: Busy = serde_json::from_str(metadata).ok()?;
+    Some(busy.turn_id)
+}
+
+// Action replies. The action output is JSON (`Call::Output`); these types are what the
+// conversation actor writes and what clients may decode it into. Each ignores fields it
+// does not know, like every other type here.
+
+/// Reply of `Submit`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubmitReply {
+    pub turn_id: String,
+    /// The request ID was already submitted: this is that turn, not a new one.
+    pub duplicate: bool,
+    /// A `CancelRequest` arrived first: the turn is cancelled and never runs. Omitted
+    /// when false, so the reply older clients read is unchanged.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cancelled: bool,
+}
+
+/// Reply of `Cancel` and `CancelRequest`: `{"ok": true}`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OkReply {
+    pub ok: bool,
+}
+
+/// Reply of `SpeechChunk`, tagged by `state`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum SpeechChunkReply {
+    /// The chunk and the voice pinned for its turn.
+    Ready {
+        index: u32,
+        text: String,
+        voice: Value,
+    },
+    /// Not committed yet: the turn is queued or running.
+    Pending,
+    /// The turn completed and has no chunk at this index.
+    Done,
+}
+
+/// Reply of `SpokenAnswer`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SpokenAnswerReply {
+    pub turn_id: String,
+    pub text: String,
+    pub voice: Value,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct EnrollmentRequest {
     pub certificate: crate::auth::Certificate,

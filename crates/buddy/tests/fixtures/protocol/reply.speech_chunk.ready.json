@@ -1,0 +1,43 @@
+{
+  "index": 0,
+  "state": "ready",
+  "text": "Hello there.",
+  "voice": {
+    "config": {
+      "delivery": "Warm, calm and close.",
+      "speech_rules": [
+        {
+          "phonemes": null,
+          "style": "whisper",
+          "text": "secret"
+        },
+        {
+          "phonemes": "P IH1 P",
+          "style": "emphasis",
+          "text": "Pip"
+        }
+      ],
+      "synthesis": {
+        "chunk_length": 300,
+        "condition_on_previous_chunks": true,
+        "early_stop_threshold": 1.0,
+        "language": "en",
+        "latency": "balanced",
+        "max_new_tokens": 1024,
+        "min_chunk_length": 50,
+        "normalize": true,
+        "normalize_loudness": true,
+        "repetition_penalty": 1.2,
+        "speed": 1.0,
+        "temperature": 0.7,
+        "top_p": 0.7,
+        "volume": 0.0
+      },
+      "voice": "will"
+    },
+    "name": "Will",
+    "revision": 2,
+    "updated": 1790000000,
+    "voice_id": "voice-id"
+  }
+}
