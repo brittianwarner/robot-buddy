@@ -134,12 +134,12 @@ AI_PROVIDER=openrouter                              # or openai_compatible
 AI_API_KEY=<your-openrouter-key>                    # create it at https://openrouter.ai/keys
 AI_MODEL=<model id, e.g. the validated z-ai/glm-5.3-flash:nitro>
 TTS_MODEL=elevenlabs/eleven-v4-turbo                # optional; enables spoken replies, uses the OpenRouter key
-OIDC_ISSUER=<https issuer URL>                      # optional; needed to claim a robot
+OIDC_ISSUER=<https issuer URL>                      # needed to claim a robot; an unclaimed Pip does not talk
 OIDC_CLIENT_ID=<client id>
 OIDC_CLIENT_SECRET=<client secret, omit for a public PKCE client>
 ```
 
-Then start the container:
+All of these go in `.env`, the only file `compose.yaml` passes to the container. After any later change to `.env`, run `docker compose up -d` again to recreate the container. Then start it:
 
 ```sh
 docker compose up --build -d
@@ -160,7 +160,7 @@ Every variable is described in [.env.example](.env.example). To try a robot with
 
 Follow **[DEPLOYMENT.md](DEPLOYMENT.md)** from top to bottom. It covers the hardware and wiring, face firmware, getting the ARM64 binary (including the exact soaked ELF), models and checksums, systemd install, enrollment and the OIDC claim, the bring-up checklist with pass thresholds, troubleshooting and rollback.
 
-Before you start, read [DEPLOYMENT.md §0](DEPLOYMENT.md#0-what-you-need-before-you-start). It lists what comes from your butty checkout (face firmware, `hey_pip.onnx`, hardware reference), what you create yourself (an OpenRouter key at <https://openrouter.ai/keys>, in `AI_API_KEY`), the one decision to make with Brittian (run your own backend, or reuse his), optional OIDC owner sign-in in three steps, and the "Confirm on your Pip" checks for things your build decides (mic, serial paths, servo IDs, audio card names, camera orientation).
+Before you start, read [DEPLOYMENT.md §0](DEPLOYMENT.md#0-what-you-need-before-you-start). It lists what comes from your butty checkout (face firmware, `hey_pip.onnx`, hardware reference), what you create yourself (an OpenRouter key at <https://openrouter.ai/keys>, in `AI_API_KEY`), the one decision to make with Brittian (run your own backend, or reuse his), OIDC owner sign-in in three steps (the server starts without it, but an unclaimed Pip refuses to talk and its operator panel returns `403`), and the "Confirm on your Pip" checks for things your build decides (mic, serial paths, servo IDs, audio card names, camera orientation).
 
 ## More
 

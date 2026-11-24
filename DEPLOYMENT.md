@@ -28,14 +28,19 @@ Nothing from butty is copied into this repository ([NOTICE.md](NOTICE.md)).
 
 This is the only question that needs Brittian. Everything else in this guide comes from this repository, your butty checkout, or your own Pip.
 
-- **Run your own backend (simplest for bring-up).** You need nothing from Brittian. Run `init` fresh in §1, point two HTTPS names you control at a TLS proxy in front of `:8080` (`BUDDY_PUBLIC_URL`) and `:6420` (`BUDDY_PUBLIC_RIVET_URL`), and leave OIDC empty until you want owner claim (below).
+- **Run your own backend (simplest for bring-up).** You need nothing from Brittian. Run `init` fresh in §1, point two HTTPS names you control at a TLS proxy in front of `:8080` (`BUDDY_PUBLIC_URL`) and `:6420` (`BUDDY_PUBLIC_RIVET_URL`), and set up OIDC (below).
 - **Reuse Brittian's running backend.** Ask Brittian for access to the host that runs the container, its `secrets/secrets.env`, the issuer key used to provision robots, the `/data` volume, DNS and TLS for the two public origins, and the OIDC app already registered for it. Do not run `init` against that deployment: it would replace its secrets.
 
-**OIDC owner sign-in is optional.** With `OIDC_ISSUER` empty the server starts without it (`apps/server/src/config.rs`) and Pip still talks; nobody can claim ownership from a phone. To turn it on with any standard provider (Google, Auth0, Okta, Keycloak and so on):
+**Set up OIDC owner sign-in before bring-up.** The server starts with `OIDC_ISSUER` empty (`apps/server/src/config.rs`), and Pip still enrolls and connects. But then nobody can claim the robot, and an unclaimed Pip does not talk or open its operator panel:
+
+- While connected, it refuses every utterance. The journal shows `utterance refused` with `reason="robot not owned"`, and the eyes flash the sorry face (`apps/robot/src/device.rs`). Pip answers only once it has an owner.
+- The operator panel on `127.0.0.1:8091` answers every request that passes its password check with `403 Robot must be connected and claimed.` (`apps/robot/src/screen/operator.rs`).
+
+Several §4 and §5 checks need the operator panel or a reply, so OIDC is part of the recommended bring-up path. [What needs a claim](#what-needs-a-claim) in §5 lists those checks, and the claim-free checks you can run first. To turn OIDC on with any standard provider (Google, Auth0, Okta, Keycloak and so on):
 
 1. Register one web application. Redirect URI: `<BUDDY_PUBLIC_URL>/auth/callback`. Scopes: `openid profile`. The server uses the authorization-code flow with PKCE S256 (`apps/server/src/claim.rs`) and needs RS256 or ES256 ID tokens (`apps/server/src/oidc.rs`). It reads only the `sub` claim.
-2. Set `OIDC_ISSUER=<issuer URL>`, `OIDC_CLIENT_ID=<client id>` and, for a confidential client, `OIDC_CLIENT_SECRET=<client secret>` in the server's `secrets/secrets.env`. The server discovers the endpoints from `<OIDC_ISSUER>/.well-known/openid-configuration` at start-up.
-3. Restart the server, complete a claim from the claim URL (§3), and run the claim checks in the §5 preflight.
+2. On the server host, set `OIDC_ISSUER=<issuer URL>`, `OIDC_CLIENT_ID=<client id>` and, for a confidential client, `OIDC_CLIENT_SECRET=<client secret>` in `.env`, the file `compose.yaml` passes to the container (`env_file: .env`). `secrets/secrets.env` is only where `init` writes its three generated values for you to copy into `.env`; the server never reads it. The server discovers the provider's endpoints from `<OIDC_ISSUER>/.well-known/openid-configuration` at start-up.
+3. Run `docker compose up -d`, which recreates the container with the new `.env`. Complete a claim from the claim URL (§3), and run the claim checks in the §5 preflight.
 
 **Web search is optional.** Create your own Brave Search API key at <https://brave.com/search/api/> and set `BRAVE_SEARCH_API_KEY=<your-brave-key>`; without it the web-search tool is off.
 
@@ -123,7 +128,7 @@ cargo run --locked -p robot-buddy-server -- provision secrets/issuer.key secrets
 On the **server host**, populate `.env` using the three values in `secrets/secrets.env` and [.env.example](.env.example). Set `BUDDY_PUBLIC_URL` and `BUDDY_PUBLIC_RIVET_URL` to two HTTPS origins reachable from the Pi. Set `AI_PROVIDER`, `AI_API_KEY`, `AI_MODEL`; for cloud speech set `TTS_MODEL=elevenlabs/eleven-v4-turbo` with an OpenRouter key.
 
 **OIDC requirements for claiming:** register `<BUDDY_PUBLIC_URL>/auth/callback` at your provider and set `OIDC_ISSUER`, `OIDC_CLIENT_ID`, and (for confidential clients) `OIDC_CLIENT_SECRET` (omit it for public PKCE clients; when set, it is sent via `client_secret_post`).
-- **Discovery availability at startup:** when `OIDC_ISSUER` is set, the server fetches `<OIDC_ISSUER>/.well-known/openid-configuration` once over HTTPS **at boot** with HTTP redirects disabled (20 s timeout). Startup fails if the discovery endpoint is unreachable, redirects, or returns an `issuer` string that does not match `OIDC_ISSUER` verbatim (including any trailing slash). Leave `OIDC_ISSUER` unset to boot without browser claiming.
+- **Discovery availability at startup:** when `OIDC_ISSUER` is set, the server fetches `<OIDC_ISSUER>/.well-known/openid-configuration` once over HTTPS **at boot** with HTTP redirects disabled (20 s timeout). Startup fails if the discovery endpoint is unreachable, redirects, or returns an `issuer` string that does not match `OIDC_ISSUER` verbatim (including any trailing slash). Leave `OIDC_ISSUER` unset to boot without browser claiming; Pip then connects but refuses to talk until it has an owner (§0).
 - **Provider capabilities:** the discovery document must publish HTTPS `authorization_endpoint`, `token_endpoint`, `userinfo_endpoint`, and `jwks_uri` (all answering without HTTP redirects). The client must support Authorization Code + PKCE (`S256`), `scope=openid profile`, `RS256` or `ES256` ID tokens carrying `kid` and `nonce`, and a `userinfo_endpoint` returning the same `sub` as the ID token.
 - **Browser redirect & error behavior:** multi-origin HTTPS redirects during sign-in (for example, federated SSO or a separate login domain) are permitted by `/claim`'s `form-action 'self' https:` policy; plaintext `http:` hops are not. If the user cancels or the IdP returns `?error=...&state=...`, `/auth/callback` verifies the login cookie and `state`, spends the transaction, clears `buddy_login`, and renders a static retry page without echoing query parameters.
 
@@ -360,7 +365,7 @@ runuser -u robot-buddy -- robot-buddy-robot servo verify "$PORT" "$CAL"
 # runuser -u robot-buddy -- robot-buddy-robot servo center "$PORT" "$CAL"
 ```
 
-After verification set `BUDDY_SERVO_PORT` and `BUDDY_SERVO_CALIBRATION` to those paths. Start the service, test a small pose, then `systemctl stop robot-buddy` and confirm the head can relax. Remove both settings to run without the neck. Consult the firmware's own assembly documentation for wiring and ear calibration.
+After verification set `BUDDY_SERVO_PORT` and `BUDDY_SERVO_CALIBRATION` to those paths. Start the service, test a small pose from the operator panel (needs a claim; the claim-free alternative is in [What needs a claim](#what-needs-a-claim)), then `systemctl stop robot-buddy` and confirm the head can relax. Remove both settings to run without the neck. Consult the firmware's own assembly documentation for wiring and ear calibration.
 
 ### Microphone, transcription and speaker
 
@@ -376,7 +381,7 @@ BUDDY_LISTEN_CHANNELS=2
 BUDDY_LISTEN_CHANNEL=0
 ```
 
-`CHANNELS` is the captured interleaved channel count, `CHANNEL` the zero-based beam index. With transcript wake, say “Hey Pip, what time is it?” and test a follow-up after the reply. **Spoken barge-in requires neural wake:** transcript mode does not transcribe playback echo to search for “Hey Pip”, even when `BUDDY_LISTEN_BARGE_IN=1`. With neural wake enabled, test an interruption during speech; set `BUDDY_LISTEN_BARGE_IN=0` if the beam/amp routing does not reject echo. The external socket still works without this listener: put only the external STT account in `pip-control` (not `robot-buddy`). Test as that account: `printf '{"wake":true}\n' | socat - UNIX-CONNECT:/run/robot-buddy/control.sock`. Do not enable two capture processes on the same microphone.
+`CHANNELS` is the captured interleaved channel count, `CHANNEL` the zero-based beam index. Pip answers only once claimed (§0); before that, use the claim-free wake check in [What needs a claim](#what-needs-a-claim). With transcript wake, say “Hey Pip, what time is it?” and test a follow-up after the reply. **Spoken barge-in requires neural wake:** transcript mode does not transcribe playback echo to search for “Hey Pip”, even when `BUDDY_LISTEN_BARGE_IN=1`. With neural wake enabled, test an interruption during speech; set `BUDDY_LISTEN_BARGE_IN=0` if the beam/amp routing does not reject echo. The external socket still works without this listener: put only the external STT account in `pip-control` (not `robot-buddy`). Test as that account: `printf '{"wake":true}\n' | socat - UNIX-CONNECT:/run/robot-buddy/control.sock`. Do not enable two capture processes on the same microphone.
 
 **Optional neural wake:** the full image includes the `onnx-wake` Cargo feature. Install an AArch64 Linux CPU build of [ONNX Runtime](https://github.com/microsoft/onnxruntime/releases). The validated build is **1.20.1**: the `runtimes/linux-arm64/native/` libraries from the `Microsoft.ML.OnnxRuntime` 1.20.1 NuGet package, which match the `ort =2.0.0-rc.9` crate's `ORT_API_VERSION=20`. Checksums are in the table below. Point `ORT_DYLIB_PATH` at the actual `libonnxruntime.so` file, not a directory, and keep `libonnxruntime_providers_shared.so` beside it. Use a local directory containing `hey_pip.onnx` from your butty checkout (`brain/models/wake/hey_pip.onnx`) plus the matching public openWakeWord `melspectrogram.onnx` and `embedding_model.onnx` frontend (`v0.5.1`). Check each file's SHA-256 against the table below; for `hey_pip.onnx` the pin is the file as of butty `c0ca680`, and a later butty commit may change it. Check each model's terms, especially for commercial use. No weights are supplied in this repository. Set e.g. `BUDDY_LISTEN_WAKE_DIR=/opt/robot-buddy/models/wake` alongside `BUDDY_LISTEN_MODEL`. This changes wake detection, not speech transcription. Validate quiet, noisy, positive and negative recorded clips against the reference before enabling it unattended; remove `BUDDY_LISTEN_WAKE_DIR` to return to transcript wake.
 
@@ -424,7 +429,7 @@ BUDDY_VISION_YUNET=/opt/robot-buddy/models/face_detection_yunet_2023mar.onnx
 #BUDDY_VISION_ROTATE_180=1
 ```
 
-The gallery belongs in the service's `0700` state directory. Use the operator panel to enroll or forget local embeddings. Frame data and recognition are not a cloud identity or authority to confirm claims. To enable the panel, put a unique `BUDDY_OPERATOR_TOKEN` (32–128 printable non-space ASCII characters, e.g. `openssl rand -hex 32`) into the root-only env file, **not** an SSH command or a URL. Restart the service. Once connected and claimed:
+The gallery belongs in the service's `0700` state directory. Use the operator panel to enroll or forget local embeddings. Frame data and recognition are not a cloud identity or authority to confirm claims. To enable the panel, put a unique `BUDDY_OPERATOR_TOKEN` (32–128 printable non-space ASCII characters, e.g. `openssl rand -hex 32`) into the root-only env file, **not** an SSH command or a URL. Restart the service. The panel works only once the robot is connected and claimed ([What needs a claim](#what-needs-a-claim) lists the claim-free camera checks):
 
 ```sh
 # From the operator's computer. Keep the same loopback host and port at both ends.
@@ -450,6 +455,23 @@ Before leaving a robot unattended, record the binary revision/checksum, OS and m
 None of this establishes motor direction, camera accuracy, acoustic wake behaviour, audible timing, thermals or memory headroom on a physical Pi. The gates below do.
 
 > **Important distinction:** Every numeric threshold in the bring-up checklist below is a **proposed engineering go/no-go threshold**, **not** observed Raspberry Pi 5 performance. Record the actual measurements from the target robot beside each gate before declaring a robot ready.
+
+### What needs a claim
+
+A claim needs OIDC on the server (§0). Until the robot is claimed, the operator panel returns `403 Robot must be connected and claimed.` and Pip refuses utterances. Checks that need neither run without a claim. Where a claim-free check exists it is listed; it covers part of the check, not all of it.
+
+| Check | Needs a claim because | Claim-free check |
+| --- | --- | --- |
+| Talking: "Hey Pip", a reply and a follow-up (§4 microphone; gate 3 wake, echo and latency) | Pip refuses utterances until it has an owner | Capture: the `arecord` test as `robot-buddy` (§4). Wake and transcription: with the service running and connected, say "Hey Pip, hello". A journal line `utterance refused` with `reason="robot not owned"` means capture, endpointing, `whisper-cli` and wake matching all worked; Pip emits an utterance only after a wake. Speaker: the `aplay` test ("Confirm on your Pip" item 10). Replies, barge-in and latency have no claim-free check |
+| Small manual neck pose on the operator panel (§4 neck; gate 2) | Operator panel | With the service stopped and the head supported, `servo center` arms the neck, moves it to `center` and turns torque off when it exits (§4). Then start the service with the neck enabled, look for `neck loop timing` in the journal, stop it and feel all three axes by hand |
+| Camera preview and live events on the operator panel (§4 camera; gate 5) | Operator panel | `rpicam-hello --list-cameras` and the 165888-byte `rpicam-vid` frame check as `robot-buddy` (§4). With `BUDDY_VISION=1` and the service running, `camera inference active` in the journal. Tracking direction: watch the eyes and neck follow a face. There is no claim-free image preview |
+| Gallery enroll and Forget (gate 5) | Operator panel | None |
+| Operator panel auth (gate 5) | `403` for a claimed robot from a wrong origin | Wrong or missing password returns `401` before the claim check, and the right password on an unclaimed robot returns the `403` above |
+| Claim, 6-digit confirmation and cancelled sign-in (gate 1) | This is the claim | None |
+| Ownership kept across reboot, upgrade and rollback (gates 1 and 6) | Needs an owner to keep | The bot ID survives without a claim; ownership cannot be checked |
+| Loaded soak (gate 4) | The load includes speech | Vision and 50 Hz neck load run without a claim; the speech part does not |
+
+Face (`face hello`, `face heartbeat`), `servo ping`, `read`, `verify`, Wi-Fi setup, enrollment and `/ready` need no claim.
 
 ### Step-by-step bring-up and go/no-go gates
 
