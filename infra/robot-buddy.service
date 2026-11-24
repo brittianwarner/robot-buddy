@@ -1,22 +1,52 @@
+# Robot Buddy client for the Raspberry Pi. Runs as the unprivileged
+# robot-buddy account; NetworkManager changes go through polkit.
+#
+# Install (as root, once):
+#   useradd --system --home-dir /var/lib/robot-buddy --shell /usr/sbin/nologin \
+#     --groups audio,dialout robot-buddy
+#   install -m 0755 robot-buddy-robot /usr/local/bin/robot-buddy-robot
+#   install -d -m 0750 -o root -g robot-buddy /etc/robot-buddy
+#   install -m 0640 -o root -g robot-buddy device.identity.json /etc/robot-buddy/
+#   install -m 0600 device.env.example /etc/robot-buddy/device.env   # then edit it
+#   install -m 0644 robot-buddy-nm.rules /etc/polkit-1/rules.d/50-robot-buddy-nm.rules
+#   install -m 0644 robot-buddy.service /etc/systemd/system/
+#   systemctl enable NetworkManager-wait-online.service
+#   systemctl daemon-reload && systemctl enable --now robot-buddy
+# The speech process writes JSON control lines to /run/robot-buddy/control.sock:
+# add its account to the robot-buddy group (usermod -aG robot-buddy <account>).
+# Upgrading from the root unit: systemd hands /var/lib/robot-buddy to the new
+# account on start, and the next Wi-Fi setup replaces the old profiles.
+
 [Unit]
 Description=Robot Buddy setup and Rivet client
-After=NetworkManager.service
-Requires=NetworkManager.service
+Wants=network-online.target NetworkManager.service
+After=network-online.target NetworkManager.service sound.target tailscaled.service
 # Restart forever, but never faster than RestartSec.
 StartLimitIntervalSec=0
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
+# READY=1 comes after the panel, face and control socket are up. The watchdog is
+# pinged from the runtime at half this interval; a wedged runtime is restarted.
+WatchdogSec=60s
+TimeoutStartSec=60s
+TimeoutStopSec=10s
+User=robot-buddy
+Group=robot-buddy
+SupplementaryGroups=audio dialout
 EnvironmentFile=/etc/robot-buddy/device.env
-# Optional ESP32 face on USB serial: set BUDDY_FACE_SERIAL=/dev/ttyACM0 in
-# device.env. Raw 115200 baud, no echo. The leading "-" keeps the service
-# starting when the face board is unplugged; the client reopens it later.
-ExecStartPre=-/bin/sh -c 'test -z "$$BUDDY_FACE_SERIAL" || stty -F "$$BUDDY_FACE_SERIAL" 115200 raw -echo'
+# Optional ESP32 face on USB serial: set BUDDY_FACE_SERIAL in device.env to its
+# /dev/serial/by-id/ path (stable across re-enumeration, unlike /dev/ttyACM0).
+# The client sets raw 115200, CLOCAL and no HUPCL itself on every open.
 ExecStart=/usr/local/bin/robot-buddy-robot
-# Control input (wake word, utterances) arrives as JSON lines on stdin.
-# Without a speech front end, stdin is /dev/null and the client keeps running.
-# To feed it from another unit, use a FIFO or socket, for example:
-#   StandardInput=socket   (with a robot-buddy.socket ListenFIFO=/run/robot-buddy/control)
+# Remove the setup hotspot if the client was killed mid-setup. "-": it is
+# usually absent.
+ExecStopPost=-/usr/bin/nmcli connection delete id robot-buddy-setup
+# Control input (wake word, utterances) arrives as JSON lines on this socket.
+# Writers may disconnect and reconnect at will. If the path is an existing FIFO,
+# it is read instead.
+Environment=BUDDY_CONTROL_SOCKET=/run/robot-buddy/control.sock
 StandardInput=null
 # stdout carries compact event lines (no conversation text) to the journal.
 StandardOutput=journal
@@ -24,14 +54,41 @@ StandardError=journal
 Restart=always
 RestartSec=3
 # Smooth audio: slightly higher CPU priority and best-effort I/O ahead of
-# background work, without real-time scheduling.
+# background work, without real-time scheduling. systemd applies these before
+# dropping to the service account.
 Nice=-5
 IOSchedulingClass=best-effort
 IOSchedulingPriority=2
+# /var/lib/robot-buddy (cache) and /run/robot-buddy (control socket, Wi-Fi
+# secret file), both owned by robot-buddy.
 StateDirectory=robot-buddy
+StateDirectoryMode=0700
+RuntimeDirectory=robot-buddy
+RuntimeDirectoryMode=0750
 UMask=0077
-# NetworkManager profile management and local port 80 require device-side privileges.
-# Run only on the robot; never put this service in the backend container.
+# The setup page listens on 10.42.0.1:80.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/robot-buddy /run/robot-buddy
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallArchitectures=native
+MemoryMax=256M
+TasksMax=128
+# Never put this service in the backend container.
 
 [Install]
 WantedBy=multi-user.target

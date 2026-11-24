@@ -1,24 +1,41 @@
 //! Linux playback for the same authenticated PCM endpoint used by the browser lab.
 //!
 //! One pooled HTTP client serves every turn. Each turn spawns a shell-free
-//! `aplay`, pipes PCM into it with a progress deadline on every write, and
-//! reports the first PCM byte and the end of playback to the session. Stop
-//! drops the task, which kills the player at once instead of draining it.
+//! `aplay` while the speech request is in flight (so the player's start-up
+//! overlaps the wait for audio), pipes PCM into it with a progress deadline
+//! on every write, and reports the first PCM byte and the end of playback to
+//! the session. Stop drops the task, which kills the player at once instead
+//! of draining it.
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use futures_util::StreamExt;
 use robot_buddy::{audio::PcmFormat, protocol::SpeechRequest};
 use std::{future::Future, process::Stdio, sync::Arc, time::Duration};
 use tokio::{
-    io::AsyncWriteExt,
+    io::{AsyncReadExt, AsyncWriteExt},
+    process::{Child, ChildStderr, ChildStdin},
     sync::mpsc,
     task::JoinHandle,
     time::{Instant, timeout},
 };
 
 const DEFAULT_BUFFER_US: u32 = 120_000;
+/// A write to the player must make progress within this long. Slow but
+/// steady reading (a full pipe draining at the sample rate) never trips it.
 const WRITE_DEADLINE: Duration = Duration::from_secs(2);
+/// Largest single write into the player's pipe.
+const WRITE_SLICE: usize = 16 * 1024;
+/// Longest silence between body chunks of the speech stream.
+const CHUNK_IDLE: Duration = Duration::from_secs(30);
 const DRAIN_DEADLINE: Duration = Duration::from_secs(10);
 const AUDIO_BUDGET: usize = 16 * 1024 * 1024;
+/// Player diagnostics kept for the journal; the rest is read and dropped.
+const STDERR_CAP: usize = 1024;
+/// The server's format (`OpenRouter` PCM). The player starts with it before
+/// the response headers arrive and is restarted only if they differ.
+const EXPECTED_FORMAT: PcmFormat = PcmFormat {
+    sample_rate: 24_000,
+    channels: 1,
+};
 
 /// `aplay` options for the I2S amplifier.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -90,6 +107,10 @@ pub struct Media {
     enabled: bool,
     make_player: PlayerFactory,
     write_deadline: Duration,
+    chunk_idle: Duration,
+    /// Start the player before the response headers. Off only in the
+    /// first-audio measurement.
+    prespawn: bool,
 }
 
 impl Media {
@@ -105,6 +126,8 @@ impl Media {
             enabled,
             make_player,
             write_deadline: WRITE_DEADLINE,
+            chunk_idle: CHUNK_IDLE,
+            prespawn: true,
         })
     }
 
@@ -116,6 +139,8 @@ impl Media {
             enabled: true,
             make_player,
             write_deadline,
+            chunk_idle: CHUNK_IDLE,
+            prespawn: true,
         }
     }
 
@@ -202,7 +227,12 @@ impl Speaker for Playback {
             if let Err(error) = result {
                 tracing::warn!(%error, played, "speech playback failed");
             }
-            let _ = events.try_send(PlaybackEvent::Finished { generation, played });
+            // Never dropped: the session must learn that playback ended, or
+            // it would show Speaking forever. Each generation sends at most
+            // two events and the session drains them between RPCs.
+            let _ = events
+                .send(PlaybackEvent::Finished { generation, played })
+                .await;
         }));
         Some(generation)
     }
@@ -232,15 +262,106 @@ impl Drop for Playback {
     }
 }
 
+/// A running player, its input pipe and a bounded reader of its stderr.
+struct Player {
+    child: Child,
+    input: Option<ChildStdin>,
+    stderr: Option<JoinHandle<Vec<u8>>>,
+    format: PcmFormat,
+}
+
+impl Player {
+    fn spawn(media: &Media, format: PcmFormat) -> Result<Self> {
+        let mut child = (media.make_player)(format)
+            .stdin(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .context("install ALSA aplay to enable robot speech")?;
+        let input = child.stdin.take();
+        let stderr = child.stderr.take().map(|pipe| tokio::spawn(capture(pipe)));
+        Ok(Self {
+            child,
+            input,
+            stderr,
+            format,
+        })
+    }
+
+    /// Kill and reap the player, then log what it wrote to stderr.
+    async fn fail(mut self) {
+        let _ = self.child.start_kill();
+        let _ = timeout(Duration::from_secs(1), self.child.wait()).await;
+        let Some(reader) = self.stderr.take() else {
+            return;
+        };
+        let Ok(Ok(bytes)) = timeout(Duration::from_millis(200), reader).await else {
+            return;
+        };
+        let text = String::from_utf8_lossy(&bytes);
+        let text = text.trim().replace(['\n', '\r'], " | ");
+        if !text.is_empty() {
+            tracing::warn!(stderr = %text, "audio player output");
+        }
+    }
+}
+
+/// Keep the first `STDERR_CAP` bytes and keep draining, so a chatty player
+/// never blocks on a full stderr pipe.
+async fn capture(mut pipe: ChildStderr) -> Vec<u8> {
+    let mut kept = Vec::new();
+    let mut buffer = [0u8; 512];
+    while let Ok(read @ 1..) = pipe.read(&mut buffer).await {
+        let room = STDERR_CAP - kept.len();
+        kept.extend_from_slice(&buffer[..read.min(room)]);
+    }
+    kept
+}
+
 async fn play(
     media: &Media,
     session: &str,
     turn_id: &str,
     generation: u64,
     events: &mpsc::Sender<PlaybackEvent>,
-    played: &mut bool,
+    audible: &mut bool,
 ) -> Result<()> {
     let started = Instant::now();
+    let mut player = media
+        .prespawn
+        .then(|| Player::spawn(media, EXPECTED_FORMAT))
+        .transpose()?;
+    let streamed = stream(
+        media,
+        session,
+        turn_id,
+        generation,
+        events,
+        audible,
+        started,
+        &mut player,
+    )
+    .await;
+    if streamed.is_err()
+        && let Some(player) = player
+    {
+        player.fail().await;
+    }
+    streamed
+}
+
+// One call site; the parameters are the turn's whole context.
+#[allow(clippy::too_many_arguments)]
+async fn stream(
+    media: &Media,
+    session: &str,
+    turn_id: &str,
+    generation: u64,
+    events: &mpsc::Sender<PlaybackEvent>,
+    audible: &mut bool,
+    started: Instant,
+    player: &mut Option<Player>,
+) -> Result<()> {
     let response = media
         .http
         .post(format!("{}/v1/speech", media.server))
@@ -263,63 +384,63 @@ async fn play(
         "unsupported encoding"
     );
     let format = PcmFormat::parse(header("content-type").context("audio format required")?)?;
-    let mut child = (media.make_player)(format)
-        .stdin(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true)
-        .spawn()
-        .context("install ALSA aplay to enable robot speech")?;
-    let streamed = async {
-        let mut input = child.stdin.take().context("audio player input")?;
-        let mut stream = response.bytes_stream();
-        let mut total = 0usize;
-        loop {
-            let bytes = tokio::select! {
-                biased;
-                status = child.wait() => bail!("audio player exited early ({:?})", status?.code()),
-                next = stream.next() => match next {
-                    Some(bytes) => bytes?,
-                    None => break,
-                },
-            };
-            total += bytes.len();
-            ensure!(total <= AUDIO_BUDGET, "audio budget exceeded");
-            within(
-                media.write_deadline,
-                "audio player",
-                input.write_all(&bytes),
-            )
-            .await?;
-            if !*played && !bytes.is_empty() {
-                *played = true;
-                let _ = events.try_send(PlaybackEvent::Started { generation });
-                tracing::debug!(
-                    headers_ms,
-                    first_pcm_ms = started.elapsed().as_millis(),
-                    "speech first audio"
-                );
-            }
+    if player.as_ref().is_none_or(|p| p.format != format) {
+        // Dropping a mismatched early player kills it (`kill_on_drop`).
+        *player = Some(Player::spawn(media, format)?);
+    }
+    let Some(Player { child, input, .. }) = player.as_mut() else {
+        bail!("audio player missing");
+    };
+    let mut input = input.take().context("audio player input")?;
+    let mut body = response.bytes_stream();
+    let mut total = 0usize;
+    loop {
+        let bytes = tokio::select! {
+            biased;
+            status = child.wait() => bail!("audio player exited early ({:?})", status?.code()),
+            next = timeout(media.chunk_idle, body.next()) => match next {
+                Err(_) => bail!("speech stream stalled for {:?}", media.chunk_idle),
+                Ok(Some(bytes)) => bytes?,
+                Ok(None) => break,
+            },
+        };
+        total += bytes.len();
+        ensure!(total <= AUDIO_BUDGET, "audio budget exceeded");
+        feed(&mut input, &bytes, media.write_deadline).await?;
+        if !*audible && !bytes.is_empty() {
+            *audible = true;
+            let _ = events.send(PlaybackEvent::Started { generation }).await;
+            tracing::debug!(
+                headers_ms,
+                first_pcm_ms = started.elapsed().as_millis(),
+                "speech first audio"
+            );
         }
-        let frame = usize::from(format.channels) * 2;
-        ensure!(
-            total > 0 && total.is_multiple_of(frame),
-            "incomplete audio stream"
-        );
-        within(media.write_deadline, "audio player", input.shutdown()).await?;
-        drop(input);
-        let status = timeout(DRAIN_DEADLINE, child.wait())
-            .await
-            .map_err(|_| anyhow!("audio player did not finish"))??;
-        ensure!(status.success(), "audio player failed");
-        Ok(())
     }
-    .await;
-    if streamed.is_err() {
-        // Kill and reap a stuck or failed player before reporting.
-        let _ = child.start_kill();
-        let _ = timeout(Duration::from_secs(1), child.wait()).await;
+    let frame = usize::from(format.channels) * 2;
+    ensure!(
+        total > 0 && total.is_multiple_of(frame),
+        "incomplete audio stream"
+    );
+    within(media.write_deadline, "audio player", input.shutdown()).await?;
+    drop(input);
+    let status = timeout(DRAIN_DEADLINE, child.wait())
+        .await
+        .map_err(|_| anyhow!("audio player did not finish"))??;
+    ensure!(status.success(), "audio player failed");
+    Ok(())
+}
+
+/// Write `bytes` in bounded slices. The deadline restarts whenever the player
+/// takes any bytes, so only a player that stops reading is killed.
+async fn feed(input: &mut ChildStdin, mut bytes: &[u8], deadline: Duration) -> Result<()> {
+    while !bytes.is_empty() {
+        let slice = &bytes[..bytes.len().min(WRITE_SLICE)];
+        let written = within(deadline, "audio player", input.write(slice)).await?;
+        ensure!(written > 0, "audio player closed its input");
+        bytes = &bytes[written..];
     }
-    streamed
+    Ok(())
 }
 
 async fn within<T>(
@@ -630,5 +751,144 @@ mod tests {
         exited
             .recv_timeout(Duration::from_secs(2))
             .expect("player still running after runtime shutdown");
+    }
+
+    async fn finished(rx: &mut mpsc::Receiver<PlaybackEvent>) -> (u64, bool) {
+        loop {
+            if let PlaybackEvent::Finished { generation, played } = next_event(rx).await {
+                return (generation, played);
+            }
+        }
+    }
+
+    /// Regression: one 2 s deadline covered a whole chunk, so a chunk larger
+    /// than 2 s of audio (96 KiB at 24 kHz) killed a player that was reading
+    /// at its normal pace. The deadline now restarts on every bit of progress.
+    #[tokio::test]
+    async fn a_slow_steady_player_takes_a_large_chunk_past_the_deadline() {
+        let media = Media::for_test(
+            "http://127.0.0.1:9",
+            // Reads about 4 KiB every 20 ms, then exits 0 at end of input.
+            player(
+                "sh",
+                &[
+                    "-c",
+                    "while [ \"$(dd bs=4096 count=1 2>/dev/null | wc -c)\" -gt 0 ]; do sleep 0.02; done",
+                ],
+            ),
+            Duration::from_millis(300),
+        );
+        let mut player = Player::spawn(&media, EXPECTED_FORMAT).unwrap();
+        let mut input = player.input.take().unwrap();
+        let chunk = vec![0u8; 256 * 1024];
+        let started = Instant::now();
+        feed(&mut input, &chunk, media.write_deadline)
+            .await
+            .expect("a reading player is never killed");
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed > Duration::from_millis(600),
+            "not throttled: {elapsed:?}"
+        );
+        drop(input);
+        let status = timeout(Duration::from_secs(10), player.child.wait()).await;
+        assert!(status.unwrap().unwrap().success());
+    }
+
+    /// Regression: a stalled body left Pip on Speaking for the whole 320 s
+    /// request timeout.
+    #[tokio::test]
+    async fn a_stalled_speech_body_ends_playback_at_the_idle_deadline() {
+        let app = Router::new().route(
+            "/v1/speech",
+            post(|| async {
+                let stream = futures_util::stream::unfold(0, |i| async move {
+                    if i > 0 {
+                        tokio::time::sleep(Duration::from_mins(1)).await;
+                    }
+                    Some((Ok::<_, std::io::Error>(vec![0u8; 4800]), i + 1))
+                });
+                (PCM_HEADERS, Body::from_stream(stream))
+            }),
+        );
+        let (server, _) = serve(app).await;
+        let mut media = Media::for_test(&server, player("cat", &[]), WRITE_DEADLINE);
+        media.chunk_idle = Duration::from_millis(300);
+        let (tx, mut rx) = mpsc::channel(8);
+        let mut playback = Playback::new(Arc::new(media), "s".into(), tx);
+        let started = Instant::now();
+        let generation = playback.start("test-turn").unwrap();
+        assert_eq!(
+            next_event(&mut rx).await,
+            PlaybackEvent::Started { generation }
+        );
+        assert_eq!(finished(&mut rx).await, (generation, true));
+        let elapsed = started.elapsed();
+        assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
+    }
+
+    #[tokio::test]
+    async fn player_stderr_is_kept_bounded_and_drained() {
+        // 100 kB is more than a pipe holds: an undrained stderr would block it.
+        let media = Media::for_test(
+            "http://127.0.0.1:9",
+            player("sh", &["-c", "yes 'audio open error' | head -c 100000 >&2"]),
+            WRITE_DEADLINE,
+        );
+        let mut player = Player::spawn(&media, EXPECTED_FORMAT).unwrap();
+        let status = timeout(Duration::from_secs(5), player.child.wait()).await;
+        assert!(status.expect("player blocked on stderr").unwrap().success());
+        let kept = player.stderr.take().unwrap().await.unwrap();
+        assert_eq!(kept.len(), STDERR_CAP);
+        assert!(kept.starts_with(b"audio open error\n"));
+    }
+
+    /// The player's own start-up (fork, exec, ALSA open; 150 ms here) runs
+    /// while the request waits for audio instead of after the headers.
+    #[tokio::test]
+    async fn the_player_starts_while_the_request_waits_for_audio() {
+        let app = Router::new().route(
+            "/v1/speech",
+            post(|| async {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                (PCM_HEADERS, vec![0u8; 4800])
+            }),
+        );
+        let (server, _) = serve(app).await;
+        let mut first_audio = Vec::new();
+        for prespawn in [true, false] {
+            let path =
+                std::env::temp_dir().join(format!("buddy-start-{}.pcm", uuid::Uuid::new_v4()));
+            let out = path.clone();
+            let factory: PlayerFactory = Arc::new(move |_| {
+                let mut command = tokio::process::Command::new("sh");
+                let script = format!("sleep 0.15; exec cat > '{}'", out.display());
+                command.args(["-c", &script]);
+                command
+            });
+            let mut media = Media::for_test(&server, factory, WRITE_DEADLINE);
+            media.prespawn = prespawn;
+            let (tx, mut rx) = mpsc::channel(8);
+            let mut playback = Playback::new(Arc::new(media), "s".into(), tx);
+            let started = Instant::now();
+            playback.start("test-turn").unwrap();
+            // The player has the audio once its output file does.
+            while std::fs::metadata(&path).map_or(0, |m| m.len()) == 0 {
+                assert!(started.elapsed() < Duration::from_secs(5));
+                tokio::time::sleep(Duration::from_millis(2)).await;
+            }
+            first_audio.push(started.elapsed());
+            finished(&mut rx).await;
+            std::fs::remove_file(path).unwrap();
+        }
+        eprintln!(
+            "first audio at the player: started early {:?}, after headers {:?}",
+            first_audio[0], first_audio[1]
+        );
+        assert!(first_audio[1] >= Duration::from_millis(450));
+        assert!(
+            first_audio[0] < Duration::from_millis(420),
+            "{first_audio:?}"
+        );
     }
 }

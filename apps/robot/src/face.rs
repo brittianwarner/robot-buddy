@@ -4,13 +4,36 @@
 //! re-sends it every `HEARTBEAT` (the ESP32 falls back to a calm idle face
 //! after 5 s of silence), and reopens the device if it disappears. Only the
 //! latest mood matters, so the session never waits on the serial port.
+//!
+//! The device is opened `O_WRONLY | O_NOCTTY | O_NONBLOCK` and set to raw
+//! 115200 baud with `CLOCAL` and without `HUPCL` on every open, because a
+//! re-enumerated CDC-ACM port comes back at the kernel defaults (9600, cooked,
+//! echo). Writes are non-blocking and driven by reactor readiness, so a
+//! stalled port times out and is closed without parking a blocking-pool
+//! thread on `write(2)`.
+use nix::sys::termios::{self, BaudRate, ControlFlags, SetArg, Termios};
 use serde::Serialize;
-use std::{future::Future, io, path::PathBuf, time::Duration};
-use tokio::{io::AsyncWriteExt, sync::watch, time::Instant};
+use std::{
+    fs::File,
+    future::Future,
+    io::{self, Write},
+    os::unix::fs::OpenOptionsExt,
+    path::{Path, PathBuf},
+    sync::OnceLock,
+    time::Duration,
+};
+use tokio::{io::AsyncWriteExt, net::unix::pipe, sync::watch, time::Instant};
 
 pub const HEARTBEAT: Duration = Duration::from_millis(1500);
 const WRITE_DEADLINE: Duration = Duration::from_millis(500);
 const REOPEN_DELAY: Duration = Duration::from_secs(1);
+/// Bounds `open` plus `tcsetattr`. Both are non-blocking syscalls, but the
+/// CDC-ACM driver sends USB control requests during them, each with a 5 s
+/// kernel timeout, so a wedged board can hold the opening thread briefly.
+const OPEN_DEADLINE: Duration = Duration::from_secs(2);
+/// After an open overran its deadline, wait past the kernel's own USB timeouts
+/// so at most one opening thread is ever outstanding.
+const STALLED_OPEN_RETRY: Duration = Duration::from_secs(15);
 pub const SORRY: Duration = Duration::from_millis(1500);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -68,6 +91,16 @@ pub enum Mood {
 }
 
 impl Mood {
+    const ALL: [Self; 7] = [
+        Self::Offline,
+        Self::Idle,
+        Self::Listening,
+        Self::Thinking,
+        Self::Speaking,
+        Self::Muted,
+        Self::Sorry,
+    ];
+
     pub fn commands(self) -> Vec<FaceCommand> {
         use FaceCommand::{Expression as E, Led as L, Look};
         let (led, e, i) = match self {
@@ -84,6 +117,23 @@ impl Mood {
             commands.push(Look { look: [0.0, 0.0] });
         }
         commands
+    }
+
+    /// Every line of this mood, serialized once per process and sent in one write.
+    pub fn frame(self) -> &'static [u8] {
+        static FRAMES: OnceLock<Vec<Vec<u8>>> = OnceLock::new();
+        let frames = FRAMES.get_or_init(|| {
+            Self::ALL
+                .iter()
+                .map(|mood| mood.commands().iter().flat_map(FaceCommand::line).collect())
+                .collect()
+        });
+        &frames[self as usize]
+    }
+
+    /// States the user is acting on. A `Sorry` flash never hides them.
+    fn active(self) -> bool {
+        matches!(self, Self::Listening | Self::Speaking | Self::Muted)
     }
 }
 
@@ -124,7 +174,7 @@ pub struct Target {
 impl Target {
     fn current(&self, now: Instant) -> Mood {
         match self.flash {
-            Some((mood, until)) if now < until => mood,
+            Some((mood, until)) if now < until && !self.mood.active() => mood,
             _ => self.mood,
         }
     }
@@ -145,18 +195,28 @@ impl Face {
         (Self { target }, rx)
     }
 
+    /// Set the steady mood. Listening, speaking and muted end any flash, so an
+    /// apology for the previous turn cannot cover the orange listening LED or
+    /// come back after it.
     pub fn set(&self, mood: Mood) {
         self.target.send_if_modified(|t| {
-            let changed = t.mood != mood;
+            let cleared = mood.active() && t.flash.take().is_some();
+            let changed = t.mood != mood || cleared;
             t.mood = mood;
             changed
         });
     }
 
-    /// Show `mood` for `duration`, then return to the steady mood.
+    /// Show `mood` for `duration`, then return to the steady mood. Ignored
+    /// while the steady mood is listening, speaking or muted.
     pub fn flash(&self, mood: Mood, duration: Duration) {
-        self.target
-            .send_modify(|t| t.flash = Some((mood, Instant::now() + duration)));
+        self.target.send_if_modified(|t| {
+            if t.mood.active() {
+                return false;
+            }
+            t.flash = Some((mood, Instant::now() + duration));
+            true
+        });
     }
 
     #[cfg(test)]
@@ -172,7 +232,8 @@ impl Face {
 }
 
 pub trait LineSink: Send {
-    fn write_line(&mut self, line: &[u8]) -> impl Future<Output = io::Result<()>> + Send;
+    /// Write one frame: one or more complete lines.
+    fn write_frame(&mut self, frame: &[u8]) -> impl Future<Output = io::Result<()>> + Send;
 }
 
 pub trait Opener: Send + 'static {
@@ -181,25 +242,77 @@ pub trait Opener: Send + 'static {
 }
 
 /// A serial device (or any file) opened for writing. Never creates the path.
+/// Prefer a stable `/dev/serial/by-id/...` path over `/dev/ttyACM0`.
 pub struct Device(pub PathBuf);
 
-pub struct DeviceSink(tokio::fs::File);
+pub enum DeviceSink {
+    /// A tty or FIFO: non-blocking writes driven by readiness. Tokio's pipe
+    /// sender is only `write(2)` on a registered non-blocking descriptor, so it
+    /// serves a tty as well as a FIFO.
+    Poll(pipe::Sender),
+    /// A regular file (debugging, tests): writes never wait.
+    File(File),
+}
 
 impl Opener for Device {
     type Sink = DeviceSink;
     async fn open(&mut self) -> io::Result<DeviceSink> {
-        let file = tokio::fs::OpenOptions::new()
-            .write(true)
-            .open(&self.0)
-            .await?;
-        Ok(DeviceSink(file))
+        let path = self.0.clone();
+        let opening = tokio::task::spawn_blocking(move || open_serial(&path));
+        let file = match tokio::time::timeout(OPEN_DEADLINE, opening).await {
+            Ok(joined) => joined.map_err(io::Error::other)??,
+            Err(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "face device open stalled",
+                ));
+            }
+        };
+        if file.metadata()?.is_file() {
+            return Ok(DeviceSink::File(file));
+        }
+        Ok(DeviceSink::Poll(pipe::Sender::from_file_unchecked(file)?))
     }
 }
 
+/// Open without becoming the controlling terminal and without waiting for
+/// carrier, then apply the line settings when the file is a tty.
+fn open_serial(path: &Path) -> io::Result<File> {
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .custom_flags(nix::libc::O_NOCTTY | nix::libc::O_NONBLOCK)
+        .open(path)?;
+    match termios::tcgetattr(&file) {
+        Ok(mut settings) => {
+            serial_settings(&mut settings)?;
+            termios::tcsetattr(&file, SetArg::TCSANOW, &settings)?;
+        }
+        // A FIFO or a plain file: no line settings to apply.
+        Err(nix::errno::Errno::ENOTTY) => {}
+        Err(error) => return Err(error.into()),
+    }
+    Ok(file)
+}
+
+/// `stty 115200 raw -echo clocal -hupcl`: no echo, no line editing or output
+/// translation, ignore modem lines, and leave DTR up on close so a reopen
+/// does not reset the ESP32.
+pub fn serial_settings(settings: &mut Termios) -> nix::Result<()> {
+    termios::cfmakeraw(settings);
+    termios::cfsetspeed(settings, BaudRate::B115200)?;
+    settings
+        .control_flags
+        .insert(ControlFlags::CLOCAL | ControlFlags::CREAD);
+    settings.control_flags.remove(ControlFlags::HUPCL);
+    Ok(())
+}
+
 impl LineSink for DeviceSink {
-    async fn write_line(&mut self, line: &[u8]) -> io::Result<()> {
-        self.0.write_all(line).await?;
-        self.0.flush().await
+    async fn write_frame(&mut self, frame: &[u8]) -> io::Result<()> {
+        match self {
+            Self::File(file) => file.write_all(frame),
+            Self::Poll(port) => port.write_all(frame).await,
+        }
     }
 }
 
@@ -227,7 +340,12 @@ pub async fn run<O: Opener>(mut target: watch::Receiver<Target>, mut opener: O) 
                             tracing::warn!(%error, "face device unavailable; retrying");
                             warned = true;
                         }
-                        reopen_at = now + REOPEN_DELAY;
+                        let wait = if error.kind() == io::ErrorKind::TimedOut {
+                            STALLED_OPEN_RETRY
+                        } else {
+                            REOPEN_DELAY
+                        };
+                        reopen_at = Instant::now() + wait;
                     }
                 }
             }
@@ -262,12 +380,9 @@ pub async fn run<O: Opener>(mut target: watch::Receiver<Target>, mut opener: O) 
 }
 
 async fn send<S: LineSink>(sink: &mut S, mood: Mood) -> io::Result<()> {
-    for command in mood.commands() {
-        tokio::time::timeout(WRITE_DEADLINE, sink.write_line(&command.line()))
-            .await
-            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "face write stalled"))??;
-    }
-    Ok(())
+    tokio::time::timeout(WRITE_DEADLINE, sink.write_frame(mood.frame()))
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "face write stalled"))?
 }
 
 #[cfg(test)]
@@ -300,13 +415,17 @@ mod tests {
         }
     }
     impl LineSink for MemorySink {
-        async fn write_line(&mut self, line: &[u8]) -> io::Result<()> {
+        async fn write_frame(&mut self, frame: &[u8]) -> io::Result<()> {
             if self.fail_writes > 0 {
                 self.fail_writes -= 1;
                 return Err(io::Error::new(io::ErrorKind::BrokenPipe, "re-enumerated"));
             }
-            let text = String::from_utf8(line.to_vec()).unwrap();
-            self.log.lock().unwrap().push((Instant::now(), text));
+            let now = Instant::now();
+            let text = String::from_utf8(frame.to_vec()).unwrap();
+            let mut log = self.log.lock().unwrap();
+            for line in text.split_inclusive('\n') {
+                log.push((now, line.to_owned()));
+            }
             Ok(())
         }
     }
@@ -462,5 +581,187 @@ mod tests {
         let missing = std::env::temp_dir().join(format!("buddy-tty-{}", uuid::Uuid::new_v4()));
         assert!(Device(missing.clone()).open().await.is_err());
         assert!(!missing.exists());
+    }
+
+    #[test]
+    fn frames_are_every_command_line_in_one_buffer() {
+        for mood in Mood::ALL {
+            let lines: Vec<u8> = mood.commands().iter().flat_map(FaceCommand::line).collect();
+            assert_eq!(mood.frame(), &lines[..], "{mood:?}");
+        }
+        assert_eq!(
+            Mood::Speaking.frame(),
+            b"{\"led\":\"speaking\"}\n{\"e\":\"happy\",\"i\":0.7}\n{\"look\":[0.0,0.0]}\n"
+        );
+        assert_eq!(
+            Mood::Sorry.frame(),
+            b"{\"led\":\"idle\"}\n{\"e\":\"sad\",\"i\":0.6}\n"
+        );
+    }
+
+    /// Regression: a 1.5 s `Sorry` flash hid the orange listening LED after
+    /// "Hey Pip", and came back once listening ended.
+    #[tokio::test(start_paused = true)]
+    async fn a_flash_never_hides_listening_speaking_or_muted() {
+        let log = Log::default();
+        let (face, rx) = Face::new();
+        let opener = Memory {
+            log: log.clone(),
+            fail_opens: 0,
+            fail_writes: 0,
+        };
+        tokio::spawn(run(rx, opener));
+        face.set(Mood::Idle);
+        face.flash(Mood::Sorry, SORRY);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(lines(&log)[0], "{\"led\":\"idle\"}\n");
+        assert_eq!(lines(&log)[1], "{\"e\":\"sad\",\"i\":0.6}\n");
+        log.lock().unwrap().clear();
+        // Wake word 100 ms into the apology: listening shows at once.
+        face.set(Mood::Listening);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(lines(&log)[0], "{\"led\":\"listening\"}\n");
+        assert_eq!(face.flashing(), None, "listening ends the flash");
+        // Listening ends while the old flash would still be running: no apology.
+        face.set(Mood::Idle);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(
+            lines(&log).last().unwrap(),
+            "{\"e\":\"neutral\",\"i\":0.5}\n"
+        );
+        // A turn that fails while the user is speaking to Pip, or muted, stays hidden.
+        for steady in [Mood::Listening, Mood::Speaking, Mood::Muted] {
+            face.set(steady);
+            face.flash(Mood::Sorry, SORRY);
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            assert_eq!(face.flashing(), None);
+            let wanted = String::from_utf8(steady.frame().to_vec()).unwrap();
+            let shown: String = lines(&log).concat();
+            assert!(shown.ends_with(&wanted), "{steady:?}: {shown}");
+        }
+        assert!(!lines(&log).iter().any(|l| l.contains("sad")));
+    }
+
+    fn pty() -> (nix::pty::OpenptyResult, PathBuf) {
+        let pty = nix::pty::openpty(None, None).unwrap();
+        let path = nix::unistd::ttyname(&pty.slave).unwrap();
+        (pty, path)
+    }
+
+    /// What `cdc_acm` gives a freshly enumerated port: 9600, cooked, echo, HUPCL.
+    fn kernel_defaults(fd: &impl std::os::fd::AsFd) {
+        use termios::{InputFlags, LocalFlags, OutputFlags};
+        let mut t = termios::tcgetattr(fd).unwrap();
+        termios::cfsetspeed(&mut t, BaudRate::B9600).unwrap();
+        t.local_flags
+            .insert(LocalFlags::ECHO | LocalFlags::ICANON | LocalFlags::ISIG);
+        t.output_flags
+            .insert(OutputFlags::OPOST | OutputFlags::ONLCR);
+        t.input_flags.insert(InputFlags::ICRNL);
+        t.control_flags.insert(ControlFlags::HUPCL);
+        t.control_flags.remove(ControlFlags::CLOCAL);
+        termios::tcsetattr(fd, SetArg::TCSANOW, &t).unwrap();
+    }
+
+    #[allow(
+        clippy::useless_conversion,
+        reason = "cfgetospeed is a u32 on Apple targets and a BaudRate on Linux"
+    )]
+    fn assert_serial_settings(fd: &impl std::os::fd::AsFd) {
+        use termios::{LocalFlags, OutputFlags};
+        let t = termios::tcgetattr(fd).unwrap();
+        assert_eq!(
+            u32::from(termios::cfgetospeed(&t)),
+            u32::from(BaudRate::B115200)
+        );
+        assert!(
+            !t.local_flags
+                .intersects(LocalFlags::ECHO | LocalFlags::ICANON)
+        );
+        assert!(!t.output_flags.contains(OutputFlags::OPOST));
+        assert!(t.control_flags.contains(ControlFlags::CLOCAL));
+        assert!(!t.control_flags.contains(ControlFlags::HUPCL));
+    }
+
+    #[tokio::test]
+    async fn every_open_applies_raw_115200_clocal_without_hupcl() {
+        let (pty, path) = pty();
+        for _ in 0..2 {
+            kernel_defaults(&pty.slave);
+            let sink = Device(path.clone()).open().await.unwrap();
+            assert!(matches!(sink, DeviceSink::Poll(_)));
+            assert_serial_settings(&pty.slave);
+        }
+    }
+
+    struct Counting {
+        device: Device,
+        opens: Arc<std::sync::atomic::AtomicUsize>,
+    }
+    impl Opener for Counting {
+        type Sink = DeviceSink;
+        async fn open(&mut self) -> io::Result<DeviceSink> {
+            let sink = self.device.open().await?;
+            self.opens.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(sink)
+        }
+    }
+
+    /// Regression: writes ran on the blocking pool, so a stalled port parked a
+    /// thread in `write(2)` every heartbeat and kept the old fd open. With a
+    /// single blocking thread allowed, a leaked write would starve it.
+    #[test]
+    fn a_stalled_port_times_out_without_leaking_threads_and_reopens_raw() {
+        use std::sync::atomic::Ordering;
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .max_blocking_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        let (pty, path) = pty();
+        // Nobody reads the master: fill the line until a write would block.
+        let filler = std::fs::OpenOptions::new()
+            .write(true)
+            .custom_flags(nix::libc::O_NOCTTY | nix::libc::O_NONBLOCK)
+            .open(&path)
+            .unwrap();
+        let block = [b'x'; 1024];
+        while (&filler).write(&block).is_ok() {}
+        runtime.block_on(async {
+            let opens = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let (face, rx) = Face::new();
+            let opener = Counting {
+                device: Device(path.clone()),
+                opens: opens.clone(),
+            };
+            let task = tokio::spawn(run(rx, opener));
+            face.set(Mood::Listening);
+            let started = Instant::now();
+            while opens.load(Ordering::SeqCst) == 0 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            // The board re-enumerates: the kernel resets the line.
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            kernel_defaults(&pty.slave);
+            while opens.load(Ordering::SeqCst) < 3 {
+                assert!(started.elapsed() < Duration::from_secs(6), "no reopen");
+                let probe = tokio::task::spawn_blocking(|| 7);
+                let free = tokio::time::timeout(Duration::from_secs(1), probe).await;
+                assert_eq!(free.expect("blocking pool starved").unwrap(), 7);
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            // Two stalls of 500 ms plus two 1 s reopen delays.
+            let elapsed = started.elapsed();
+            assert!(elapsed < Duration::from_secs(4), "{elapsed:?}");
+            assert_serial_settings(&pty.slave);
+            drop(face);
+            tokio::time::timeout(Duration::from_secs(2), task)
+                .await
+                .expect("writer task stops with the face")
+                .unwrap();
+        });
+        drop(filler);
+        runtime.shutdown_timeout(Duration::from_millis(100));
     }
 }
