@@ -284,7 +284,7 @@ struct WriterSlot(Arc<AtomicUsize>);
 impl WriterSlot {
     fn claim(writers: &Arc<AtomicUsize>) -> Option<Self> {
         let claimed = writers
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
                 (n < MAX_WRITERS).then_some(n + 1)
             })
             .is_ok();
