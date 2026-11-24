@@ -1,7 +1,7 @@
 //! Durable speech admission: only a running turn can commit chunks.
 use super::{
-    Context, Conversation, Ctx, OutputEvent, P, RUNNING_TURN_SQL, Result, SqliteDbExt,
-    SqliteTransaction, Value, ensure, integer, json, named, params, string,
+    Context, Conversation, Ctx, Db, OutputEvent, P, RUNNING_TURN_SQL, Result, SqliteDbExt,
+    SqliteTransaction, Tx, Value, ensure, integer, json, named, params, string,
 };
 
 const SPEECH_SETTINGS_SQL: &str = r"
@@ -35,7 +35,7 @@ const MAX_CHUNKS: u32 = 64;
 const MAX_CHUNK_BYTES: usize = crate::sentences::HARD_LIMIT + 4;
 
 /// Inserts one event inside a transaction. Zero rows means the turn stopped running.
-async fn insert_event(tx: &SqliteTransaction, sql: &str, id: &str, payload: &Value) -> Result<i64> {
+async fn insert_event(tx: &Tx, sql: &str, id: &str, payload: &Value) -> Result<i64> {
     let rows = tx
         .execute(sql, params(&[id, &payload.to_string(), id]))
         .await?
@@ -47,7 +47,7 @@ impl Conversation {
     /// Pins this turn's voice before its first spoken text and returns the character prompt.
     /// It may run more than once per turn; the first pin is kept.
     pub(super) async fn begin_speech(&self, ctx: &Ctx<Self>, id: &str) -> Result<String> {
-        let pin = |tx: SqliteTransaction| async move {
+        let pin = |tx: Tx| async move {
             let rows = tx.execute(SPEECH_SETTINGS_SQL, None).await?.rows;
             let row = rows.first().context("speech settings missing")?;
             let config: crate::voice::VoiceConfig = serde_json::from_str(&string(row, 1)?)?;
@@ -65,7 +65,7 @@ impl Conversation {
                 .await?;
             string(row, 0)
         };
-        ctx.sql()
+        ctx.db()
             .transaction(pin, named("conversation.begin_speech"))
             .await
     }
@@ -102,7 +102,7 @@ impl Conversation {
             payloads.push(("text.delta", json!({ "text": text })));
         }
         let (payloads_ref, chunks_ref) = (&payloads, &chunks);
-        let write = move |tx: SqliteTransaction| async move {
+        let write = move |tx: Tx| async move {
             let mut sequences = Vec::with_capacity(payloads_ref.len() + chunks_ref.len());
             if let Some((_, delta)) = payloads_ref.first() {
                 sequences.push(insert_event(&tx, TEXT_DELTA_SQL, id, delta).await?);
@@ -123,7 +123,7 @@ impl Conversation {
             Ok(sequences)
         };
         let sequences = ctx
-            .sql()
+            .db()
             .transaction(write, named("conversation.commit_stream"))
             .await?;
         let ready = chunks

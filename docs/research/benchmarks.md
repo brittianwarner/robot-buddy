@@ -70,30 +70,33 @@ Local in-memory SQLite (rusqlite, bundled), with the real schema files. `v1` is 
 
 Batch size depends on the batch, not on history. The one-shot rebuild grows with every turn stored.
 
-## SQL per direct spoken turn
+## SQL per turn
 
-Counted from the code, not measured: profiling is not compiled into this build (see "SQLite practices" in `docs/architecture/backend.md`). The path is submit, drain, `generate`, one direct model round, `finish_turn`. Counts are statements on the conversation actor's SQLite. Each auto-commit statement is its own implicit transaction. Trigger statements run inside their statement and cost no extra round trip.
+Measured 2026-11-23 by `tests/core_sql_counts.rs`, which reads the counters of the `db::Db` wrapper every actor statement goes through. Counts are for the whole test process: the Bot, Conversation and Memory actors, plus the test client's own reads. A transaction's statements count as statements; an auto-commit statement is its own commit. Before is the code before the change, with only the counting wrapper added.
 
-| Step | Statements | Transaction |
-|---|---|---|
-| `submit`: prior request, busy check, insert turn (+2 trigger statements) | 3 | `conversation.submit` |
-| Drain claims the turn | 1 | auto-commit |
-| `turn.started` event | 1 | auto-commit |
-| Saved run, persona prompt, recent 12 turns | 3 | auto-commit each |
-| `model_pending` checkpoint, context config, completed effects | 3 | auto-commit each |
-| Text already emitted | 1 | auto-commit |
-| `begin_speech`: speech settings, running check, pin voice | 3 | `conversation.begin_speech` |
-| Each stream commit: text delta, plus chunk and `speech.ready` per chunk | 1 + 2 per chunk | `conversation.commit_stream` |
-| `finish_turn`: finish (+2 trigger statements), terminal event, delete run | 3 | `conversation.finish_turn` |
-| Drain finds no next turn; recheck for queued turns | 2 | auto-commit each |
+```sh
+cargo test -p robot-buddy --test core_sql_counts -- --ignored --nocapture
+```
 
-Total for a turn with S stream commits and C speech chunks:
+Run with the environment of `bun run test:integration`.
 
-- Statements: 20 + S + 2C.
-- Named transactions: 3 + S.
-- Auto-commit statements: 11.
+| Measure | Statements before | after | Auto-commit before | after | Transactions before | after |
+|---|---|---|---|---|---|---|
+| Direct spoken turn (2 sentences) | 37 | 31 | 23 | 11 | 5 | 6 |
+| One tool turn (`memory_remember`, then a spoken answer) | 63 | 53 to 58 | 51 | 35 to 40 | 4 | 5 |
+| Enroll plus first turn (new database) | 76 | 71 to 79 | 54 | 42 to 50 | 9 | 11 |
+| Wake after an engine restart plus a direct turn | not measured | 42 to 49 | not measured | 24 to 31 | not measured | 5 |
 
-Stream commits happen at each sentence boundary, on each 100 ms tick with uncommitted text, and once at the end. With the integration mock (680 ms, 4 chunks), S is at most about 12, so a turn is about 40 statements and 15 named transactions. Memory search adds 2 reads on the memory actor's SQLite. Live access checks call the bot actor at most once per second.
+Before is one run. After is four runs for the first three rows and three for the wake row; the direct turn gave the same counts each time. The spread is auto-commit reads whose number depends on timing: live access checks (one Bot statement each, at most once a second during a turn) and the test client's replay reads.
+
+What changed on the turn path:
+
+- The claim, `turn.started` and every read the first model round needs commit in one `conversation.claim` transaction. A fresh run skips the completed-tool and spoken-byte reads, and later rounds keep both in memory.
+- The duplicate `ready` checkpoint before a tool round is gone, and settings tools no longer write their receipt twice.
+- Text between sentence ends commits at most every 200 ms instead of on a 100 ms tick, and the flush clock restarts at each commit.
+- The drain no longer rechecks for a queued turn after each turn; a submit during a drain asks it to claim again.
+
+The transaction count rises by one because the claim is now a transaction instead of auto-commit statements. A wake no longer reruns the schema, the seeds and factory adoption once `PRAGMA user_version` is set; a new database still runs them.
 
 ## Turn latency (integration)
 

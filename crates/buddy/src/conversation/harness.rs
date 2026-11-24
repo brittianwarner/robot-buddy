@@ -4,8 +4,9 @@
 //! spoken dialogue and finish at once. The action phase runs tool rounds silently. The
 //! spoken phase is one tool-disabled call that speaks the answer after tool work.
 use super::{
-    CancellationToken, Command, Context, Conversation, Ctx, Delta, Duration, Result, ToolCall,
-    Value, bail, ensure, integer, json, params, string,
+    CLAIM_SQL, CancellationToken, Command, Context, Conversation, Ctx, Db, Delta, Duration,
+    INSERT_EVENT_SQL, Result, ToolCall, Tx, V, Value, bail, context, ensure, integer, json, named,
+    params, persona, string,
 };
 use rig::{
     completion::{
@@ -14,6 +15,7 @@ use rig::{
     run::{AgentRun, AgentRunStep, ModelTurn, ModelTurnOutcome, PendingToolCall, TurnPolicy},
     tool::{ToolOutput, ToolResult},
 };
+use std::time::Instant;
 
 const CHECKPOINT_VERSION: &str = "rig-0.46.0";
 /// Saves the run only while the turn is running. RETURNING tells the caller it was admitted.
@@ -31,7 +33,10 @@ const RECENT_TURNS_SQL: &str = r"
         FROM turns WHERE status = 'completed'
         ORDER BY id DESC LIMIT 12
     ) ORDER BY id";
-const EFFECTS_SQL: &str = "SELECT name FROM tool_calls WHERE turn_id = ? AND result <> '' LIMIT 64";
+/// This turn's completed tool calls, the receipts every model request lists.
+const EFFECTS_SQL: &str =
+    "SELECT call_id, name FROM tool_calls WHERE turn_id = ? AND result <> '' LIMIT 64";
+const MAX_EFFECTS: usize = 64;
 const EMITTED_SQL: &str = r"
     SELECT COALESCE(SUM(length(CAST(json_extract(payload, '$.text') AS BLOB))), 0)
     FROM events WHERE turn_id = ? AND kind = 'text.delta'";
@@ -41,9 +46,12 @@ const MAX_SPOKEN_BYTES: i64 = 12_000;
 const MAX_TOOL_CALLS_PER_ROUND: usize = 8;
 const MAX_MODEL_TOKENS: u64 = 2048;
 const MODEL_DEADLINE: Duration = Duration::from_secs(90);
-const FLUSH_INTERVAL: Duration = Duration::from_millis(100);
+/// Streamed text between sentence ends commits at most this long after the last commit.
+const FLUSH_INTERVAL: Duration = Duration::from_millis(200);
 /// A sentence end that waits on the next token is decided after this long without text.
 const STALL_FLUSH: Duration = Duration::from_millis(200);
+/// How often a stream with no other wake checks the stop signal and live access.
+const LIVE_INTERVAL: Duration = Duration::from_secs(1);
 
 const DIRECT_ROUTING: &str = "RESPONSE ROUTING: If tools are needed, emit only tool calls, with \
 no dialogue or planning prose. Otherwise respond immediately with only the final spoken dialogue. \
@@ -117,6 +125,25 @@ enum SpeechMode {
     Spoken,
 }
 
+/// A claimed turn and everything its first model round reads, from the claim transaction.
+/// Rows stay raw until after the commit, so a bad row fails the turn instead of rolling
+/// back the claim.
+pub(super) struct Claimed {
+    pub(super) id: String,
+    pub(super) text: String,
+    /// The committed `turn.started` event.
+    pub(super) started: Option<i64>,
+    /// A saved run: version, state and preamble.
+    saved: Option<Vec<V>>,
+    /// Resumed runs only: completed tool calls and the spoken bytes already committed.
+    effects: Vec<Vec<V>>,
+    emitted: Vec<Vec<V>>,
+    /// Fresh runs only: the system prompt and recent completed turns.
+    prompt: Vec<Vec<V>>,
+    history: Vec<Vec<V>>,
+    context: Vec<Vec<V>>,
+}
+
 /// One running turn: where it is stored, what the user said and its stop signal.
 struct Turn<'a> {
     ctx: &'a Ctx<Conversation>,
@@ -129,8 +156,14 @@ struct Turn<'a> {
 struct Agent {
     run: AgentRun,
     preamble: String,
-    definitions: Vec<ToolDefinition>,
+    definitions: &'static [ToolDefinition],
     policy: TurnPolicy,
+    /// Completed tool calls this turn, by call ID and name. Kept here, not reread.
+    effects: Vec<(String, String)>,
+    /// Spoken bytes this turn has committed, across its model calls.
+    emitted: i64,
+    /// The runtime context read by the claim, used by the first model round.
+    context: Option<Vec<V>>,
 }
 
 /// How a model round ended.
@@ -152,7 +185,9 @@ struct Spoken {
     sentences: crate::sentences::Sentences,
     next_chunk: u32,
     /// When admitted text last arrived, while a stall flush may still be owed.
-    last_text: Option<std::time::Instant>,
+    last_text: Option<Instant>,
+    /// When streamed text last committed.
+    committed: Instant,
 }
 
 impl Spoken {
@@ -170,7 +205,24 @@ impl Spoken {
             sentences: crate::sentences::Sentences::default(),
             next_chunk: 0,
             last_text: None,
+            committed: Instant::now(),
         }
+    }
+    /// The next time the stream must wake without a delta: a stall decision, a flush of
+    /// text waiting since the last commit, or the liveness check.
+    fn next_wake(&self, live: Instant) -> Instant {
+        let stall = self
+            .last_text
+            .filter(|_| self.gate.pinned())
+            .map(|at| at + STALL_FLUSH);
+        let flush = (!self.pending.is_empty()).then(|| self.committed + FLUSH_INTERVAL);
+        [stall, flush]
+            .into_iter()
+            .flatten()
+            .fold(live, Instant::min)
+    }
+    fn flush_due(&self) -> bool {
+        !self.pending.is_empty() && self.committed.elapsed() >= FLUSH_INTERVAL
     }
     /// Accepts admitted text and returns the sentence chunks it completed.
     fn accept(&mut self, text: &str) -> Result<Vec<(u32, String)>> {
@@ -181,7 +233,7 @@ impl Spoken {
         );
         self.output.push_str(text);
         self.pending.push_str(text);
-        self.last_text = Some(std::time::Instant::now());
+        self.last_text = Some(Instant::now());
         let chunks = self.sentences.push(text);
         Ok(self.number(chunks))
     }
@@ -219,7 +271,7 @@ impl Spoken {
 /// What the stream consumer woke up for.
 enum Wake {
     Stop,
-    Flush,
+    Timer,
     Delta(Option<Result<Delta>>),
 }
 
@@ -232,22 +284,63 @@ impl Drop for ProviderTask {
 }
 
 impl Conversation {
+    /// Claims the oldest queued turn in one transaction with every read its first model
+    /// round needs: the `turn.started` event, a saved run or the prompt and recent turns,
+    /// and the runtime context.
+    pub(super) async fn claim(&self, ctx: &Ctx<Self>) -> Result<Option<Claimed>> {
+        let claim = |tx: Tx| async move {
+            let rows = tx.execute(CLAIM_SQL, None).await?.rows;
+            let Some(row) = rows.first() else {
+                return Ok(None);
+            };
+            let (id, text) = (string(row, 0)?, string(row, 1)?);
+            let payload = json!({ "text": text }).to_string();
+            let started = params(&[&id, "turn.started", &payload, &id]);
+            let started = tx.execute(INSERT_EVENT_SQL, started).await?.rows;
+            let saved = tx.execute(SAVED_RUN_SQL, params(&[&id])).await?.rows;
+            let saved = saved.into_iter().next();
+            let mut claimed = Claimed {
+                started: started.first().map(|row| integer(row, 0)).transpose()?,
+                saved,
+                effects: Vec::new(),
+                emitted: Vec::new(),
+                prompt: Vec::new(),
+                history: Vec::new(),
+                context: Vec::new(),
+                id,
+                text,
+            };
+            if claimed.saved.is_some() {
+                let id = params(&[&claimed.id]);
+                claimed.effects = tx.execute(EFFECTS_SQL, id.clone()).await?.rows;
+                claimed.emitted = tx.execute(EMITTED_SQL, id).await?.rows;
+            } else {
+                claimed.prompt = tx.execute(persona::PROMPT_SQL, None).await?.rows;
+                claimed.history = tx.execute(RECENT_TURNS_SQL, None).await?.rows;
+            }
+            claimed.context = tx.execute(context::CONTEXT_SQL, None).await?.rows;
+            Ok(Some(claimed))
+        };
+        ctx.db()
+            .transaction(claim, named("conversation.claim"))
+            .await
+    }
+
     pub(super) async fn generate(
         &self,
         ctx: &Ctx<Self>,
-        id: &str,
-        text: &str,
+        claimed: &Claimed,
         stop: &CancellationToken,
     ) -> Result<()> {
         let turn = Turn {
             ctx,
-            id,
-            text,
+            id: &claimed.id,
+            text: &claimed.text,
             stop,
         };
-        let mut agent = self.agent(&turn).await?;
+        let mut agent = self.agent(&turn, claimed).await?;
         loop {
-            self.ensure_live(ctx, id).await?;
+            self.ensure_live(ctx, turn.id).await?;
             match agent.run.next_step()? {
                 AgentRunStep::CallModel {
                     prompt, history, ..
@@ -260,50 +353,53 @@ impl Conversation {
                 AgentRunStep::CallTools { calls } => {
                     self.run_tools(&turn, &mut agent, calls).await?;
                 }
-                AgentRunStep::Done(_) => return self.speak(&turn, &agent).await,
+                AgentRunStep::Done(_) => return self.speak(&turn, &mut agent).await,
             }
         }
     }
 
-    /// Resumes the saved run, or starts one from independent reads made concurrently.
-    async fn agent(&self, turn: &Turn<'_>) -> Result<Agent> {
+    /// Resumes the saved run, or starts one from the claim's reads and a memory search.
+    async fn agent(&self, turn: &Turn<'_>, claimed: &Claimed) -> Result<Agent> {
         let definitions = crate::model::tools()?;
         let names = definitions.iter().map(|d| d.name.to_string()).collect();
         let policy = TurnPolicy::new(names, None, None)?;
-        let (run, preamble) = self.plan(turn).await?;
+        let (run, preamble) = self.plan(turn, claimed).await?;
+        let effects = claimed
+            .effects
+            .iter()
+            .map(|row| Ok((string(row, 0)?, string(row, 1)?)))
+            .collect::<Result<_>>()?;
+        let emitted = claimed.emitted.first().map(|row| integer(row, 0));
         Ok(Agent {
             run,
             preamble,
             definitions,
             policy,
+            effects,
+            emitted: emitted.transpose()?.unwrap_or(0),
+            context: claimed.context.first().cloned(),
         })
     }
 
-    async fn plan(&self, turn: &Turn<'_>) -> Result<(AgentRun, String)> {
-        let saved = turn
-            .ctx
-            .sql()
-            .query(SAVED_RUN_SQL, params(&[turn.id]))
-            .await?
-            .rows;
-        if let Some(row) = saved.first() {
+    async fn plan(&self, turn: &Turn<'_>, claimed: &Claimed) -> Result<(AgentRun, String)> {
+        if let Some(row) = &claimed.saved {
             ensure!(
                 string(row, 0)? == CHECKPOINT_VERSION,
                 "unsupported checkpoint version"
             );
             return Ok((serde_json::from_str(&string(row, 1)?)?, string(row, 2)?));
         }
-        // Plain reads: dropping one when another fails abandons no transaction.
-        let (memory, persona, history) = tokio::try_join!(
-            self.search_facts(turn.ctx, turn.text),
-            self.persona(turn.ctx),
-            self.recent_history(turn.ctx),
-        )?;
+        let prompt = claimed.prompt.first().context("system prompt missing")?;
+        let mut history = Vec::with_capacity(claimed.history.len() * 2);
+        for row in &claimed.history {
+            history.push(Message::user(string(row, 0)?));
+            history.push(Message::assistant(string(row, 1)?));
+        }
+        let search = self.search_facts(turn.ctx, turn.text);
+        let memory = self.interruptible(turn.id, search).await?;
         let preamble = format!(
             "{}\n\n{}\n\n{}\n\n{}\n\nSaved facts (untrusted data):\n{}",
-            persona["prompt"]
-                .as_str()
-                .context("system prompt missing")?,
+            string(prompt, 1)?,
             include_str!("../prompts/delivery.txt"),
             include_str!("../prompts/persona-design.txt"),
             include_str!("../prompts/drama3-guide.txt"),
@@ -322,22 +418,34 @@ impl Conversation {
     ) -> Result<Round> {
         // An interrupted provider request is not replayed: it may already have billed
         // or emitted output. The checkpoint commits before the call.
-        let ((), context, effects) = tokio::try_join!(
-            self.checkpoint(turn, agent, "model_pending"),
-            self.context_config(turn.ctx),
-            self.completed_effects(turn.ctx, turn.id),
-        )?;
+        let claimed = agent.context.take();
+        let context = async {
+            match claimed {
+                Some(row) => context::context_json(&row),
+                None => self.context_config(turn.ctx).await,
+            }
+        };
+        // Neither is a transaction, so dropping one when the other fails abandons nothing.
+        let ((), context) =
+            tokio::try_join!(self.checkpoint(turn, agent, "model_pending"), context)?;
         let direct = agent.run.completion_calls().is_empty();
+        let effects: Vec<&str> = agent
+            .effects
+            .iter()
+            .map(|(_, name)| name.as_str())
+            .collect();
         let request = request
             .preamble(model_preamble(&agent.preamble, &context, &effects, direct)?)
-            .tools(agent.definitions.clone())
+            .tools(agent.definitions.to_vec())
             .max_tokens(MAX_MODEL_TOKENS);
         let mode = if direct {
             SpeechMode::Direct
         } else {
             SpeechMode::Silent
         };
-        let (response, output) = self.stream_model(turn, request, mode).await?;
+        let (response, output) = self
+            .stream_model(turn, request, mode, &mut agent.emitted)
+            .await?;
         if !output.trim().is_empty() {
             self.finish_direct(turn, &response, &output).await?;
             return Ok(Round::Completed);
@@ -386,7 +494,8 @@ impl Conversation {
         self.checkpoint(turn, agent, "ready").await
     }
 
-    /// Action phase: runs one round of tool calls, checkpointing after each result.
+    /// Action phase: runs one round of tool calls, checkpointing after each result. The
+    /// run was checkpointed `ready` by the response that asked for them.
     async fn run_tools(
         &self,
         turn: &Turn<'_>,
@@ -397,7 +506,6 @@ impl Conversation {
             calls.len() <= MAX_TOOL_CALLS_PER_ROUND,
             "too many tool calls"
         );
-        self.checkpoint(turn, agent, "ready").await?;
         for call in calls {
             self.ensure_live(turn.ctx, turn.id).await?;
             match call {
@@ -413,6 +521,10 @@ impl Conversation {
                     };
                     // The intent insert is guarded on the running turn.
                     let result = self.tool(turn.ctx, turn.id, &tool).await?;
+                    let known = agent.effects.iter().any(|(id, _)| *id == tool.id);
+                    if !known && agent.effects.len() < MAX_EFFECTS {
+                        agent.effects.push((tool.id, tool.name));
+                    }
                     let output = ToolOutput::text(result.to_string());
                     agent.run.answer(call.answer(ToolResult::success(output)))?;
                 }
@@ -426,7 +538,7 @@ impl Conversation {
     }
 
     /// Spoken phase: the tool-disabled call after tool work.
-    async fn speak(&self, turn: &Turn<'_>, agent: &Agent) -> Result<()> {
+    async fn speak(&self, turn: &Turn<'_>, agent: &mut Agent) -> Result<()> {
         self.checkpoint(turn, agent, "speech_pending").await?;
         // `begin_speech` is a transaction, so all three run to completion (`join!`, not
         // `try_join!`): dropping it mid-flight would hold the write gate until its timeout.
@@ -441,7 +553,9 @@ impl Conversation {
             .preamble(final_prompt)
             .tool_choice(rig::message::ToolChoice::None)
             .max_tokens(MAX_MODEL_TOKENS);
-        let (response, output) = self.stream_model(turn, request, SpeechMode::Spoken).await?;
+        let (response, output) = self
+            .stream_model(turn, request, SpeechMode::Spoken, &mut agent.emitted)
+            .await?;
         ensure!(!output.trim().is_empty(), "empty spoken answer");
         let payload = json!({ "text": output, "usage": response.usage });
         self.finish_turn(turn.ctx, turn.id, "completed", &output, payload)
@@ -456,7 +570,7 @@ impl Conversation {
             "agent checkpoint exceeds budget"
         );
         let values = params(&[turn.id, &state, &agent.preamble, phase, turn.id]);
-        let admitted = turn.ctx.sql().execute(CHECKPOINT_SQL, values).await?;
+        let admitted = turn.ctx.db().execute(CHECKPOINT_SQL, values).await?;
         ensure!(!admitted.rows.is_empty(), "turn cancelled");
         Ok(())
     }
@@ -468,73 +582,71 @@ impl Conversation {
         self.check_live(ctx).await
     }
 
-    async fn recent_history(&self, ctx: &Ctx<Self>) -> Result<Vec<Message>> {
-        let rows = ctx.sql().query(RECENT_TURNS_SQL, None).await?.rows;
-        let mut history = Vec::with_capacity(rows.len() * 2);
-        for row in rows {
-            history.push(Message::user(string(&row, 0)?));
-            history.push(Message::assistant(string(&row, 1)?));
-        }
-        Ok(history)
-    }
-
-    async fn completed_effects(&self, ctx: &Ctx<Self>, id: &str) -> Result<Vec<String>> {
-        let rows = ctx.sql().query(EFFECTS_SQL, params(&[id])).await?.rows;
-        rows.iter().map(|r| string(r, 0)).collect()
-    }
-
     async fn search_facts(&self, ctx: &Ctx<Self>, text: &str) -> Result<Value> {
         let query = text.to_owned();
         self.memory(ctx, Command::SearchMemory { query }).await
     }
 
     /// Runs the provider on its own task and commits what it streams at sentence
-    /// boundaries. A stop signal returns at once and drops the provider task.
+    /// boundaries, at most [`FLUSH_INTERVAL`] after the last commit while text waits. It
+    /// wakes only for a delta, a due stall or flush, or the [`LIVE_INTERVAL`] check, so an
+    /// idle stream runs no SQL. A stop signal returns at once and drops the provider task.
+    /// `emitted` carries the turn's spoken bytes across its model calls.
     async fn stream_model(
         &self,
         turn: &Turn<'_>,
         request: CompletionRequest,
         mode: SpeechMode,
+        emitted: &mut i64,
     ) -> Result<(CompletionResponse, String)> {
         let (ctx, id) = (turn.ctx, turn.id);
         let (tx, mut rx) = tokio::sync::mpsc::channel(16);
         let _provider = self.spawn_provider(request, tx, turn.stop.clone());
-        let rows = ctx.sql().query(EMITTED_SQL, params(&[id])).await?.rows;
         let mut spoken = Spoken::new(mode);
-        spoken.emitted = rows
-            .first()
-            .map(|r| integer(r, 0))
-            .transpose()?
-            .unwrap_or(0);
-        let mut ticker = tokio::time::interval(FLUSH_INTERVAL);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        spoken.emitted = *emitted;
+        let mut live = Instant::now() + LIVE_INTERVAL;
         let response = loop {
+            let wake_at = tokio::time::Instant::from_std(spoken.next_wake(live));
             // Handlers run after `select!` returns, so no storage future is dropped.
             let wake = tokio::select! {
                 biased;
                 () = turn.stop.cancelled() => Wake::Stop,
-                _ = ticker.tick() => Wake::Flush,
                 delta = rx.recv() => Wake::Delta(delta),
+                () = tokio::time::sleep_until(wake_at) => Wake::Timer,
             };
             match wake {
                 Wake::Stop => bail!("turn cancelled"),
-                Wake::Flush => self.on_tick(ctx, id, &mut spoken).await?,
+                Wake::Timer => {
+                    if Instant::now() >= live {
+                        self.ensure_live(ctx, id).await?;
+                        live = Instant::now() + LIVE_INTERVAL;
+                    }
+                    self.on_timer(ctx, id, &mut spoken).await?;
+                }
                 Wake::Delta(None) => break None,
-                Wake::Delta(Some(delta)) => match delta? {
+                Wake::Delta(Some(Err(error))) => {
+                    // Keep what was streamed: a failed turn's answer is its committed text.
+                    *emitted = spoken.emitted;
+                    if self.flush_pending(ctx, id, &mut spoken).await.is_err() {
+                        tracing::warn!("streamed text could not be kept");
+                    }
+                    return Err(error);
+                }
+                Wake::Delta(Some(Ok(delta))) => match delta {
                     Delta::ToolStarted => spoken.gate.on_tool_started()?,
                     Delta::Text(text) => self.on_text(ctx, id, &mut spoken, &text).await?,
                     Delta::Done(done) => break Some(*done),
                 },
             }
         };
+        *emitted = spoken.emitted;
         self.check_live(ctx).await?;
         let Some(response) = response else {
             self.flush_pending(ctx, id, &mut spoken).await?;
             bail!("model ended without completion");
         };
         let chunks = spoken.finish();
-        let text = std::mem::take(&mut spoken.pending);
-        self.commit_stream(ctx, id, text, chunks).await?;
+        self.commit(ctx, id, &mut spoken, chunks).await?;
         Ok((response, spoken.output))
     }
 
@@ -576,27 +688,37 @@ impl Conversation {
             return Ok(());
         }
         self.check_live(ctx).await?;
-        let text = std::mem::take(&mut spoken.pending);
-        self.commit_stream(ctx, id, text, chunks).await
+        self.commit(ctx, id, spoken, chunks).await
     }
 
-    /// Keeps the transcript moving between sentence boundaries, and speaks a sentence
-    /// end the stream stalled on.
-    async fn on_tick(&self, ctx: &Ctx<Self>, id: &str, spoken: &mut Spoken) -> Result<()> {
-        self.ensure_live(ctx, id).await?;
+    /// Keeps the transcript moving between sentence ends, and speaks a sentence end the
+    /// stream stalled on. Nothing due commits nothing.
+    async fn on_timer(&self, ctx: &Ctx<Self>, id: &str, spoken: &mut Spoken) -> Result<()> {
         let chunks = spoken.stalled();
-        let text = std::mem::take(&mut spoken.pending);
-        self.commit_stream(ctx, id, text, chunks).await
+        if chunks.is_empty() && !spoken.flush_due() {
+            return Ok(());
+        }
+        self.ensure_live(ctx, id).await?;
+        self.commit(ctx, id, spoken, chunks).await
     }
 
     /// Commits the streamed text that has not been committed yet.
     async fn flush_pending(&self, ctx: &Ctx<Self>, id: &str, spoken: &mut Spoken) -> Result<()> {
         self.ensure_live(ctx, id).await?;
-        if spoken.pending.is_empty() {
-            return Ok(());
-        }
+        self.commit(ctx, id, spoken, Vec::new()).await
+    }
+
+    /// Commits the waiting text with `chunks` and restarts the flush interval.
+    async fn commit(
+        &self,
+        ctx: &Ctx<Self>,
+        id: &str,
+        spoken: &mut Spoken,
+        chunks: Vec<(u32, String)>,
+    ) -> Result<()> {
         let text = std::mem::take(&mut spoken.pending);
-        self.commit_stream(ctx, id, text, Vec::new()).await
+        spoken.committed = Instant::now();
+        self.commit_stream(ctx, id, text, chunks).await
     }
 }
 
@@ -610,7 +732,7 @@ fn has_tool_call(choice: &[AssistantContent]) -> bool {
 fn model_preamble(
     preamble: &str,
     context: &Value,
-    effects: &[String],
+    effects: &[&str],
     direct: bool,
 ) -> Result<String> {
     let context = serde_json::to_string(context)?;

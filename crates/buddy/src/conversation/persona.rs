@@ -1,10 +1,11 @@
 //! The conversation owns its bounded, versioned harness configuration.
 use super::{
-    Context, Conversation, Ctx, P, Receipt, Result, SqliteDbExt, SqliteTransaction, Value, auth,
-    ensure, ensure_receipt_running, integer, json, named, string, trim_versions, write_receipt,
+    Context, Conversation, Ctx, Db, P, Receipt, Result, Tx, Value, auth, ensure,
+    ensure_receipt_running, integer, json, named, string, trim_versions, write_receipt,
 };
 
-const PROMPT_SQL: &str = "SELECT revision, prompt, updated FROM system_prompt WHERE singleton = 1";
+pub(super) const PROMPT_SQL: &str =
+    "SELECT revision, prompt, updated FROM system_prompt WHERE singleton = 1";
 pub(super) const UPDATE_PROMPT_SQL: &str = r"
     UPDATE system_prompt SET revision = revision + 1, prompt = ?, updated = ?
     WHERE singleton = 1 AND revision = ?
@@ -18,7 +19,7 @@ const PROMPT_HISTORY_SQL: &str = r"
 
 impl Conversation {
     pub(super) async fn persona(&self, ctx: &Ctx<Self>) -> Result<Value> {
-        let rows = ctx.sql().query(PROMPT_SQL, None).await?.rows;
+        let rows = ctx.db().query(PROMPT_SQL, None).await?.rows;
         let row = rows.first().context("system prompt missing")?;
         Ok(json!({
             "revision": integer(row, 0)?,
@@ -43,7 +44,7 @@ impl Conversation {
                 && reason.len() <= 500,
             "invalid system prompt update"
         );
-        let write = |tx: SqliteTransaction| async move {
+        let write = |tx: Tx| async move {
             ensure_receipt_running(&tx, receipt).await?;
             let now = auth::now();
             let update = vec![
@@ -69,13 +70,13 @@ impl Conversation {
             write_receipt(&tx, receipt, &result).await?;
             Ok(result)
         };
-        ctx.sql()
+        ctx.db()
             .transaction(write, named("conversation.set_persona"))
             .await
     }
 
     pub(super) async fn persona_history(&self, ctx: &Ctx<Self>) -> Result<Value> {
-        let rows = ctx.sql().query(PROMPT_HISTORY_SQL, None).await?.rows;
+        let rows = ctx.db().query(PROMPT_HISTORY_SQL, None).await?.rows;
         let versions = rows
             .iter()
             .map(|r| {

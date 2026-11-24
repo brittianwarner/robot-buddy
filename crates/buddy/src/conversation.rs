@@ -5,28 +5,28 @@ mod harness;
 pub mod history;
 mod persona;
 mod profiles;
+mod retention;
 mod speech;
 mod tools;
 mod voice;
 use crate::{
     auth,
-    db::{bot_key, integer, params, string},
+    db::{BATCH_TX_TIMEOUT, Db, Tx, bot_key, integer, named, named_for, params, string},
     model::{Delta, Model, ToolCall},
     protocol::{Call, Command, Connection, OutputEvent},
 };
 use anyhow::{Context, Result, bail, ensure};
 use async_trait::async_trait;
 use rivetkit::{
-    BindParam as P, ColumnValue as V, SqliteDbExt, SqliteTransaction,
-    SqliteTransactionOptions as TxOptions, action, prelude::*,
+    BindParam as P, ColumnValue as V, SqliteDbExt, SqliteTransaction, action, prelude::*,
 };
 use serde_json::{Value, json};
 use std::{
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -37,12 +37,26 @@ pub struct Conversation {
     draining: AtomicBool,
     /// Shared so a model stream can run on its own task.
     model: Arc<Model>,
-    last_authorized: tokio::sync::Mutex<Option<std::time::Instant>>,
+    /// When the latest access check that passed began; see [`LIVE_CHECK_TTL`].
+    last_authorized: std::sync::Mutex<Option<Instant>>,
     /// In-process stop signal for the running turn. A terminal `finish_turn` fires it so
-    /// a provider stream drops at once. Durable turn status stays the source of truth.
+    /// a provider stream drops at once; so do the turn deadline and actor shutdown. Durable
+    /// turn status stays the source of truth.
     running: std::sync::Mutex<Option<(String, CancellationToken)>>,
     /// Verified session expiry per connection, so events do not re-verify each session.
     sessions: delivery::Sessions,
+    /// A `start_drain` found a drain running. The drain claims again before it stops.
+    wake: AtomicBool,
+    /// Drains that failed in a row, for the bounded retry backoff.
+    drain_failures: AtomicU32,
+    /// A failed turn could not be marked failed. The next drain fails it first.
+    orphaned: AtomicBool,
+    /// Turns finished since the last retention pass.
+    since_prune: AtomicU32,
+    /// The schema, seeds and factory adoption are current; `on_start` skips adoption.
+    schema_current: bool,
+    /// `PRAGMA user_version` is below [`SCHEMA_VERSION`]; `on_start` raises it.
+    mark_schema: bool,
 }
 
 /// The turn and tool call a settings write records its result for, when a tool made it.
@@ -50,21 +64,33 @@ type Receipt<'a> = Option<(&'a str, &'a str)>;
 
 /// How long one turn may run, tool rounds and speech included.
 const TURN_DEADLINE: Duration = Duration::from_mins(3);
-/// How long a live-access check is trusted.
+/// After the deadline or shutdown fires a turn's stop signal, how long it may take to
+/// reach its next stop check. Only a turn stuck past this is dropped.
+const HALT_GRACE: Duration = Duration::from_secs(2);
+/// How long a passed access check is trusted by in-process checks, speech polling and a
+/// subscription right after its connect. Every other device action and every connect
+/// checks the bot actor fresh, so a revoke fails them at once.
 const LIVE_CHECK_TTL: Duration = Duration::from_secs(1);
+/// Retries of a failed drain: 100 ms, then doubling, then the next submit or wake.
+const DRAIN_RETRIES: u32 = 5;
+const DRAIN_RETRY_BASE: Duration = Duration::from_millis(100);
+/// Attempts to mark a failed turn failed before the next drain must reconcile it.
+const FINISH_ATTEMPTS: u32 = 3;
+/// `PRAGMA user_version` once this code's schema, seeds and factory adoption are applied.
+const SCHEMA_VERSION: i64 = 1;
+/// The schema version and whether a trigger of an older layout is present. Both readable
+/// before any table exists.
+const SCHEMA_STATE_SQL: &str = r"
+    SELECT (SELECT user_version FROM pragma_user_version),
+        EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name IN (
+            'turns_history_insert', 'turns_history_update',
+            'turns_search_insert', 'turns_search_update'))";
+const MARK_SCHEMA_SQL: &str = "PRAGMA user_version = 1";
 /// Lifetime of the agent session the conversation signs for memory and access checks.
 const AGENT_SESSION_SECONDS: i64 = 60;
 /// Settings keep their newest versions; older ones are deleted on each write.
 const KEPT_VERSIONS: i64 = 15;
 const MAX_SPOKEN_ANSWER_BYTES: usize = 12_000;
-
-/// Transaction options with a static name, which Rivet reports in errors and profiles.
-const fn named(name: &'static str) -> TxOptions<'static> {
-    TxOptions {
-        name: Some(name),
-        timeout: None,
-    }
-}
 
 const SEED_PROMPT_SQL: &str = r"
     INSERT OR IGNORE INTO system_prompt(singleton, revision, prompt, updated)
@@ -115,7 +141,6 @@ const INSERT_EVENT_SQL: &str = r"
     INSERT INTO events(turn_id, kind, payload) SELECT ?, ?, ?
     WHERE EXISTS(SELECT 1 FROM turns WHERE id = ? AND status = 'running')
     RETURNING sequence";
-const QUEUED_SQL: &str = "SELECT id FROM turns WHERE status = 'queued' LIMIT 1";
 const CLAIM_SQL: &str = r"
     UPDATE turns SET status = 'running'
     WHERE id = (SELECT id FROM turns WHERE status = 'queued' ORDER BY created LIMIT 1)
@@ -137,9 +162,17 @@ const PRIOR_REQUEST_SQL: &str = "SELECT id, text FROM turns WHERE request_id = ?
 const BUSY_SQL: &str = "SELECT id FROM turns WHERE status IN ('queued', 'running') LIMIT 1";
 const INSERT_TURN_SQL: &str =
     "INSERT INTO turns(id, request_id, text, created) VALUES (?, ?, ?, ?)";
+/// At most 128 events and [`REPLAY_PAGE_BYTES`] of payload, counting 64 bytes of framing
+/// per event, but always the first event: a client pages until a page is empty.
 const REPLAY_SQL: &str = r"
-    SELECT sequence, turn_id, kind, payload FROM events
-    WHERE sequence > ? ORDER BY sequence LIMIT 128";
+    SELECT sequence, turn_id, kind, payload FROM (
+        SELECT sequence, turn_id, kind, payload,
+            row_number() OVER (ORDER BY sequence) AS n,
+            sum(length(CAST(payload AS BLOB)) + 64) OVER (ORDER BY sequence) AS bytes
+        FROM (SELECT * FROM events WHERE sequence > ? ORDER BY sequence LIMIT 128))
+    WHERE n = 1 OR bytes <= ? ORDER BY sequence";
+/// Half of rivetkit's 1 MiB outgoing message limit, leaving room for encoding.
+const REPLAY_PAGE_BYTES: i64 = 512 * 1024;
 const SNAPSHOT_SQL: &str = r"
     SELECT id, status, text, answer,
         EXISTS(SELECT 1 FROM speech_chunks c WHERE c.turn_id = turns.id)
@@ -153,7 +186,7 @@ const HISTORY_PAGE_SQL: &str = r"
 /// Starts, resumes or restarts the history search rebuild, or marks it done. Returns
 /// whether batches remain. Runs in `create`, before any action.
 async fn begin_history_backfill(ctx: &Ctx<Conversation>) -> Result<bool> {
-    let begin = |tx: SqliteTransaction| async move {
+    let begin = |tx: Tx| async move {
         let rows = tx.execute(history::STATUS_SQL, None).await?.rows;
         let row = rows.first().context("history status missing")?;
         let flag = |index| integer(row, index).map(|value| value != 0);
@@ -175,12 +208,12 @@ async fn begin_history_backfill(ctx: &Ctx<Conversation>) -> Result<bool> {
         Ok(decision.pending())
     };
     let options = named("conversation.history_backfill_begin");
-    ctx.sql().transaction(begin, options).await
+    ctx.db().transaction(begin, options).await
 }
 
 /// One rebuild batch in one transaction. Returns whether batches remain.
 async fn history_backfill_step(ctx: &Ctx<Conversation>) -> Result<bool> {
-    let step = |tx: SqliteTransaction| async move {
+    let step = |tx: Tx| async move {
         let rows = tx.execute(history::STATE_SQL, None).await?.rows;
         let Some(row) = rows.first() else {
             return Ok(false);
@@ -221,8 +254,11 @@ async fn history_backfill_step(ctx: &Ctx<Conversation>) -> Result<bool> {
             .await?;
         Ok(false)
     };
-    ctx.sql()
-        .transaction(step, named("conversation.history_backfill"))
+    ctx.db()
+        .transaction(
+            step,
+            named_for("conversation.history_backfill", BATCH_TX_TIMEOUT),
+        )
         .await
 }
 
@@ -233,20 +269,32 @@ async fn seed_settings(
     versions: &'static str,
     value: String,
 ) -> Result<()> {
-    let seed = |tx: SqliteTransaction| async move {
+    let seed = |tx: Tx| async move {
         let row = vec![P::Text(value), P::Integer(auth::now())];
         tx.execute(settings, Some(row)).await?;
         tx.execute(versions, None).await?;
         Ok(())
     };
-    ctx.sql()
+    ctx.db()
         .transaction(seed, named("conversation.seed_settings"))
         .await
 }
 
+/// Seeds every settings singleton and the Buddy persona; existing rows are kept.
+async fn seed_all(ctx: &Ctx<Conversation>) -> Result<()> {
+    let prompt = include_str!("prompts/persona.txt").to_owned();
+    seed_settings(ctx, SEED_PROMPT_SQL, SEED_PROMPT_VERSION_SQL, prompt).await?;
+    let default_voice = serde_json::to_string(&crate::voice::VoiceConfig::default())?;
+    let voice = default_voice.clone();
+    seed_settings(ctx, SEED_VOICE_SQL, SEED_VOICE_VERSION_SQL, voice).await?;
+    seed_buddy(ctx, default_voice).await?;
+    let context = serde_json::to_string(&crate::context::ContextConfig::default())?;
+    seed_settings(ctx, SEED_CONTEXT_SQL, SEED_CONTEXT_VERSION_SQL, context).await
+}
+
 /// Seeds the Buddy persona at version 1 with the default prompt and voice.
 async fn seed_buddy(ctx: &Ctx<Conversation>, voice: String) -> Result<()> {
-    let seed = |tx: SqliteTransaction| async move {
+    let seed = |tx: Tx| async move {
         tx.execute(SEED_BUDDY_SQL, None).await?;
         let version = vec![
             P::Text(include_str!("prompts/persona.txt").into()),
@@ -256,13 +304,13 @@ async fn seed_buddy(ctx: &Ctx<Conversation>, voice: String) -> Result<()> {
         tx.execute(SEED_BUDDY_VERSION_SQL, Some(version)).await?;
         Ok(())
     };
-    ctx.sql()
+    ctx.db()
         .transaction(seed, named("conversation.seed_buddy"))
         .await
 }
 
 /// Fails a settings write made by a tool once its turn has stopped running.
-async fn ensure_receipt_running(tx: &SqliteTransaction, receipt: Receipt<'_>) -> Result<()> {
+async fn ensure_receipt_running(tx: &Tx, receipt: Receipt<'_>) -> Result<()> {
     if let Some((turn, _)) = receipt {
         let rows = tx.execute(RUNNING_TURN_SQL, params(&[turn])).await?.rows;
         ensure!(!rows.is_empty(), "turn cancelled");
@@ -272,7 +320,7 @@ async fn ensure_receipt_running(tx: &SqliteTransaction, receipt: Receipt<'_>) ->
 
 /// Records a tool's result in the same transaction as its write, so a recovered turn
 /// cannot apply the write twice.
-async fn write_receipt(tx: &SqliteTransaction, receipt: Receipt<'_>, result: &Value) -> Result<()> {
+async fn write_receipt(tx: &Tx, receipt: Receipt<'_>, result: &Value) -> Result<()> {
     if let Some((turn, call)) = receipt {
         let values = params(&[&result.to_string(), turn, call]);
         tx.execute(RECEIPT_SQL, values).await?;
@@ -281,7 +329,7 @@ async fn write_receipt(tx: &SqliteTransaction, receipt: Receipt<'_>, result: &Va
 }
 
 /// Deletes the settings versions older than the kept window below `revision`.
-async fn trim_versions(tx: &SqliteTransaction, sql: &str, revision: i64) -> Result<()> {
+async fn trim_versions(tx: &Tx, sql: &str, revision: i64) -> Result<()> {
     let oldest = (revision - KEPT_VERSIONS).max(1);
     tx.execute(sql, Some(vec![P::Integer(oldest)])).await?;
     Ok(())
@@ -313,6 +361,20 @@ fn start_history_backfill(ctx: &Ctx<Conversation>) {
     });
 }
 
+/// Why a turn was stopped by the runtime rather than by a user.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Halt {
+    Deadline,
+    Abort,
+}
+
+/// Whether an action's access check may use the [`LIVE_CHECK_TTL`] cache.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Check {
+    Fresh,
+    Cached,
+}
+
 /// Clears the drain flag when dropped, including during a panic, then runs `recheck`.
 struct DrainGuard<'a, F: FnOnce()> {
     draining: &'a AtomicBool,
@@ -321,7 +383,7 @@ struct DrainGuard<'a, F: FnOnce()> {
 
 impl<F: FnOnce()> Drop for DrainGuard<'_, F> {
     fn drop(&mut self) {
-        self.draining.store(false, Ordering::Release);
+        self.draining.store(false, Ordering::SeqCst);
         if let Some(recheck) = self.recheck.take() {
             recheck();
         }
@@ -337,32 +399,48 @@ impl Actor for Conversation {
     type Action = action::Raw;
     async fn create(ctx: &Ctx<Self>) -> Result<Self> {
         let signing_key = crate::config::signing_key()?;
-        ctx.sql().exec(include_str!("conversation.sql")).await?;
+        // A wake of a current database skips the schema, the seeds and factory adoption.
+        // Older code never sets the version, and any older trigger forces the full path,
+        // which is idempotent, so a rolling deploy in either direction stays correct.
+        let rows = ctx.db().query(SCHEMA_STATE_SQL, None).await?.rows;
+        let row = rows.first().context("schema state missing")?;
+        let version = integer(row, 0)?;
+        let schema_current = version >= SCHEMA_VERSION && integer(row, 1)? == 0;
+        if !schema_current {
+            ctx.db().exec(include_str!("conversation.sql")).await?;
+        }
         let history_backfill = begin_history_backfill(ctx).await?;
-        let prompt = include_str!("prompts/persona.txt").to_owned();
-        seed_settings(ctx, SEED_PROMPT_SQL, SEED_PROMPT_VERSION_SQL, prompt).await?;
-        let default_voice = serde_json::to_string(&crate::voice::VoiceConfig::default())?;
-        let voice = default_voice.clone();
-        seed_settings(ctx, SEED_VOICE_SQL, SEED_VOICE_VERSION_SQL, voice).await?;
-        seed_buddy(ctx, default_voice).await?;
-        let context = serde_json::to_string(&crate::context::ContextConfig::default())?;
-        seed_settings(ctx, SEED_CONTEXT_SQL, SEED_CONTEXT_VERSION_SQL, context).await?;
+        if !schema_current {
+            seed_all(ctx).await?;
+        }
         Ok(Self {
             signing_key,
             history_backfill,
             draining: AtomicBool::new(false),
             model: Arc::new(Model::from_env()?),
-            last_authorized: tokio::sync::Mutex::new(None),
+            last_authorized: std::sync::Mutex::new(None),
             running: std::sync::Mutex::new(None),
             sessions: delivery::Sessions::default(),
+            wake: AtomicBool::new(false),
+            drain_failures: AtomicU32::new(0),
+            orphaned: AtomicBool::new(false),
+            since_prune: AtomicU32::new(0),
+            schema_current,
+            mark_schema: version < SCHEMA_VERSION,
         })
     }
     async fn on_start(self: Arc<Self>, ctx: Ctx<Self>) -> Result<()> {
-        self.adopt_factory_companion(&ctx).await?;
-        ctx.sql().execute(REQUEUE_READY_SQL, None).await?;
+        if !self.schema_current {
+            self.adopt_factory_companion(&ctx).await?;
+        }
+        if self.mark_schema {
+            // Never lowers a version newer code wrote.
+            ctx.db().exec(MARK_SCHEMA_SQL).await?;
+        }
+        ctx.db().execute(REQUEUE_READY_SQL, None).await?;
         // A provider stream cannot resume after process loss. Preserve its output and make
         // the interruption explicit.
-        let interrupted = ctx.sql().query(RUNNING_TURNS_SQL, None).await?;
+        let interrupted = ctx.db().query(RUNNING_TURNS_SQL, None).await?;
         for row in interrupted.rows {
             let payload = json!({ "reason": "server_restart" });
             let id = string(&row, 0)?;
@@ -376,17 +454,23 @@ impl Actor for Conversation {
         Ok(())
     }
     async fn on_before_connect(self: Arc<Self>, ctx: Ctx<Self>, p: &Connection) -> Result<()> {
-        self.authorize(&ctx, &p.session, None).await.map(|_| ())
+        self.authorize(&ctx, &p.session, None, Check::Fresh)
+            .await
+            .map(|_| ())
     }
     async fn on_subscribe(
         self: Arc<Self>,
         ctx: Ctx<Self>,
         conn: ConnCtx<Self>,
-        _: String,
+        event: String,
     ) -> Result<()> {
-        self.authorize(&ctx, &conn.params()?.session, None)
-            .await
-            .map(|_| ())
+        // `on_before_connect` checked access fresh just before; see `LIVE_CHECK_TTL`.
+        self.authorize(&ctx, &conn.params()?.session, None, Check::Cached)
+            .await?;
+        if event == OutputEvent::NAME {
+            self.sessions.subscribed(conn.id());
+        }
+        Ok(())
     }
 }
 
@@ -395,7 +479,7 @@ impl Conversation {
     /// Customized prompts, voices, and later persona versions stay as saved.
     async fn adopt_factory_companion(&self, ctx: &Ctx<Self>) -> Result<()> {
         let factory_prompt = include_str!("prompts/persona.factory-v1.txt");
-        let prompt_rows = ctx.sql().query(FACTORY_PROMPT_SQL, None).await?.rows;
+        let prompt_rows = ctx.db().query(FACTORY_PROMPT_SQL, None).await?.rows;
         if let Some(row) = prompt_rows.first()
             && integer(row, 0)? == 1
             && string(row, 1)? == factory_prompt
@@ -404,7 +488,7 @@ impl Conversation {
             self.set_persona(ctx, 1, prompt, "Adopt J.P. companion wording", None)
                 .await?;
         }
-        let voice_rows = ctx.sql().query(FACTORY_VOICE_SQL, None).await?.rows;
+        let voice_rows = ctx.db().query(FACTORY_VOICE_SQL, None).await?.rows;
         if let Some(row) = voice_rows.first()
             && integer(row, 0)? == 1
         {
@@ -415,14 +499,14 @@ impl Conversation {
                     .await?;
             }
         }
-        let buddy = ctx.sql().query(BUDDY_LATEST_SQL, None).await?.rows;
+        let buddy = ctx.db().query(BUDDY_LATEST_SQL, None).await?.rows;
         if buddy
             .first()
             .is_none_or(|row| integer(row, 0).ok() != Some(1))
         {
             return Ok(());
         }
-        let versions = ctx.sql().query(BUDDY_FIRST_SQL, None).await?.rows;
+        let versions = ctx.db().query(BUDDY_FIRST_SQL, None).await?.rows;
         let Some(row) = versions.first() else {
             return Ok(());
         };
@@ -439,7 +523,7 @@ impl Conversation {
                 P::Text(prompt),
                 P::Text(stored_voice),
             ];
-            ctx.sql().execute(ADOPT_BUDDY_SQL, Some(values)).await?;
+            ctx.db().execute(ADOPT_BUDDY_SQL, Some(values)).await?;
         }
         Ok(())
     }
@@ -449,11 +533,41 @@ impl Conversation {
         ctx: &Ctx<Self>,
         token: &str,
         role: Option<&str>,
+        check: Check,
     ) -> Result<auth::Session> {
         let session: auth::Session = auth::verify(&self.signing_key, "session", token)?;
         session.validate(&bot_key(ctx)?, role)?;
-        crate::actor::check_access(ctx.client()?, &bot_key(ctx)?, token).await?;
+        if check == Check::Fresh || !self.recently_authorized() {
+            self.check_access(ctx, token).await?;
+        }
         Ok(session)
+    }
+
+    /// Whether an access check that passed began less than [`LIVE_CHECK_TTL`] ago.
+    fn recently_authorized(&self) -> bool {
+        self.last_authorized
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some_and(|at| at.elapsed() < LIVE_CHECK_TTL)
+    }
+
+    /// Asks the bot actor, then records the outcome: a pass dates the cache from when the
+    /// check began, any failure clears it.
+    async fn check_access(&self, ctx: &Ctx<Self>, token: &str) -> Result<()> {
+        let began = Instant::now();
+        let result = crate::actor::check_access(ctx.client()?, &bot_key(ctx)?, token).await;
+        let mut last = self
+            .last_authorized
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if result.is_ok() {
+            if last.is_none_or(|at| at < began) {
+                *last = Some(began);
+            }
+        } else {
+            *last = None;
+        }
+        result
     }
 
     /// A short agent session the conversation presents to the bot and memory actors.
@@ -468,7 +582,7 @@ impl Conversation {
 
     async fn event(&self, ctx: &Ctx<Self>, turn: &str, kind: &str, payload: Value) -> Result<()> {
         let values = params(&[turn, kind, &payload.to_string(), turn]);
-        let inserted = ctx.sql().execute(INSERT_EVENT_SQL, values).await?;
+        let inserted = ctx.db().execute(INSERT_EVENT_SQL, values).await?;
         let Some(row) = inserted.rows.first() else {
             return Ok(());
         };
@@ -482,99 +596,182 @@ impl Conversation {
         Ok(())
     }
 
+    /// Starts the drain task, or tells the running one to claim again before it stops.
     fn start_drain(self: &Arc<Self>, ctx: &Ctx<Self>) {
-        if self
-            .draining
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
-            return;
+        // `wake` is set before `draining` is read again, and the drain clears `draining`
+        // before it reads `wake`, so a request is never lost between the two.
+        loop {
+            if self
+                .draining
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                break;
+            }
+            self.wake.store(true, Ordering::SeqCst);
+            if self.draining.load(Ordering::SeqCst) {
+                return;
+            }
         }
+        // This drain's first claim covers every request made so far.
+        self.wake.store(false, Ordering::SeqCst);
         let actor = self.clone();
         let task_ctx = ctx.clone();
         ctx.register_task(async move {
-            // Submit also calls `start_drain` after its commit, which this drain may have
-            // refused while it was finishing. The recheck closes that race.
-            let recheck = || {
-                if task_ctx.aborted() {
-                    // `on_start` drains whatever stays queued on the next wake.
-                    return;
-                }
-                let (actor, ctx) = (actor.clone(), task_ctx.clone());
-                task_ctx.register_task(async move {
-                    let queued = ctx.sql().query(QUEUED_SQL, None).await;
-                    if queued.is_ok_and(|rows| !rows.rows.is_empty()) {
-                        actor.start_drain(&ctx);
-                    }
-                });
-            };
+            let recheck = || actor.after_drain(&task_ctx);
             let _guard = DrainGuard {
                 draining: &actor.draining,
                 recheck: Some(recheck),
             };
             let _awake = task_ctx.keep_awake_region();
-            if let Err(e) = actor.drain(&task_ctx).await {
-                tracing::error!(
-                    transport_error = e.is::<reqwest::Error>(),
-                    "agent drain failed"
-                );
+            match actor.drain(&task_ctx).await {
+                Ok(()) => actor.drain_failures.store(0, Ordering::SeqCst),
+                Err(e) => {
+                    let failures = actor.drain_failures.fetch_add(1, Ordering::SeqCst) + 1;
+                    tracing::error!(
+                        failures,
+                        transport_error = e.is::<reqwest::Error>(),
+                        "agent drain failed"
+                    );
+                }
+            }
+        });
+    }
+
+    /// Runs after a drain clears its flag: retries a failed drain with a bounded backoff,
+    /// or starts another drain for a request that arrived while this one finished.
+    fn after_drain(self: &Arc<Self>, ctx: &Ctx<Self>) {
+        if ctx.aborted() {
+            // `on_start` drains whatever stays queued on the next wake.
+            return;
+        }
+        let failures = self.drain_failures.load(Ordering::SeqCst);
+        if failures == 0 {
+            if self.wake.swap(false, Ordering::SeqCst) {
+                self.start_drain(ctx);
+            }
+            return;
+        }
+        if failures > DRAIN_RETRIES {
+            // A submit starts a drain even while busy, so a stuck turn is retried then.
+            tracing::error!(failures, "agent drain retries exhausted");
+            return;
+        }
+        let delay = DRAIN_RETRY_BASE * 2_u32.pow(failures - 1);
+        let (actor, task_ctx) = (self.clone(), ctx.clone());
+        ctx.register_task(async move {
+            tokio::time::sleep(delay).await;
+            if !task_ctx.aborted() {
+                actor.start_drain(&task_ctx);
             }
         });
     }
 
     async fn drain(&self, ctx: &Ctx<Self>) -> Result<()> {
+        if self.orphaned.swap(false, Ordering::SeqCst)
+            && let Err(error) = self.fail_orphans(ctx).await
+        {
+            self.orphaned.store(true, Ordering::SeqCst);
+            return Err(error);
+        }
         loop {
-            let rows = ctx.sql().query(CLAIM_SQL, None).await?.rows;
-            let Some(row) = rows.first() else {
+            let Some(claimed) = self.claim(ctx).await? else {
                 return Ok(());
             };
-            let id = string(row, 0)?;
-            let text = string(row, 1)?;
+            let id = claimed.id.clone();
+            if let Some(sequence) = claimed.started {
+                let event = OutputEvent {
+                    sequence,
+                    turn_id: id.clone(),
+                    kind: "turn.started".into(),
+                    payload: json!({ "text": claimed.text }),
+                };
+                self.deliver(ctx, &event).await;
+            }
             let stop = self.begin_turn_signal(&id);
-            let result = self.run_turn(ctx, &id, &text, &stop).await;
+            let (result, halt) = self.run_turn(ctx, &claimed, &stop).await;
             self.end_turn_signal(&id);
-            let Some(result) = result else {
-                return Ok(());
-            };
-            if let Err(error) = result {
-                if stop.is_cancelled() {
-                    // Already terminal: cancellation committed its own event.
-                    continue;
+            match (result, halt) {
+                // Stopping: `on_start` requeues or interrupts the turn on the next wake.
+                (_, Some(Halt::Abort)) => return Ok(()),
+                (Ok(()), _) => {}
+                // A cancel already committed the terminal event.
+                (Err(_), None) if stop.is_cancelled() => {}
+                (Err(error), halt) => {
+                    tracing::warn!(
+                        transport_error = error.is::<reqwest::Error>(),
+                        deadline = halt.is_some(),
+                        "generation failed"
+                    );
+                    self.fail_turn(ctx, &id).await?;
                 }
-                tracing::warn!(
-                    transport_error = error.is::<reqwest::Error>(),
-                    "generation failed"
-                );
-                let payload = json!({
-                    "message": "The assistant could not finish. Please try again.",
-                });
-                self.finish_turn(ctx, &id, "failed", "", payload).await?;
+            }
+            self.prune_after_turn(ctx);
+            if !self.wake.swap(false, Ordering::SeqCst) {
+                return Ok(());
             }
         }
     }
 
-    /// Runs one admitted turn under the execution deadline. `None` means the actor is
-    /// stopping. A barge-in does not drop this future: it fires `stop`, which the model
-    /// stream observes, so no `SQLite` transaction is abandoned mid-flight.
+    /// Marks a turn failed, retrying briefly. If every attempt fails the turn would stay
+    /// `running`, so the next drain fails it before claiming.
+    async fn fail_turn(&self, ctx: &Ctx<Self>, id: &str) -> Result<()> {
+        let payload = json!({ "message": "The assistant could not finish. Please try again." });
+        let mut attempt = 1;
+        loop {
+            match self
+                .finish_turn(ctx, id, "failed", "", payload.clone())
+                .await
+            {
+                Ok(()) => return Ok(()),
+                Err(error) if attempt >= FINISH_ATTEMPTS => {
+                    self.orphaned.store(true, Ordering::SeqCst);
+                    return Err(error);
+                }
+                Err(_) => {
+                    tokio::time::sleep(DRAIN_RETRY_BASE * attempt).await;
+                    attempt += 1;
+                }
+            }
+        }
+    }
+
+    /// Fails turns left `running` by a failed `fail_turn`. No turn runs during a drain.
+    async fn fail_orphans(&self, ctx: &Ctx<Self>) -> Result<()> {
+        let rows = ctx.db().query(RUNNING_TURNS_SQL, None).await?.rows;
+        for row in rows {
+            let payload = json!({ "message": "The assistant could not finish. Please try again." });
+            self.finish_turn(ctx, &string(&row, 0)?, "failed", "", payload)
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Runs one claimed turn under the execution deadline. A barge-in, the deadline and
+    /// actor shutdown all fire `stop`, which the turn observes at its next await point, so
+    /// no `SQLite` transaction is abandoned mid-flight. Only a turn that does not stop
+    /// within [`HALT_GRACE`] is dropped.
     async fn run_turn(
         &self,
         ctx: &Ctx<Self>,
-        id: &str,
-        text: &str,
+        claimed: &harness::Claimed,
         stop: &CancellationToken,
-    ) -> Option<Result<()>> {
-        let generation = async {
-            self.event(ctx, id, "turn.started", json!({ "text": text }))
-                .await?;
-            self.generate(ctx, id, text, stop).await
-        };
+    ) -> (Result<()>, Option<Halt>) {
+        let generation = self.generate(ctx, claimed, stop);
+        tokio::pin!(generation);
+        let deadline = tokio::time::sleep(TURN_DEADLINE);
+        tokio::pin!(deadline);
         let abort = ctx.abort_signal();
-        tokio::select! {
-            () = abort.cancelled() => None,
-            result = tokio::time::timeout(TURN_DEADLINE, generation) => {
-                Some(result.context("turn deadline exceeded").and_then(|v| v))
-            }
-        }
+        let halt = tokio::select! {
+            result = &mut generation => return (result, None),
+            () = &mut deadline => Halt::Deadline,
+            () = abort.cancelled() => Halt::Abort,
+        };
+        stop.cancel();
+        let result = tokio::time::timeout(HALT_GRACE, generation)
+            .await
+            .unwrap_or_else(|_| Err(anyhow::anyhow!("turn did not stop in time")));
+        (result, Some(halt))
     }
 
     fn begin_turn_signal(&self, id: &str) -> CancellationToken {
@@ -622,22 +819,39 @@ impl Conversation {
         Ok(())
     }
 
+    /// The access check of active generation and delivery, cached for [`LIVE_CHECK_TTL`].
     async fn check_live(&self, ctx: &Ctx<Self>) -> Result<()> {
-        let mut checked = self.last_authorized.lock().await;
-        if checked.is_some_and(|at| at.elapsed() < LIVE_CHECK_TTL) {
+        if self.recently_authorized() {
             return Ok(());
         }
-        let bot = bot_key(ctx)?;
-        let token = self.agent_token(&bot)?;
-        crate::actor::check_access(ctx.client()?, &bot, &token).await?;
-        *checked = Some(std::time::Instant::now());
-        Ok(())
+        let token = self.agent_token(&bot_key(ctx)?)?;
+        self.check_access(ctx, &token).await
+    }
+
+    /// Runs network work of the turn `id` until it finishes or the turn's stop signal
+    /// fires. Only for work that holds no transaction: it is dropped when stopped.
+    async fn interruptible<T>(&self, id: &str, work: impl Future<Output = Result<T>>) -> Result<T> {
+        let stop = self
+            .running
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .filter(|(turn, _)| turn == id)
+            .map(|(_, stop)| stop.clone());
+        let Some(stop) = stop else {
+            return work.await;
+        };
+        tokio::select! {
+            biased;
+            () = stop.cancelled() => bail!("turn cancelled"),
+            result = work => result,
+        }
     }
 
     async fn active(&self, ctx: &Ctx<Self>, id: &str) -> Result<()> {
         self.ensure_not_stopped(id)?;
         self.check_live(ctx).await?;
-        let rows = ctx.sql().query(RUNNING_TURN_SQL, params(&[id])).await?.rows;
+        let rows = ctx.db().query(RUNNING_TURN_SQL, params(&[id])).await?.rows;
         ensure!(!rows.is_empty(), "turn cancelled");
         Ok(())
     }
@@ -653,7 +867,7 @@ impl Conversation {
         let kind = format!("turn.{status}");
         let encoded = payload.to_string();
         let (kind_ref, encoded_ref) = (&kind, &encoded);
-        let finish = move |tx: SqliteTransaction| async move {
+        let finish = move |tx: Tx| async move {
             // A stopped turn keeps what it already streamed as its answer.
             let answer = if status == "completed" {
                 answer.to_owned()
@@ -678,7 +892,7 @@ impl Conversation {
             Ok(inserted.last_insert_row_id)
         };
         let changed = ctx
-            .sql()
+            .db()
             .transaction(finish, named("conversation.finish_turn"))
             .await?;
         let Some(sequence) = changed else {
@@ -712,7 +926,7 @@ impl Conversation {
         let escaped = query.replace('"', "\"\"");
         let phrase = format!("\"{escaped}\"");
         let rows = ctx
-            .sql()
+            .db()
             .query(history::SEARCH_SQL, params(&[&phrase]))
             .await?
             .rows;
@@ -760,7 +974,7 @@ impl Conversation {
         );
         let id = uuid::Uuid::now_v7().to_string();
         let created = auth::now();
-        let submit = |tx: SqliteTransaction| async move {
+        let submit = |tx: Tx| async move {
             let prior = tx
                 .execute(PRIOR_REQUEST_SQL, params(&[&request_id]))
                 .await?
@@ -783,14 +997,17 @@ impl Conversation {
             tx.execute(INSERT_TURN_SQL, Some(turn)).await?;
             Ok(json!({ "turn_id": id, "duplicate": false }))
         };
-        ctx.sql()
+        ctx.db()
             .transaction(submit, named("conversation.submit"))
             .await
     }
 
     async fn replay(&self, ctx: &Ctx<Self>, after: i64) -> Result<Value> {
-        let cursor = Some(vec![P::Integer(after.max(0))]);
-        let rows = ctx.sql().query(REPLAY_SQL, cursor).await?.rows;
+        let cursor = Some(vec![
+            P::Integer(after.max(0)),
+            P::Integer(REPLAY_PAGE_BYTES),
+        ]);
+        let rows = ctx.db().query(REPLAY_SQL, cursor).await?.rows;
         let events = rows
             .into_iter()
             .map(|r| {
@@ -806,7 +1023,7 @@ impl Conversation {
     }
 
     async fn snapshot(&self, ctx: &Ctx<Self>) -> Result<Value> {
-        let read = |tx: SqliteTransaction| async move {
+        let read = |tx: Tx| async move {
             let rows = tx.execute(SNAPSHOT_SQL, None).await?.rows;
             let turns = rows
                 .into_iter()
@@ -820,14 +1037,14 @@ impl Conversation {
             let last = integer(rows.first().context("sequence missing")?, 0)?;
             Ok(json!({ "turns": turns, "last_sequence": last }))
         };
-        ctx.sql()
+        ctx.db()
             .transaction(read, named("conversation.snapshot"))
             .await
     }
 
     async fn spoken_answer(&self, ctx: &Ctx<Self>, turn_id: String) -> Result<Value> {
         ensure!(turn_id.len() <= 128, "invalid turn id");
-        let rows = ctx.sql().query(ANSWER_SQL, params(&[&turn_id])).await?.rows;
+        let rows = ctx.db().query(ANSWER_SQL, params(&[&turn_id])).await?.rows;
         let row = rows
             .first()
             .context("only completed answers can be spoken")?;
@@ -842,7 +1059,7 @@ impl Conversation {
 
     async fn history_page(&self, ctx: &Ctx<Self>, before: String) -> Result<Value> {
         let cursor = params(&[&before, &before]);
-        let rows = ctx.sql().query(HISTORY_PAGE_SQL, cursor).await?.rows;
+        let rows = ctx.db().query(HISTORY_PAGE_SQL, cursor).await?.rows;
         let turns = rows
             .iter()
             .map(|r| turn_json(r))
@@ -853,13 +1070,20 @@ impl Conversation {
 
 impl Handler<Call> for Conversation {
     async fn handle(self: Arc<Self>, ctx: Ctx<Self>, call: Call) -> Result<Value> {
-        let session = self.authorize(&ctx, &call.session, None).await?;
+        // Speech polling is the hot device path; see `LIVE_CHECK_TTL`.
+        let check = if matches!(call.command, Command::SpeechChunk { .. }) {
+            Check::Cached
+        } else {
+            Check::Fresh
+        };
+        let session = self.authorize(&ctx, &call.session, None, check).await?;
         match call.command {
             Command::Submit { request_id, text } => {
                 ensure!(session.role == "device", "only device may submit");
-                let output = self.submit(&ctx, request_id, text).await?;
+                let output = self.submit(&ctx, request_id, text).await;
+                // Also when busy: a turn left queued by a failed drain gets a new one.
                 self.start_drain(&ctx);
-                Ok(output)
+                output
             }
             Command::Cancel { turn_id } => {
                 self.finish_turn(&ctx, &turn_id, "cancelled", "", json!({}))
@@ -881,7 +1105,7 @@ impl Handler<Call> for Conversation {
                 expected_voice_revision,
             } => {
                 ensure_settings_role(&session, "persona")?;
-                let expected = (expected_prompt_revision, expected_voice_revision);
+                let expected = Some((expected_prompt_revision, expected_voice_revision));
                 self.activate_profile(&ctx, &name, version, expected, None)
                     .await
             }
@@ -985,6 +1209,88 @@ mod tests {
         assert_eq!(adopt("factory prompt"), 1);
         let prompt: String = db.query_row(BUDDY_FIRST_SQL, [], |r| r.get(0)).unwrap();
         assert_eq!(prompt, "companion");
+    }
+
+    /// `create` skips `conversation.sql` on a database at [`SCHEMA_VERSION`], so any change
+    /// to the schema must raise the version. Update this hash only together with it.
+    #[test]
+    fn schema_changes_raise_the_schema_version() {
+        use sha2::{Digest, Sha256};
+        let digest = Sha256::digest(include_str!("conversation.sql").as_bytes());
+        let hex = digest.iter().fold(String::new(), |mut hex, byte| {
+            use std::fmt::Write;
+            let _ = write!(hex, "{byte:02x}");
+            hex
+        });
+        assert_eq!(
+            (SCHEMA_VERSION, hex.as_str()),
+            (
+                1,
+                "5112e83bda725a9215a50d6a8b9a75d87aa6e2b2f9704055fd0b10adb28d2f3d"
+            ),
+            "conversation.sql changed: raise SCHEMA_VERSION and MARK_SCHEMA_SQL"
+        );
+        assert_eq!(
+            MARK_SCHEMA_SQL,
+            format!("PRAGMA user_version = {SCHEMA_VERSION}")
+        );
+    }
+
+    fn replay_page(db: &rusqlite::Connection, after: i64) -> Vec<(i64, usize)> {
+        let mut statement = db.prepare(REPLAY_SQL).unwrap();
+        statement
+            .query_map([after, REPLAY_PAGE_BYTES], |r| {
+                Ok((r.get(0)?, r.get::<_, String>(3)?.len()))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn replay_pages_hold_the_byte_budget_and_never_stall() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(include_str!("conversation.sql")).unwrap();
+        let insert = |bytes: usize| {
+            let payload = json!({ "text": "x".repeat(bytes) }).to_string();
+            db.execute(
+                "INSERT INTO events(turn_id, kind, payload) VALUES ('t', 'text.delta', ?)",
+                [payload],
+            )
+            .unwrap();
+        };
+        // One event over the budget still pages, alone.
+        insert(700_000);
+        for _ in 0..3 {
+            insert(200_000);
+        }
+        for _ in 0..200 {
+            insert(10);
+        }
+        let first = replay_page(&db, 0);
+        assert_eq!(first.len(), 1);
+        let second = replay_page(&db, first[0].0);
+        assert_eq!(
+            second.len(),
+            2,
+            "two 200 kB events fit in 512 KiB, three do not"
+        );
+        let budget = usize::try_from(REPLAY_PAGE_BYTES).unwrap();
+        assert!(second.iter().map(|(_, bytes)| bytes + 64).sum::<usize>() <= budget);
+        let mut cursor = second[1].0;
+        let mut pages = 0;
+        loop {
+            let page = replay_page(&db, cursor);
+            let Some(last) = page.last() else { break };
+            assert!(page.len() <= 128);
+            cursor = last.0;
+            pages += 1;
+        }
+        assert_eq!(cursor, 204);
+        assert_eq!(
+            pages, 2,
+            "the last 200 kB event with 127 small ones, then the rest"
+        );
     }
 
     #[test]

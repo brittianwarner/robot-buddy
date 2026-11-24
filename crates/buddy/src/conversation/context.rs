@@ -1,11 +1,11 @@
 //! Versioned runtime context: the timezone and location every model request sees.
 use super::{
-    Context, Conversation, Ctx, P, Receipt, Result, SqliteDbExt, SqliteTransaction, Value, auth,
-    ensure, ensure_receipt_running, integer, json, named, string, trim_versions, write_receipt,
+    Context, Conversation, Ctx, Db, P, Receipt, Result, Tx, V, Value, auth, ensure,
+    ensure_receipt_running, integer, json, named, string, trim_versions, write_receipt,
 };
 use crate::context::ContextConfig;
 
-const CONTEXT_SQL: &str =
+pub(super) const CONTEXT_SQL: &str =
     "SELECT revision, config, updated FROM context_settings WHERE singleton = 1";
 const UPDATE_CONTEXT_SQL: &str = r"
     UPDATE context_settings SET revision = revision + 1, config = ?, updated = ?
@@ -15,17 +15,21 @@ const INSERT_VERSION_SQL: &str = r"
     INSERT INTO context_versions(revision, config, reason, updated) VALUES (?, ?, ?, ?)";
 const TRIM_VERSIONS_SQL: &str = "DELETE FROM context_versions WHERE revision < ?";
 
+/// A [`CONTEXT_SQL`] row with the clock read now.
+pub(super) fn context_json(row: &[V]) -> Result<Value> {
+    let config: ContextConfig = serde_json::from_str(&string(row, 1)?)?;
+    Ok(json!({
+        "revision": integer(row, 0)?,
+        "config": config,
+        "updated": integer(row, 2)?,
+        "current": config.at(auth::now())?,
+    }))
+}
+
 impl Conversation {
     pub(super) async fn context_config(&self, ctx: &Ctx<Self>) -> Result<Value> {
-        let rows = ctx.sql().query(CONTEXT_SQL, None).await?.rows;
-        let row = rows.first().context("context configuration missing")?;
-        let config: ContextConfig = serde_json::from_str(&string(row, 1)?)?;
-        Ok(json!({
-            "revision": integer(row, 0)?,
-            "config": config,
-            "updated": integer(row, 2)?,
-            "current": config.at(auth::now())?,
-        }))
+        let rows = ctx.db().query(CONTEXT_SQL, None).await?.rows;
+        context_json(rows.first().context("context configuration missing")?)
     }
 
     pub(super) async fn set_context(
@@ -42,7 +46,7 @@ impl Conversation {
             "invalid context update"
         );
         let encoded = serde_json::to_string(config)?;
-        let write = |tx: SqliteTransaction| async move {
+        let write = |tx: Tx| async move {
             ensure_receipt_running(&tx, receipt).await?;
             let now = auth::now();
             let update = vec![
@@ -71,7 +75,7 @@ impl Conversation {
             write_receipt(&tx, receipt, &result).await?;
             Ok(result)
         };
-        ctx.sql()
+        ctx.db()
             .transaction(write, named("conversation.set_context"))
             .await
     }

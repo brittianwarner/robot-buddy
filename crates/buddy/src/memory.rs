@@ -1,7 +1,7 @@
 //! Bot-scoped durable facts, independently addressable from conversation history.
 use crate::{
     auth,
-    db::{bot_key, string},
+    db::{Db, bot_key, string},
     protocol::{Call, Command, Connection},
 };
 use anyhow::{Result, bail, ensure};
@@ -52,7 +52,7 @@ impl Actor for Memory {
     type ConnParams = Connection;
     type Action = action::Raw;
     async fn create(ctx: &Ctx<Self>) -> Result<Self> {
-        ctx.sql().exec("CREATE TABLE IF NOT EXISTS facts(key TEXT PRIMARY KEY,value TEXT NOT NULL,updated INTEGER NOT NULL); CREATE VIRTUAL TABLE IF NOT EXISTS facts_search USING fts5(key,value); CREATE TRIGGER IF NOT EXISTS facts_insert AFTER INSERT ON facts BEGIN INSERT INTO facts_search(key,value) VALUES(new.key,new.value); END; CREATE TRIGGER IF NOT EXISTS facts_delete AFTER DELETE ON facts BEGIN DELETE FROM facts_search WHERE key=old.key; END; CREATE TRIGGER IF NOT EXISTS facts_update AFTER UPDATE ON facts BEGIN DELETE FROM facts_search WHERE key=old.key; INSERT INTO facts_search(key,value) VALUES(new.key,new.value); END;").await?;
+        ctx.db().exec("CREATE TABLE IF NOT EXISTS facts(key TEXT PRIMARY KEY,value TEXT NOT NULL,updated INTEGER NOT NULL); CREATE VIRTUAL TABLE IF NOT EXISTS facts_search USING fts5(key,value); CREATE TRIGGER IF NOT EXISTS facts_insert AFTER INSERT ON facts BEGIN INSERT INTO facts_search(key,value) VALUES(new.key,new.value); END; CREATE TRIGGER IF NOT EXISTS facts_delete AFTER DELETE ON facts BEGIN DELETE FROM facts_search WHERE key=old.key; END; CREATE TRIGGER IF NOT EXISTS facts_update AFTER UPDATE ON facts BEGIN DELETE FROM facts_search WHERE key=old.key; INSERT INTO facts_search(key,value) VALUES(new.key,new.value); END;").await?;
         Ok(Self {
             signing_key: crate::config::signing_key()?,
         })
@@ -80,7 +80,7 @@ impl Handler<Call> for Memory {
                     P::Integer(auth::now()),
                     P::Integer(MAX_FACTS),
                 ];
-                let saved = ctx.sql().query(REMEMBER, Some(values)).await?.rows;
+                let saved = ctx.db().query(REMEMBER, Some(values)).await?.rows;
                 ensure!(!saved.is_empty(), "memory is full; forget a fact first");
                 Ok(json!({"saved":true}))
             }
@@ -89,14 +89,14 @@ impl Handler<Call> for Memory {
                     !key.is_empty() && key.len() <= KEY_MAX,
                     "invalid memory key"
                 );
-                ctx.sql()
+                ctx.db()
                     .execute("DELETE FROM facts WHERE key=?", Some(vec![P::Text(key)]))
                     .await?;
                 Ok(json!({"forgotten":true}))
             }
             Command::Snapshot => {
                 let rows = ctx
-                    .sql()
+                    .db()
                     .query(
                         "SELECT key,value FROM facts ORDER BY updated DESC LIMIT 100",
                         None,
@@ -115,11 +115,11 @@ impl Handler<Call> for Memory {
                 let mut rows = if terms.is_empty() {
                     Vec::new()
                 } else {
-                    ctx.sql().query("SELECT key,value FROM facts_search WHERE facts_search MATCH ? ORDER BY rank LIMIT 6",Some(vec![P::Text(terms)])).await?.rows
+                    ctx.db().query("SELECT key,value FROM facts_search WHERE facts_search MATCH ? ORDER BY rank LIMIT 6",Some(vec![P::Text(terms)])).await?.rows
                 };
                 // Two recent explicit facts maintain useful preferences even when lexical overlap is absent.
                 rows.extend(
-                    ctx.sql()
+                    ctx.db()
                         .query(
                             "SELECT key,value FROM facts ORDER BY updated DESC LIMIT 2",
                             None,
