@@ -52,7 +52,7 @@ robot-buddy's code fixes what it expects; your butty build fixes what is fitted.
 
 1. **Pi model and RAM.** Any Raspberry Pi 5 works; butty's own docs say 8 GB (`SPEC.md`) and 4 GB (`SHOPPING.md`). The robot service peaked at 185.9 MiB (process) and 207.6 MiB (with sampled children) over the 30-minute soak, and its systemd budget is 1 GiB, so either fits. Check: `free -h`.
 2. **Microphone.** The robot needs a USB capture device that delivers 16 kHz S16_LE. butty names two models: reSpeaker Flex XVF3800 (`SPEC.md`, `cad/params.py`) and reSpeaker Lite (`SHOPPING.md`, `brain/README.md`). Both present 2 channels with the processed beam on channel 0 (butty `brain/config.yaml`). Check with the service stopped: `arecord -L`, then the capture command in §4. Set `BUDDY_LISTEN_DEVICE`, `BUDDY_LISTEN_CHANNELS=2` and `BUDDY_LISTEN_CHANNEL=0` (try `1` only if channel 0 is not the processed beam).
-3. **Operating system.** Bookworm and Trixie both passed the ARM64 matrix. The soaked binary is a Trixie build and does not run on Bookworm. **Recommended:** a fresh Raspberry Pi OS Trixie (64-bit) card and the soaked binary (§2). If you keep a Bookworm card, build natively on it (§2); that binary passed the matrix but not the soak. Check: `cat /etc/os-release`.
+3. **Operating system.** **Default:** Raspberry Pi OS (64-bit) **Bookworm**, as in Brittian's spec sheet and butty `brain/README.md`, with the native full build on the Pi (§2). That binary passed the ARM64 matrix but not the soak. **Alternative:** Trixie and the soaked ELF (§2), which is the exact binary that passed the soak but moves off the spec's OS. The soaked ELF does not run on Bookworm. Check: `cat /etc/os-release`.
 4. **Neck servo IDs and limits.** robot-buddy has no default calibration: you write a per-robot `neck.json` in raw steps (§4). butty `brain/config.yaml` uses IDs yaw `1`, pitch `2`, roll `3` at 1 Mbaud (yaw and pitch inverted, roll centre `2107`); butty's yaw centre shift (about 228 steps) lives in an untracked `config.local.yaml`. Check: `robot-buddy-robot servo ping`, `read` and `verify` in §4 (it has no ID-assignment command; §4 says how to set IDs); measure your own limits, never copy another robot's.
 5. **Serial paths.** robot-buddy does not auto-detect. Use the two distinct names under `/dev/serial/by-id/` (face board vendor `303a`, servo adapter `1a86`), or butty's udev names `/dev/pip-face` and `/dev/pip-servos` if that rule is installed. Check: `ls -l /dev/serial/by-id/`.
 6. **Audio card names.** Use what your Pi reports, not an example. Check: `aplay -L` (the MAX98357A appears after the overlay in §3) and `arecord -L`. Put the exact names in `BUDDY_ALSA_DEVICE` and `BUDDY_LISTEN_DEVICE`.
@@ -166,14 +166,13 @@ Then set `BUDDY_PUBLIC_URL=https://buddy.example.com` and `BUDDY_PUBLIC_RIVET_UR
 
 ## 2. Build the Linux ARM64 binary
 
-Use **64-bit Raspberry Pi OS**, **Bookworm** (Debian 12) or **Trixie** (Debian 13), arm64. Check with `uname -m` → `aarch64` and `dpkg --print-architecture` → `arm64`. The ARM64 [toolchain matrix](infra/toolchain-validation.md) passed on both at `82e8d5b`, with default and full Pip features. Bookworm runs every peripheral without an OS upgrade if you use the native Bookworm build below. On Trixie, use its packaged OpenCV or the ARM64 Buildx recipe. The binary needs the same OpenCV and glibc ABI it was built against, so do **not** copy a Trixie binary onto Bookworm. Models are installed later, on the device.
+**Default: Raspberry Pi OS (64-bit) Bookworm with the native full build.** Brittian's spec sheet and butty `brain/README.md` ("Raspberry Pi OS setup") both name Bookworm (Debian 12), so this path keeps the spec's OS. Build on the Pi itself with the [Bookworm native full build](#bookworm-native-full-build-on-the-pi-default) below. The ARM64 [toolchain matrix](infra/toolchain-validation.md) built and tested this configuration (private OpenCV 4.10 prefix, full Pip features) at `82e8d5b`, but no Bookworm binary has run the 30-minute soak. Its SHA-256 will differ from the soaked one, so record it.
 
-**Which binary to install.** It depends on the Raspberry Pi OS release on the robot ("Confirm on your Pip" item 3). The spec sheet and butty name Bookworm; the soaked binary is a Trixie build.
+**Alternative: Raspberry Pi OS (64-bit) Trixie with the soaked ELF.** The 30-minute E2E soak (artifact `soak-30m-c5d7c08`; see [CHANGELOG.md](CHANGELOG.md#validation-status)) ran a robot ELF with SHA-256 `be7cae4e42fda047f857d327af875e0dbf91b54af3a8076df84080e802e2768b` and GNU BuildID `c15c88b7594bd0919c5a0bf78609c2b01c6162e9`. It comes from the `build-robot` stage of the [pip-e2e image](tests/pip-e2e/Dockerfile): `rust:1.100.0-slim-trixie`, `--features pi-vision,onnx-wake`, `aarch64-unknown-linux-gnu`. It links Trixie's packaged OpenCV 4.10 (`libopencv_*.so.410`).
 
-- **Trixie: install the soaked binary.** The 30-minute E2E soak (artifact `soak-30m-c5d7c08`; see [CHANGELOG.md](CHANGELOG.md#validation-status)) ran a robot ELF with SHA-256 `be7cae4e42fda047f857d327af875e0dbf91b54af3a8076df84080e802e2768b` and GNU BuildID `c15c88b7594bd0919c5a0bf78609c2b01c6162e9`. It comes from the `build-robot` stage of the [pip-e2e image](tests/pip-e2e/Dockerfile): `rust:1.100.0-slim-trixie`, `--features pi-vision,onnx-wake`, `aarch64-unknown-linux-gnu`. It links Trixie's packaged OpenCV 4.10 (`libopencv_*.so.410`).
-- **Bookworm: build natively** with the [Bookworm full build](#existing-bookworm-pi-native-full-build) below. The soaked ELF will not run there. The ARM64 matrix built and tested this configuration at `82e8d5b`, but no Bookworm binary has run the soak. Its SHA-256 will differ from the soaked one, so record it.
+**The trade-off.** Trixie gives you the exact binary that passed the soak, byte for byte, but moves the robot off the spec's OS. Bookworm keeps the spec's OS, but its binary is built on your Pi and has passed the matrix, not the soak. Either way, check with `uname -m` → `aarch64`, `dpkg --print-architecture` → `arm64` and `cat /etc/os-release`. The binary needs the OpenCV and glibc ABI it was built against, so do **not** copy a Trixie binary onto Bookworm. Models are installed later, on the device.
 
-To get the soaked ELF and verify it:
+To get the soaked ELF (Trixie alternative) and verify it, on a machine with Docker Buildx for `linux/arm64`:
 
 ```sh
 tests/pip-e2e/run-in-docker.sh build                    # image robot-buddy-pip-e2e:arm64 (override with PIP_E2E_IMAGE)
@@ -186,7 +185,7 @@ file target/pip-e2e-robot-buddy-robot
 # expect ELF 64-bit ... ARM aarch64 ... BuildID[sha1]=c15c88b7594bd0919c5a0bf78609c2b01c6162e9
 ```
 
-Check the SHA-256 again on the Pi after you copy it (`sha256sum /usr/local/bin/robot-buddy-robot`), and record it.
+Check the SHA-256 again on the Pi after you install it (`sha256sum /usr/local/bin/robot-buddy-robot`), and record it.
 
 **Reproducibility, checked on 2026-11-24.** Clean rebuilds, with fresh Cargo caches and the build stage not cached, each produced `be7cae4e…2768b` with BuildID `c15c88b7…2e9`, byte for byte:
 
@@ -194,23 +193,32 @@ Check the SHA-256 again on the Pi after you copy it (`sha256sum /usr/local/bin/r
 - the same stage from the `c5d7c08` sources. The only robot change between the two, `0f0bc60`, edits test code, so the release binary is identical;
 - [`infra/pi-build.Dockerfile`](infra/pi-build.Dockerfile) (`artifact` stage) from the `82e8d5b` sources.
 
-The robot sources at the branch tip are the same as at `82e8d5b`; only docs and bench files changed since. The recipes do not pin the Debian package versions they install (`clang`, `libclang-dev`, `libopencv-dev`), so a later rebuild can differ once Trixie updates those packages. A different hash means the binary is not the soaked one ("Confirm on your Pip" item 13).
+The robot sources at the branch tip are the same as at `82e8d5b`; only docs and bench files changed since. The recipes do not pin the Debian package versions they install (`clang`, `libclang-dev`, `libopencv-dev`), so a later rebuild can differ once Trixie updates those packages. A different hash means the binary is not the soaked one: treat it as unsoaked and run the §5 checklist in full.
 
-| Where | Build from the repository root | Artifact |
-|---|---|---|
-| Docker Buildx (`linux/arm64`), the soaked recipe | E2E image commands above | `target/pip-e2e-robot-buddy-robot` |
-| Pi 5, no camera | `cargo build --release --locked -p robot-buddy-robot` | `target/release/robot-buddy-robot` |
-| Bookworm Pi 5, full | Build the private-prefix OpenCV and native robot below | `target/release/robot-buddy-robot` |
-| Trixie Pi 5, full | Install `build-essential cmake clang libclang-dev pkg-config libopencv-dev`, then `cargo build -j2 --release --locked -p robot-buddy-robot --features pi-vision,onnx-wake` | `target/release/robot-buddy-robot` |
-| Mac or Linux with Docker Buildx, with camera | Command below | `target/pi-image/robot-buddy-robot` |
-| Linux cross-compiler, no camera | GNU toolchain commands below | `target/aarch64-unknown-linux-gnu/release/robot-buddy-robot` |
+Each build path leaves the binary in a different place. §3 installs it from there.
 
-### Existing Bookworm Pi: native full build
+| Build path | Where it runs | Commands | Artifact (relative to the robot-buddy checkout) |
+|---|---|---|---|
+| **Bookworm, full (default)** | On the Pi | [Bookworm native full build](#bookworm-native-full-build-on-the-pi-default) below | `target/release/robot-buddy-robot`, on the Pi |
+| **Trixie, soaked ELF (alternative)** | Any machine with Docker Buildx for `linux/arm64` | E2E image commands above | `target/pip-e2e-robot-buddy-robot`, on that machine |
+| Trixie, full, on the Pi | On the Pi | Install `build-essential cmake clang libclang-dev pkg-config libopencv-dev`, then `cargo build -j2 --release --locked -p robot-buddy-robot --features pi-vision,onnx-wake` | `target/release/robot-buddy-robot`, on the Pi |
+| Trixie, full, from a workstation | Mac or Linux with Docker Buildx | [Pi build image](#trixie-from-another-workstation-or-a-base-build-without-vision) below | `target/pi-image/robot-buddy-robot`, on that machine |
+| Either OS, no camera, on the Pi | On the Pi | `cargo build --release --locked -p robot-buddy-robot` | `target/release/robot-buddy-robot`, on the Pi |
+| No camera, cross-compiled | Linux build host | GNU toolchain commands below | `target/aarch64-unknown-linux-gnu/release/robot-buddy-robot`, on that host |
 
-Bookworm's packaged OpenCV 4.6 predates the recommended 2023 YuNet. Build **OpenCV 4.10** beside the OS libraries rather than replacing the distro's camera stack. From a regular account on an ARM64 Bookworm Pi (or an equivalent ARM64 Bookworm build host):
+Every build on the Pi needs a robot-buddy checkout there and the pinned Rust toolchain, as below.
+
+### Bookworm: native full build on the Pi (default)
+
+Bookworm's packaged OpenCV 4.6 predates the recommended 2023 YuNet. Build **OpenCV 4.10** beside the OS libraries rather than replacing the distro's camera stack. You also need a robot-buddy checkout on the Pi and Rust **1.100.0**, the toolchain [rust-toolchain.toml](rust-toolchain.toml) pins, installed with rustup. From a regular account on an ARM64 Bookworm Pi (or an equivalent ARM64 Bookworm build host):
 
 ```sh
-sudo apt-get install build-essential git cmake ninja-build clang libclang-dev pkg-config libjpeg-dev zlib1g-dev
+sudo apt-get install build-essential git curl cmake ninja-build clang libclang-dev pkg-config libjpeg-dev zlib1g-dev
+# Rust through rustup (https://rustup.rs), then the pinned toolchain from rust-toolchain.toml.
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
+. "$HOME/.cargo/env"
+git clone --branch feat/pip-hardware <robot-buddy repository URL> robot-buddy
+(cd robot-buddy && rustup toolchain install 1.100.0 --profile minimal --component rustfmt,clippy && rustc --version)  # expect rustc 1.100.0
 # Use a fresh directory on a drive with space to compile; -j2 limits peak memory.
 git clone --depth 1 --branch 4.10.0 https://github.com/opencv/opencv.git opencv-4.10.0
 test "$(git -C opencv-4.10.0 rev-parse HEAD)" = 71d3237a093b60a27601c20e9ee6c3e52154e8b1 || exit 1
@@ -228,9 +236,11 @@ sudo ldconfig
 export PKG_CONFIG_PATH="$CV/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 test "$(pkg-config --modversion opencv4)" = 4.10.0 || exit 1
 test "$(pkg-config --variable=prefix opencv4)" = "$CV" || exit 1
-# From the robot-buddy repo, using its pinned Rust toolchain:
+# In the robot-buddy checkout; rust-toolchain.toml selects 1.100.0.
+cd robot-buddy
 cargo build -j2 --release --locked -p robot-buddy-robot --features pi-vision,onnx-wake
 ldd target/release/robot-buddy-robot | grep opencv  # paths under /opt/robot-buddy/opencv-4.10/lib
+sha256sum target/release/robot-buddy-robot          # record it; it will not match the soaked Trixie ELF
 ```
 
 If building for another **matching Bookworm Pi**, deploy the contents of that OpenCV prefix at the same absolute path, including SONAME symlinks (`tar`/`rsync -a`), then install the same linker entry, run `ldconfig` and inspect `ldd` **on the target**. This path does not require `libopencv-dev` 4.6 or a copied Trixie system library. Install the ONNX Runtime for optional neural wake separately (§4).
@@ -263,7 +273,7 @@ cargo build --locked --release -p robot-buddy-robot --target aarch64-unknown-lin
 
 ## 3. Prepare the Pi and install the service
 
-Flash **Raspberry Pi OS Lite (64-bit)**, Bookworm or Trixie, to match the binary you built in §2. Enable SSH on a trusted provisioning network. The Wi-Fi interface must support AP mode under NetworkManager. Keep initial access over Ethernet if you can. Run the administrative steps below as root. If the Pi previously ran butty's Python brain, stop its `pip.service` (`systemctl disable --now pip.service`). Two processes must never own the mic, serial ports or camera at the same time.
+Flash **Raspberry Pi OS Lite (64-bit) Bookworm** (the default), or Trixie if you chose the soaked ELF in §2. For the default native build, flash and boot the Pi first, then run the §2 build on it. Enable SSH on a trusted provisioning network. The Wi-Fi interface must support AP mode under NetworkManager. Keep initial access over Ethernet if you can. Run the administrative steps below as root. If the Pi previously ran butty's Python brain, stop its `pip.service` (`systemctl disable --now pip.service`). Two processes must never own the mic, serial ports or camera at the same time.
 
 ```sh
 apt-get update
@@ -296,13 +306,27 @@ dtoverlay=max98357a
 # dtoverlay=ov5647,cam0
 ```
 
-Stage **only** the binary, this robot's identity, and the files under `infra/` on the Pi over SSH. Example from the provisioning machine (adjust user, hostname and binary):
+Stage **only** the binary, this robot's identity, and the files under `infra/` in one directory on the Pi. Copy the identity over SSH from the machine that holds it. Adjust user, hostname and paths:
 
 ```sh
+# From the machine that holds secrets/pip-01.identity.json:
 ssh pi@pip.local 'umask 077; mkdir -p ~/buddy-install/infra'
-scp target/pi-image/robot-buddy-robot secrets/pip-01.identity.json pi@pip.local:buddy-install/
+scp secrets/pip-01.identity.json pi@pip.local:buddy-install/
+```
+
+Then add the binary and the `infra/` files from wherever your §2 build path left them:
+
+```sh
+# Default, Bookworm native build: everything is already on the Pi. On the Pi:
+cp ~/robot-buddy/target/release/robot-buddy-robot ~/buddy-install/
+cp ~/robot-buddy/infra/{robot-buddy.service,robot-buddy-nm.rules,robot-buddy-pip.conf,device.env.example} ~/buddy-install/infra/
+
+# Alternative, soaked Trixie ELF: from the machine with the robot-buddy checkout and the ELF.
+scp target/pip-e2e-robot-buddy-robot pi@pip.local:buddy-install/robot-buddy-robot
 scp infra/{robot-buddy.service,robot-buddy-nm.rules,robot-buddy-pip.conf,device.env.example} pi@pip.local:buddy-install/infra/
 ```
+
+For the other build paths, copy the artifact named in the §2 table to `buddy-install/robot-buddy-robot` the same way.
 
 On the Pi, change into that staging directory, then run as root. On **first install**:
 
