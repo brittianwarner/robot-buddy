@@ -947,6 +947,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_failure_clearing_the_eyes_does_not_restart_the_link_on_shutdown() {
+        struct ShutdownPort(mpsc::UnboundedSender<()>);
+        impl LineSink for ShutdownPort {
+            async fn write_frame(&mut self, frame: &[u8]) -> io::Result<()> {
+                self.0.send(()).unwrap();
+                if frame.starts_with(b"{\"qr\":[]}") {
+                    Err(io::ErrorKind::BrokenPipe.into())
+                } else {
+                    Ok(())
+                }
+            }
+        }
+        struct Open(mpsc::UnboundedSender<()>);
+        impl Opener for Open {
+            type Sink = ShutdownPort;
+            async fn open(&mut self) -> io::Result<Self::Sink> {
+                Ok(ShutdownPort(self.0.clone()))
+            }
+        }
+        let (tx, mut sent) = mpsc::unbounded_channel();
+        let (face, rx) = Face::new();
+        let task = tokio::spawn(run(rx, Open(tx)));
+        sent.recv().await.unwrap();
+        face.stop();
+        tokio::time::timeout(WRITE_DEADLINE, task)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn second_hello_repaints_qr_mood_and_gaze_without_replaying_gesture() {
         struct Board {
             frames: mpsc::UnboundedSender<Vec<u8>>,
