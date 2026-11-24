@@ -56,7 +56,7 @@ This suite strictly separates **real prerecorded human speech**, **synthetic fix
 To qualify with real local human recordings (mounted read-only, never copied into the repo):
 
 ```sh
-PIP_E2E_HEY_PIP_ONNX=/Users/brittianwarner/scratch/butty/brain/models/wake/hey_pip.onnx \
+PIP_E2E_HEY_PIP_ONNX=/path/to/authorized/hey_pip.onnx \
 PIP_E2E_HUMAN_WAKE_POSITIVE_WAV=/path/to/human_hey_pip_16k_mono.wav \
 PIP_E2E_HUMAN_WAKE_NEGATIVE_WAV=/path/to/human_negative_16k_mono.wav \
 PIP_E2E_HUMAN_FOLLOWUP_WAV=/path/to/human_followup_16k_mono.wav \

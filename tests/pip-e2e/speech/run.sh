@@ -6,7 +6,7 @@
 #
 # Optional environment variables (all read-only mounted, never copied into repo):
 #   PIP_E2E_HEY_PIP_ONNX            Path to private hey_pip.onnx
-#                                   (default: /Users/brittianwarner/scratch/butty/brain/models/wake/hey_pip.onnx)
+#                                   (explicit opt-in; no default)
 #   PIP_E2E_HUMAN_SPEECH_DIR        Optional dir with wake_positive.wav, wake_negative.wav,
 #                                   followup.wav, reference_clip.pcm, reference_scores.txt
 #   PIP_E2E_HUMAN_WAKE_POSITIVE_WAV Optional 16kHz mono S16_LE WAV of human saying "Hey Pip"
@@ -65,15 +65,15 @@ DOCKER_ARGS=(
   -v "${ARTIFACTS_HOST}:/opt/pip-e2e/artifacts"
 )
 
-HEY_PIP_HOST="${PIP_E2E_HEY_PIP_ONNX:-/Users/brittianwarner/scratch/butty/brain/models/wake/hey_pip.onnx}"
+HEY_PIP_HOST="${PIP_E2E_HEY_PIP_ONNX:-}"
 if [[ -f "${HEY_PIP_HOST}" ]]; then
-  echo "[speech-run] mounting private hey_pip.onnx read-only from ${HEY_PIP_HOST}"
+  echo "[speech-run] mounting the configured wake classifier read-only"
   DOCKER_ARGS+=(
     -v "${HEY_PIP_HOST}:/opt/pip-e2e/private/hey_pip.onnx:ro"
     -e "PIP_E2E_HEY_PIP_ONNX=/opt/pip-e2e/private/hey_pip.onnx"
   )
 else
-  echo "[speech-run] NOTE: private hey_pip.onnx not found at ${HEY_PIP_HOST}; neural wake tests will report missing_evidence."
+  echo "[speech-run] Set PIP_E2E_HEY_PIP_ONNX to an authorized local model; without it neural wake tests report missing_evidence."
 fi
 
 if [[ -n "${PIP_E2E_HUMAN_SPEECH_DIR:-}" && -d "${PIP_E2E_HUMAN_SPEECH_DIR}" ]]; then
