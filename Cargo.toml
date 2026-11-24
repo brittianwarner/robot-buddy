@@ -16,6 +16,8 @@ hmac = "0.12"
 rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 rivetkit = "=3.1.1"
+# The client alone: the robot talks to actors without linking the actor runtime.
+rivetkit-client = "=3.1.1"
 rig = { version = "=0.46.0", default-features = false, features = ["agent", "reqwest", "rustls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -26,6 +28,14 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4", "v7"] }
 url = "2"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+# Errors and panics are documented where they are not obvious from the signature.
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+module_name_repetitions = "allow"
+
 [profile.dev]
 debug = 0
 [profile.release]

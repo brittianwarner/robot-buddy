@@ -1,29 +1,41 @@
 //! Durable speech admission: only a running turn can commit chunks.
-use super::*;
+use super::{
+    Context, Conversation, Ctx, OutputEvent, P, RUNNING_TURN_SQL, Result, SqliteDbExt,
+    SqliteTransaction, TxOptions, Value, ensure, integer, json, params, string,
+};
 
-const SPEECH_SETTINGS_SQL: &str = "SELECT p.prompt,v.config,v.revision,v.updated \
-    FROM system_prompt p CROSS JOIN voice_settings v WHERE p.singleton=1 AND v.singleton=1";
-const PIN_VOICE_SQL: &str = "INSERT INTO speech_turns(turn_id,voice) SELECT ?,? \
-    WHERE EXISTS(SELECT 1 FROM turns WHERE id=? AND status='running') RETURNING turn_id";
-const TEXT_DELTA_SQL: &str = "INSERT INTO events(turn_id,kind,payload) SELECT ?,'text.delta',? \
-    WHERE EXISTS(SELECT 1 FROM turns WHERE id=? AND status='running') RETURNING sequence";
-const CHUNK_SQL: &str = "INSERT INTO speech_chunks(turn_id,chunk_index,text) SELECT ?,?,? \
-    WHERE EXISTS(SELECT 1 FROM turns WHERE id=? AND status='running') RETURNING chunk_index";
-const SPEECH_READY_SQL: &str = "INSERT INTO events(turn_id,kind,payload) SELECT ?,'speech.ready',? \
-    WHERE EXISTS(SELECT 1 FROM turns WHERE id=? AND status='running') RETURNING sequence";
-const READ_CHUNK_SQL: &str = "SELECT c.text,s.voice FROM speech_chunks c \
-    JOIN speech_turns s ON s.turn_id=c.turn_id WHERE c.turn_id=? AND c.chunk_index=?";
+const SPEECH_SETTINGS_SQL: &str = r"
+    SELECT p.prompt, v.config, v.revision, v.updated
+    FROM system_prompt p CROSS JOIN voice_settings v
+    WHERE p.singleton = 1 AND v.singleton = 1";
+/// The first pin wins: a turn that begins speech again keeps the voice it already speaks in.
+const PIN_VOICE_SQL: &str = r"
+    INSERT INTO speech_turns(turn_id, voice) VALUES (?, ?)
+    ON CONFLICT(turn_id) DO NOTHING";
+const TEXT_DELTA_SQL: &str = r"
+    INSERT INTO events(turn_id, kind, payload) SELECT ?, 'text.delta', ?
+    WHERE EXISTS(SELECT 1 FROM turns WHERE id = ? AND status = 'running')
+    RETURNING sequence";
+const CHUNK_SQL: &str = r"
+    INSERT INTO speech_chunks(turn_id, chunk_index, text) SELECT ?, ?, ?
+    WHERE EXISTS(SELECT 1 FROM turns WHERE id = ? AND status = 'running')
+    RETURNING chunk_index";
+const SPEECH_READY_SQL: &str = r"
+    INSERT INTO events(turn_id, kind, payload) SELECT ?, 'speech.ready', ?
+    WHERE EXISTS(SELECT 1 FROM turns WHERE id = ? AND status = 'running')
+    RETURNING sequence";
+const READ_CHUNK_SQL: &str = r"
+    SELECT c.text, s.voice FROM speech_chunks c
+    JOIN speech_turns s ON s.turn_id = c.turn_id
+    WHERE c.turn_id = ? AND c.chunk_index = ?";
+const SPEECH_VOICE_SQL: &str = "SELECT voice FROM speech_turns WHERE turn_id = ?";
+const TURN_STATUS_SQL: &str = "SELECT status FROM turns WHERE id = ?";
 /// Chunks one turn may speak, and the largest chunk the splitter can produce.
 const MAX_CHUNKS: u32 = 64;
 const MAX_CHUNK_BYTES: usize = crate::sentences::HARD_LIMIT + 4;
 
 /// Inserts one event inside a transaction. Zero rows means the turn stopped running.
-async fn insert_event(
-    tx: &rivetkit::SqliteTransaction,
-    sql: &str,
-    id: &str,
-    payload: &Value,
-) -> Result<i64> {
+async fn insert_event(tx: &SqliteTransaction, sql: &str, id: &str, payload: &Value) -> Result<i64> {
     let rows = tx
         .execute(sql, params(&[id, &payload.to_string(), id]))
         .await?
@@ -33,8 +45,9 @@ async fn insert_event(
 
 impl Conversation {
     /// Pins this turn's voice before its first spoken text and returns the character prompt.
+    /// It may run more than once per turn; the first pin is kept.
     pub(super) async fn begin_speech(&self, ctx: &Ctx<Self>, id: &str) -> Result<String> {
-        let pin = |tx: rivetkit::SqliteTransaction| async move {
+        let pin = |tx: SqliteTransaction| async move {
             let rows = tx.execute(SPEECH_SETTINGS_SQL, None).await?.rows;
             let row = rows.first().context("speech settings missing")?;
             let config: crate::voice::VoiceConfig = serde_json::from_str(&string(row, 1)?)?;
@@ -46,25 +59,17 @@ impl Conversation {
                 "voice_id": config.voice.id(),
                 "name": config.voice.name(),
             });
-            let inserted = tx
-                .execute(PIN_VOICE_SQL, params(&[id, &voice.to_string(), id]))
-                .await?
-                .rows;
-            ensure!(!inserted.is_empty(), "turn cancelled");
+            let running = tx.execute(RUNNING_TURN_SQL, params(&[id])).await?.rows;
+            ensure!(!running.is_empty(), "turn cancelled");
+            tx.execute(PIN_VOICE_SQL, params(&[id, &voice.to_string()]))
+                .await?;
             string(row, 0)
         };
-        ctx.sql().transaction(pin, Default::default()).await
+        ctx.sql().transaction(pin, TxOptions::default()).await
     }
 
     pub(super) async fn speech_voice(&self, ctx: &Ctx<Self>, id: &str) -> Result<Value> {
-        let rows = ctx
-            .sql()
-            .query(
-                "SELECT voice FROM speech_turns WHERE turn_id=?",
-                params(&[id]),
-            )
-            .await?
-            .rows;
+        let rows = ctx.sql().query(SPEECH_VOICE_SQL, params(&[id])).await?.rows;
         match rows.first() {
             Some(row) => Ok(serde_json::from_str(&string(row, 0)?)?),
             None => self.voice_config(ctx).await,
@@ -92,10 +97,10 @@ impl Conversation {
         }
         let mut payloads = Vec::with_capacity(chunks.len() + 1);
         if !text.is_empty() {
-            payloads.push(("text.delta", json!({"text":text})));
+            payloads.push(("text.delta", json!({ "text": text })));
         }
         let (payloads_ref, chunks_ref) = (&payloads, &chunks);
-        let write = move |tx: rivetkit::SqliteTransaction| async move {
+        let write = move |tx: SqliteTransaction| async move {
             let mut sequences = Vec::with_capacity(payloads_ref.len() + chunks_ref.len());
             if let Some((_, delta)) = payloads_ref.first() {
                 sequences.push(insert_event(&tx, TEXT_DELTA_SQL, id, delta).await?);
@@ -110,15 +115,15 @@ impl Conversation {
                 ];
                 let rows = tx.execute(CHUNK_SQL, Some(values)).await?.rows;
                 ensure!(!rows.is_empty(), "turn cancelled");
-                let ready = json!({"index":index});
+                let ready = json!({ "index": index });
                 sequences.push(insert_event(&tx, SPEECH_READY_SQL, id, &ready).await?);
             }
             Ok(sequences)
         };
-        let sequences = ctx.sql().transaction(write, Default::default()).await?;
+        let sequences = ctx.sql().transaction(write, TxOptions::default()).await?;
         let ready = chunks
             .iter()
-            .map(|(index, _)| ("speech.ready", json!({"index":index})));
+            .map(|(index, _)| ("speech.ready", json!({ "index": index })));
         let events = payloads.into_iter().chain(ready);
         for (sequence, (kind, payload)) in sequences.into_iter().zip(events) {
             let event = OutputEvent {
@@ -142,11 +147,8 @@ impl Conversation {
             !id.is_empty() && id.len() <= 128 && index <= MAX_CHUNKS,
             "invalid speech cursor"
         );
-        let read = |tx: rivetkit::SqliteTransaction| async move {
-            let rows = tx
-                .execute("SELECT status FROM turns WHERE id=?", params(&[id]))
-                .await?
-                .rows;
+        let read = |tx: SqliteTransaction| async move {
+            let rows = tx.execute(TURN_STATUS_SQL, params(&[id])).await?.rows;
             let status = string(rows.first().context("turn missing")?, 0)?;
             ensure!(
                 ["running", "completed"].contains(&status.as_str()),
@@ -157,7 +159,12 @@ impl Conversation {
             if let Some(row) = rows.first() {
                 let voice: Value = serde_json::from_str(&string(row, 1)?)?;
                 let text = string(row, 0)?;
-                return Ok(json!({"state":"ready","index":index,"text":text,"voice":voice}));
+                return Ok(json!({
+                    "state": "ready",
+                    "index": index,
+                    "text": text,
+                    "voice": voice,
+                }));
             }
             let state = if status == "completed" {
                 "done"
@@ -166,6 +173,61 @@ impl Conversation {
             };
             Ok(json!({ "state": state }))
         };
-        ctx.sql().transaction(read, Default::default()).await
+        ctx.sql().transaction(read, TxOptions::default()).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::{Connection, OptionalExtension};
+
+    fn database() -> Connection {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(include_str!("../conversation.sql"))
+            .unwrap();
+        db.execute(
+            "INSERT INTO turns(id, request_id, text, status, created) VALUES (?1, ?1, '', ?2, 0)",
+            ["live", "running"],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO turns(id, request_id, text, status, created) VALUES (?1, ?1, '', ?2, 0)",
+            ["stopped", "cancelled"],
+        )
+        .unwrap();
+        db
+    }
+
+    /// The SQL half of `begin_speech`: the running check, then the pin.
+    fn pin(db: &Connection, id: &str, voice: &str) -> Result<()> {
+        let running = db
+            .query_row(RUNNING_TURN_SQL, [id], |_| Ok(()))
+            .optional()?;
+        ensure!(running.is_some(), "turn cancelled");
+        db.execute(PIN_VOICE_SQL, [id, voice])?;
+        Ok(())
+    }
+
+    fn pinned(db: &Connection, id: &str) -> Option<String> {
+        db.query_row(SPEECH_VOICE_SQL, [id], |row| row.get(0))
+            .optional()
+            .unwrap()
+    }
+
+    #[test]
+    fn pinning_twice_keeps_the_first_voice() {
+        let db = database();
+        pin(&db, "live", "first").unwrap();
+        pin(&db, "live", "second").unwrap();
+        assert_eq!(pinned(&db, "live").as_deref(), Some("first"));
+    }
+
+    #[test]
+    fn a_stopped_turn_is_never_pinned() {
+        let db = database();
+        assert!(pin(&db, "stopped", "voice").is_err());
+        assert!(pin(&db, "missing", "voice").is_err());
+        assert_eq!(pinned(&db, "stopped"), None);
     }
 }

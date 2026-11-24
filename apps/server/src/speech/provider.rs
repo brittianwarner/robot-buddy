@@ -1,4 +1,4 @@
-//! OpenRouter speech transport (`elevenlabs/eleven-v4-turbo`, PCM).
+//! `OpenRouter` speech transport (`elevenlabs/eleven-v4-turbo`, PCM).
 use super::pipeline::{Spoken, Synthesis, Synthesizer};
 use anyhow::{Context, Result, bail, ensure};
 use axum::http::header;

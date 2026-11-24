@@ -31,7 +31,7 @@ impl PcmFormat {
             channels,
         })
     }
-    /// Bare `audio/pcm` is OpenRouter's 16-bit little-endian mono 24 kHz default.
+    /// Bare `audio/pcm` is `OpenRouter`'s 16-bit little-endian mono 24 kHz default.
     /// Explicit rate or channel values still go through [`parse`](Self::parse).
     pub fn from_provider(content_type: &str) -> Result<Self> {
         let has_rate = content_type

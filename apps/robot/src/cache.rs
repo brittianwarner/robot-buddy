@@ -79,7 +79,7 @@ fn remove_stale_temps(path: &Path) {
 
 /// Atomically replace `path` with `bytes`.
 pub fn persist(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    persist_with(path, bytes, |file, bytes| file.write_all(bytes))
+    persist_with(path, bytes, Write::write_all)
 }
 
 fn persist_with(
@@ -151,7 +151,7 @@ impl CacheStore {
         Self {
             shared,
             messages,
-            version: Default::default(),
+            version: std::sync::atomic::AtomicU64::default(),
         }
     }
 
@@ -178,7 +178,11 @@ impl CacheStore {
         let Some(snapshot) = self.snapshot(cache, urgent) else {
             return;
         };
-        let mut latest = self.shared.latest.lock().unwrap_or_else(|e| e.into_inner());
+        let mut latest = self
+            .shared
+            .latest
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let urgent = urgent || latest.as_ref().is_some_and(|s| s.urgent);
         *latest = Some(Snapshot { urgent, ..snapshot });
         drop(latest);
@@ -235,7 +239,7 @@ async fn writer(
                 }
             },
             () = shared.wake.notified() => {
-                let urgent = shared.latest.lock().unwrap_or_else(|e| e.into_inner())
+                let urgent = shared.latest.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
                     .as_ref().is_some_and(|s| s.urgent);
                 let earliest = last_write.map_or_else(Instant::now, |t| t + interval);
                 let next = if urgent { Instant::now() } else { earliest.max(Instant::now()) };
@@ -261,7 +265,7 @@ async fn write_latest(shared: &Shared, write: &WriteFn, written: &mut u64) -> bo
     let snapshot = shared
         .latest
         .lock()
-        .unwrap_or_else(|e| e.into_inner())
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
         .take();
     match snapshot {
         Some(snapshot) => {

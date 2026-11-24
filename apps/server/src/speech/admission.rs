@@ -57,7 +57,9 @@ impl Drop for SlotGuard {
 }
 
 fn lock(slots: &Slots) -> std::sync::MutexGuard<'_, HashMap<String, Slot>> {
-    slots.lock().unwrap_or_else(|e| e.into_inner())
+    slots
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl Admission {

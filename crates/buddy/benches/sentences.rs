@@ -70,10 +70,10 @@ fn bench(c: &mut Criterion) {
     for (name, pieces, bytes) in &cases {
         group.throughput(Throughput::Bytes(*bytes as u64));
         group.bench_with_input(BenchmarkId::new("current", name), pieces, |b, p| {
-            b.iter(|| run::<Sentences>(p))
+            b.iter(|| run::<Sentences>(p));
         });
         group.bench_with_input(BenchmarkId::new("legacy", name), pieces, |b, p| {
-            b.iter(|| run::<LegacySentences>(p))
+            b.iter(|| run::<LegacySentences>(p));
         });
     }
     group.finish();

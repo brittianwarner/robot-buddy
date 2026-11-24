@@ -172,7 +172,7 @@ impl Synthesizer for FakeSynth {
         self.max_active.fetch_max(now, Ordering::SeqCst);
         let active = Active(self.active.clone());
         tokio::time::sleep(self.ttfb).await;
-        let frames = (self.sentence.as_millis() / FRAME.as_millis()) as u32;
+        let frames = u32::try_from(self.sentence.as_millis() / FRAME.as_millis()).unwrap();
         let first = Instant::now();
         let audio = stream::unfold((0, active), move |(frame, active)| async move {
             if frame == frames {
@@ -239,7 +239,10 @@ async fn listen(body: AudioBody, start: Instant) -> Heard {
             }
         };
         let now = Instant::now();
-        let length = Duration::from_secs_f64(bytes.len() as f64 / BYTES_PER_SECOND as f64);
+        let length = Duration::from_secs_f64(
+            f64::from(u32::try_from(bytes.len()).unwrap())
+                / f64::from(u32::try_from(BYTES_PER_SECOND).unwrap()),
+        );
         let from = match play_end {
             Some(end) if now > end => {
                 heard.max_gap = heard.max_gap.max(now - end);
@@ -296,7 +299,7 @@ async fn eval_gap_lookahead_vs_sequential() {
         tokio::join!(measure(true), measure(false));
     // Sequential, analytically: each boundary waits for lookup + TTFB, less the last
     // 20 ms frame still playing.
-    let analytic = ms(15) + ms(300) - FRAME;
+    let analytic = (ms(15) + ms(300)).saturating_sub(FRAME);
     println!(
         "gap eval: lookahead max gap {:?}, sequential max gap {:?} (analytic ~{:?}), \
          first byte {:?} / {:?}",

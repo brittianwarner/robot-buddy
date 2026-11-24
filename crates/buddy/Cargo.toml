@@ -3,38 +3,68 @@ name = "robot-buddy"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+
+[features]
+default = ["server"]
+# The actors, the model harness and their runtime. The robot builds without it and keeps
+# only the wire contracts, device credentials and audio formats.
+server = [
+    "dep:async-trait",
+    "dep:chrono",
+    "dep:chrono-tz",
+    "dep:futures-util",
+    "dep:reqwest",
+    "dep:rig",
+    "dep:rivetkit",
+    "dep:tokio",
+    "dep:tokio-util",
+    "dep:tracing",
+    "dep:url",
+]
+
 [dependencies]
-chrono = "0.4"
-chrono-tz = "0.10"
 anyhow.workspace = true
-async-trait.workspace = true
 base64.workspace = true
 ed25519-dalek.workspace = true
-futures-util.workspace = true
 hmac.workspace = true
 rand.workspace = true
-reqwest.workspace = true
-rivetkit.workspace = true
-rig.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-tokio.workspace = true
-tracing.workspace = true
 uuid.workspace = true
-url.workspace = true
-tokio-util = "0.7"
+async-trait = { workspace = true, optional = true }
+chrono = { version = "0.4", optional = true }
+chrono-tz = { version = "0.10", optional = true }
+futures-util = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
+rivetkit = { workspace = true, optional = true }
+rig = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+tokio-util = { version = "0.7", optional = true }
+tracing = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
+
 [dev-dependencies]
 tracing-subscriber.workspace = true
 axum.workspace = true
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
+
+[lints]
+workspace = true
+
+[[test]]
+name = "actors"
+required-features = ["server"]
+
 [[bench]]
 name = "sentences"
 harness = false
+
 [[bench]]
 name = "primitives"
 harness = false
+
 [[bench]]
 name = "history_sql"
 harness = false

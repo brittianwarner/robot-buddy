@@ -6,7 +6,8 @@ The real-engine integration suite covers registration idempotency, bot isolation
 
 Remaining acceptance requires actual inputs and hardware:
 
-- The chosen local inference server and its tool-calling support. OpenRouter GLM Nitro/low and Drama 3 have been exercised locally; see the review record for scope.
+- The chosen local inference server and its tool-calling support. OpenRouter GLM Nitro/low was exercised live, together with the earlier Fish Drama 3 speech route; see the [validation record](../research/validation.md) for scope.
+- Live OpenRouter `elevenlabs/eleven-v4-turbo` speech. The current speech route has fixture tests only; no live acceptance is recorded.
 - A real OIDC application configured with the callback URL, plus a phone owner-claim walkthrough. Automated browser ownership was validated against a controlled OIDC fixture.
 - Linux NetworkManager AP-mode adapter, kiosk display, wrong-password retry and power-loss testing.
 - Hardware speech input/output integration and actuator-specific safety/acknowledgement semantics.

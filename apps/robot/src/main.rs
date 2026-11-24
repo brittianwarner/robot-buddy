@@ -28,7 +28,7 @@ use tokio::{io::BufReader, time::Instant};
 /// Cursor checkpoints are coalesced to at most one write per interval.
 const CHECKPOINT_INTERVAL: Duration = Duration::from_secs(1);
 /// How long the setup hotspot stays up when reopened after a Wi-Fi loss.
-const SETUP_WINDOW: Duration = Duration::from_secs(600);
+const SETUP_WINDOW: Duration = Duration::from_mins(10);
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -101,22 +101,21 @@ async fn reconnect(
         shared.face.set(Mood::Offline);
         shared.screen.show("Connecting…", "").await?;
         let started = Instant::now();
-        match session::bootstrap(control, &settings.server, identity).await {
-            Ok(bundle) => {
-                let known = &state.cache.bot_id;
-                ensure!(
-                    known.is_empty() || *known == bundle.bot_id,
-                    "server returned a different bot identity"
-                );
-                if *known != bundle.bot_id {
-                    state.cache.bot_id = bundle.bot_id.clone();
-                    shared.store.flush(&state.cache).await?;
-                }
-                if session::run(&bundle, shared, state, input).await.is_err() {
-                    tracing::warn!("connection interrupted; recovering same bot");
-                }
+        if let Ok(bundle) = session::bootstrap(control, &settings.server, identity).await {
+            let known = &state.cache.bot_id;
+            ensure!(
+                known.is_empty() || *known == bundle.bot_id,
+                "server returned a different bot identity"
+            );
+            if *known != bundle.bot_id {
+                state.cache.bot_id.clone_from(&bundle.bot_id);
+                shared.store.flush(&state.cache).await?;
             }
-            Err(_) => tracing::warn!("bootstrap unavailable"),
+            if session::run(&bundle, shared, state, input).await.is_err() {
+                tracing::warn!("connection interrupted; recovering same bot");
+            }
+        } else {
+            tracing::warn!("bootstrap unavailable");
         }
         shared.face.set(Mood::Offline);
         let healthy = started.elapsed() >= HEALTHY_SESSION;
@@ -132,12 +131,9 @@ async fn reconnect(
 
 /// Reopen Wi-Fi setup only when no network has been joined for the grace period.
 async fn recover_wifi(link: &mut LinkWatch, screen: &Screen) {
-    let up = match wifi::connected().await {
-        Ok(up) => up,
-        Err(_) => {
-            tracing::debug!("Wi-Fi state unavailable");
-            return;
-        }
+    let Ok(up) = wifi::connected().await else {
+        tracing::debug!("Wi-Fi state unavailable");
+        return;
     };
     if link.observe(up, Instant::now()) == LinkAction::Setup {
         tracing::warn!("no Wi-Fi network for the grace period; reopening setup");

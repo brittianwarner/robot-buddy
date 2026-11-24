@@ -54,12 +54,12 @@ fn bench(c: &mut Criterion) {
     let token = auth::sign(KEY, "session", &session()).expect("sign");
     c.bench_function("auth/sign_session", |b| {
         let value = session();
-        b.iter(|| auth::sign(black_box(KEY), "session", black_box(&value)).expect("sign"))
+        b.iter(|| auth::sign(black_box(KEY), "session", black_box(&value)).expect("sign"));
     });
     c.bench_function("auth/verify_session", |b| {
         b.iter(|| {
             auth::verify::<Session>(black_box(KEY), "session", black_box(&token)).expect("verify")
-        })
+        });
     });
     let (config, text) = voice_with_rules();
     c.bench_function("voice/speech_body_32_rules", |b| {
@@ -67,10 +67,10 @@ fn bench(c: &mut Criterion) {
             config
                 .speech_body(black_box(SPEECH_MODEL), black_box(&text))
                 .expect("body")
-        })
+        });
     });
     c.bench_function("audio/pcm_format_parse", |b| {
-        b.iter(|| PcmFormat::parse(black_box("audio/pcm;rate=24000;channels=1")).expect("parse"))
+        b.iter(|| PcmFormat::parse(black_box("audio/pcm;rate=24000;channels=1")).expect("parse"));
     });
 }
 

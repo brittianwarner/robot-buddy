@@ -1,6 +1,8 @@
 //! Robot-local settings and server-clock context. Location labels never imply GPS access.
+#[cfg(feature = "server")]
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "server")]
 use serde_json::{Value, json};
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -16,6 +18,8 @@ impl Default for ContextConfig {
         }
     }
 }
+/// Timezone checks and local time need the timezone database, which only the server links.
+#[cfg(feature = "server")]
 impl ContextConfig {
     pub fn validate(&self) -> Result<()> {
         self.timezone
@@ -33,12 +37,24 @@ impl ContextConfig {
         self.validate()?;
         let utc = chrono::DateTime::from_timestamp(timestamp, 0).context("invalid timestamp")?;
         let local = utc.with_timezone(&self.timezone.parse::<chrono_tz::Tz>()?);
-        Ok(
-            json!({"utc":utc.to_rfc3339(),"local_datetime":local.to_rfc3339(),"local_date":local.format("%Y-%m-%d").to_string(),"weekday":local.format("%A").to_string(),"timezone":self.timezone,"location_label":self.location,"clock_source":"server","location_source":if self.location.is_some(){"saved_setting"}else{"unknown"}}),
-        )
+        let location_source = if self.location.is_some() {
+            "saved_setting"
+        } else {
+            "unknown"
+        };
+        Ok(json!({
+            "utc": utc.to_rfc3339(),
+            "local_datetime": local.to_rfc3339(),
+            "local_date": local.format("%Y-%m-%d").to_string(),
+            "weekday": local.format("%A").to_string(),
+            "timezone": self.timezone,
+            "location_label": self.location,
+            "clock_source": "server",
+            "location_source": location_source,
+        }))
     }
 }
-#[cfg(test)]
+#[cfg(all(test, feature = "server"))]
 mod tests {
     use super::*;
     #[test]

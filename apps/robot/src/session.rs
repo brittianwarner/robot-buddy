@@ -10,15 +10,12 @@ use crate::{
     screen::Screen,
 };
 use anyhow::{Context, Result};
-use rivetkit::{
-    TypedActorHandle,
-    client::{Client, ClientConfig, GetOptions},
+use rivetkit_client::{
+    Client, ClientConfig, GetOptions, connection::ActorConnection, handle::ActorHandle,
 };
 use robot_buddy::{
-    Bot,
     auth::{self, Identity},
-    conversation::Conversation as ConversationActor,
-    protocol::{Bundle, Call, Command, EnrollmentRequest, OutputEvent},
+    protocol::{Bundle, CALL_ACTION, Call, Command, EnrollmentRequest, OUTPUT_EVENT, OutputEvent},
 };
 use serde_json::{Value, json};
 use std::{
@@ -84,8 +81,44 @@ pub async fn bootstrap(
         .await?)
 }
 
+/// Sends one authenticated call: action `call` with the [`Call`] as its only argument.
+/// The server's actors decode it as the typed `Call` action and answer with JSON.
+async fn send(handle: &ActorHandle, call: &Call) -> Result<Value> {
+    handle
+        .action(CALL_ACTION, vec![serde_json::to_value(call)?])
+        .await
+}
+
+/// An `output` event carries one [`OutputEvent`] argument.
+fn decode_output(args: &[Value]) -> Option<OutputEvent> {
+    match args {
+        [event] => serde_json::from_value(event.clone()).ok(),
+        _ => None,
+    }
+}
+
+/// Pushes decoded `output` events into `push`. Never blocks the client's event task:
+/// a dropped event sets `overflowed`, shows up as a gap and is replayed.
+async fn subscribe(
+    connection: &ActorConnection,
+    push: mpsc::Sender<OutputEvent>,
+    overflowed: Arc<AtomicBool>,
+) -> rivetkit_client::SubscriptionHandle {
+    connection
+        .on_event(OUTPUT_EVENT, move |args| {
+            let Some(event) = decode_output(args) else {
+                tracing::debug!("undecodable output event dropped");
+                return;
+            };
+            if push.try_send(event).is_err() {
+                overflowed.store(true, Ordering::Relaxed);
+            }
+        })
+        .await
+}
+
 struct Conversation {
-    handle: TypedActorHandle<ConversationActor>,
+    handle: ActorHandle,
     session: String,
 }
 
@@ -95,7 +128,7 @@ impl Conversation {
             session: self.session.clone(),
             command,
         };
-        timeout(CALL_DEADLINE, self.handle.send(call))
+        timeout(CALL_DEADLINE, send(&self.handle, &call))
             .await
             .context("conversation call timed out")?
     }
@@ -163,26 +196,13 @@ pub async fn run(
     let options = || GetOptions {
         params: Some(json!({ "session": bundle.session })),
     };
-    let bot =
-        TypedActorHandle::<Bot>::new(client.get_for_id("bot", &bundle.actor_id, options())?);
-    let conversation = TypedActorHandle::<ConversationActor>::new(client.get_for_id(
-        "conversation",
-        &bundle.conversation_actor_id,
-        options(),
-    )?);
+    let bot = client.get_for_id("bot", &bundle.actor_id, options())?;
+    let conversation =
+        client.get_for_id("conversation", &bundle.conversation_actor_id, options())?;
     let connection = conversation.connect();
     let (push, mut pushed) = mpsc::channel(PUSHED_EVENTS);
     let overflow = Arc::new(AtomicBool::new(false));
-    let overflowed = overflow.clone();
-    let _subscription = connection
-        .on::<OutputEvent>(move |event| {
-            // Never block the client's event task. A dropped event shows up
-            // as a gap and is replayed.
-            if push.try_send(event).is_err() {
-                overflowed.store(true, Ordering::Relaxed);
-            }
-        })
-        .await;
+    let _subscription = subscribe(&connection, push, overflow.clone()).await;
 
     let media = shared.media.clone();
     tokio::spawn(async move { media.prewarm().await });
@@ -247,7 +267,7 @@ fn catch_up(live: bool) -> Duration {
 /// Keep the loopback panel in step with ownership. Returns whether the bot
 /// has an owner (only owned bots submit utterances).
 async fn registration(
-    bot: &TypedActorHandle<Bot>,
+    bot: &ActorHandle,
     bundle: &Bundle,
     shared: &Shared<'_>,
     cache: &mut Cache,
@@ -256,7 +276,7 @@ async fn registration(
         session: bundle.session.clone(),
         command,
     };
-    let snapshot = timeout(CALL_DEADLINE, bot.send(call(Command::Snapshot)))
+    let snapshot = timeout(CALL_DEADLINE, send(bot, &call(Command::Snapshot)))
         .await
         .context("bot snapshot timed out")??;
     let owner = snapshot["owner"].as_str();
@@ -268,7 +288,7 @@ async fn registration(
     let claim_lapsed = snapshot["pending_owner"].as_str() == Some("")
         || snapshot["claim_expires"].as_i64().unwrap_or(0) <= now;
     if now >= cache.claim_expires && claim_lapsed {
-        let claim = timeout(CALL_DEADLINE, bot.send(call(Command::BeginClaim)))
+        let claim = timeout(CALL_DEADLINE, send(bot, &call(Command::BeginClaim)))
             .await
             .context("claim timed out")??;
         cache.claim_expires = claim["expires"].as_i64().context("claim expiry missing")?;
@@ -289,9 +309,37 @@ async fn registration(
     let code = snapshot["confirm_code"].as_str().unwrap_or("");
     if shared.screen.confirmation(code).await && !code.is_empty() {
         let confirm = call(Command::ConfirmClaim { code: code.into() });
-        timeout(CALL_DEADLINE, bot.send(confirm))
+        timeout(CALL_DEADLINE, send(bot, &confirm))
             .await
             .context("confirm timed out")??;
     }
     Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn calls_keep_the_typed_wire_shape() {
+        let call = Call {
+            session: "s".into(),
+            command: Command::Replay { after: 7 },
+        };
+        let encoded = serde_json::to_value(&call).unwrap();
+        assert_eq!(
+            encoded,
+            json!({ "session": "s", "command": { "type": "replay", "after": 7 } })
+        );
+        assert_eq!((CALL_ACTION, OUTPUT_EVENT), ("call", "output"));
+    }
+
+    #[test]
+    fn output_events_decode_from_one_argument() {
+        let event = json!({ "sequence": 3, "turn_id": "t", "kind": "text.delta", "payload": {} });
+        let decoded = decode_output(std::slice::from_ref(&event)).unwrap();
+        assert_eq!((decoded.sequence, decoded.kind.as_str()), (3, "text.delta"));
+        assert!(decode_output(&[]).is_none());
+        assert!(decode_output(&[event.clone(), event]).is_none());
+    }
 }

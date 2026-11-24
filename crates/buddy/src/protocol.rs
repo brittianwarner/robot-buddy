@@ -1,7 +1,11 @@
 //! Versioned application messages transported by the official Rivet client.
-use rivetkit::{Action, Event};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+/// The one application action: an authenticated [`Call`]. Its output is JSON.
+pub const CALL_ACTION: &str = "call";
+/// The event that carries an [`OutputEvent`] to subscribed connections.
+pub const OUTPUT_EVENT: &str = "output";
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Connection {
     pub session: String,
@@ -11,9 +15,10 @@ pub struct Call {
     pub session: String,
     pub command: Command,
 }
-impl Action for Call {
+#[cfg(feature = "server")]
+impl rivetkit::Action for Call {
     type Output = Value;
-    const NAME: &'static str = "call";
+    const NAME: &'static str = CALL_ACTION;
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -111,8 +116,9 @@ pub struct OutputEvent {
     pub kind: String,
     pub payload: Value,
 }
-impl Event for OutputEvent {
-    const NAME: &'static str = "output";
+#[cfg(feature = "server")]
+impl rivetkit::Event for OutputEvent {
+    const NAME: &'static str = OUTPUT_EVENT;
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct EnrollmentRequest {

@@ -10,12 +10,21 @@ mod source;
 #[cfg(test)]
 mod tests;
 
-use super::*;
+use super::{App, Web};
 use admission::Admission;
-use axum::{body::Body, http::header};
+use anyhow::{Context, Result, ensure};
+use axum::{
+    Json,
+    body::Body,
+    extract::State,
+    http::{HeaderMap, HeaderValue, header},
+    response::Response,
+};
 use pipeline::{Head, Job, Limits};
 use provider::OpenRouter;
+use robot_buddy::{auth, protocol::SpeechRequest};
 use source::ActorSource;
+use std::sync::Arc;
 use tokio::sync::Semaphore;
 
 /// Concurrent speech streams per process.
@@ -57,7 +66,7 @@ fn non_empty_env(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|s| !s.is_empty())
 }
 
-/// The OpenRouter inference key is reused only for the default OpenRouter host, so a
+/// The `OpenRouter` inference key is reused only for the default `OpenRouter` host, so a
 /// custom `TTS_BASE_URL` never receives it implicitly.
 fn speech_key(custom_base: bool) -> Result<String> {
     if let Some(key) = non_empty_env("TTS_API_KEY") {

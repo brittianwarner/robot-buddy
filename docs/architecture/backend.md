@@ -39,20 +39,21 @@ Bot does not run inference or hold transcripts. Memory has an independent mutati
 stateDiagram-v2
   [*] --> Queued: persist unique client request
   Queued --> Running: SQL admission
-  Running --> ModelPending: persist Rig checkpoint
-  ModelPending --> Completed: direct dialogue + sentence streaming
-  ModelPending --> Ready: completed tool/planning response
-  Ready --> ToolPending: persist tool intent
-  ToolPending --> Ready: persist result and advance Rig
-  Ready --> SpeechPending: pin persona + voice
-  SpeechPending --> Completed: stream sentences then atomic final answer + event
-  SpeechPending --> Interrupted: actor process stops
-  ModelPending --> Interrupted: actor process stops
-  Ready --> Queued: restore checkpoint after restart
-  ToolPending --> Failed: outcome is unknown after restart
+  Running --> model_pending: checkpoint before each model request
+  model_pending --> Completed: direct dialogue + sentence streaming
+  model_pending --> ready: tool calls or planning response
+  ready --> ready: tool intent, effect, result, checkpoint
+  ready --> model_pending: next action-phase model request
+  ready --> speech_pending: Rig run done, pin persona + voice
+  speech_pending --> Completed: stream sentences, then final answer + event
+  model_pending --> Interrupted: actor process stops
+  speech_pending --> Interrupted: actor process stops
+  ready --> Queued: restart resumes the checkpoint
   Running --> Cancelled: atomic terminal event
-  Running --> Failed: deadline or provider failure
+  Running --> Failed: deadline, provider failure, or a resumed intent without a result
 ```
+
+The checkpoint `phase` column holds `model_pending`, `ready` or `speech_pending`. There is no separate tool phase: a tool intent is a `tool_calls` row without a result, written while the run is `ready`.
 
 `AgentRun` is checkpointed at effect boundaries, not on every token. Snapshots carry a Rig-format version and are limited to 512 KiB. Completed/failed run checkpoints are deleted after their terminal event commits; canonical history and tool receipts remain. Unsupported checkpoint versions fail explicitly.
 
@@ -64,7 +65,7 @@ Terminal status and terminal event commit in one transaction. Failed, interrupte
 
 Normal prompts load the latest 12 completed turns (bounded text, read through the `turns_completed` index), up to six matching facts plus two recent facts, and the current request. Full transcript data stays in SQLite and is accessible via history pages and an FTS5 history-search tool. This provides bounded normal context cost; lexical retrieval is not semantic search or a promise that every relevant fact is automatically retrieved. Tool receipts retain tool arguments/results separately from the final spoken answer.
 
-Rig uses a shared pooled HTTP transport with redirects disabled and connect/total deadlines; the web-search client is reused. Streaming uses a bounded channel and batches persisted deltas at 100 ms between sentence boundaries. Actor lookup is not performed per token. Device action authorization is checked fresh; active generation and event delivery share a one-second revocation-check cache, bounding revocation propagation while reducing cross-actor reads. A process-wide inference semaphore defaults to 16 concurrent model calls and rejects overflow; no global actor is involved. No actor is kept awake after its registered work finishes. Robot status polling currently wakes the Bot actor every three seconds while connected.
+Rig uses a shared pooled HTTP transport with redirects disabled and connect/total deadlines; the web-search client is reused. Streaming uses a bounded channel and batches persisted deltas at 100 ms between sentence boundaries. Actor lookup is not performed per token. Device action authorization is checked fresh; active generation and event delivery share a one-second revocation-check cache, bounding revocation propagation while reducing cross-actor reads. Output events go only to connections subscribed to `output`. Each connection's session is verified once and its expiry cached. A connection whose session has expired is disconnected before the event is sent. A failed revocation check disconnects every connection. A process-wide inference semaphore defaults to 16 concurrent model calls and rejects overflow; no global actor is involved. No actor is kept awake after its registered work finishes. Robot status polling currently wakes the Bot actor every three seconds while connected.
 
 Do not claim throughput improvements without measurement. Establish release-build baselines for first-token latency, SQLite operations per turn, checkpoint bytes, event bytes, memory per active run, and idle wakeups before changing batching or context limits. Semantic memory, summarization, multi-conversation indexing and event-retention policies are future extensions.
 

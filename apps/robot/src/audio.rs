@@ -134,7 +134,7 @@ fn client() -> Result<reqwest::Client> {
         .connect_timeout(Duration::from_secs(10))
         // Server media deadline is 300 s; this bounds a single speech request.
         .timeout(Duration::from_secs(320))
-        .pool_idle_timeout(Duration::from_secs(300))
+        .pool_idle_timeout(Duration::from_mins(5))
         .pool_max_idle_per_host(2)
         .tcp_keepalive(Duration::from_secs(30))
         .tcp_nodelay(true)
@@ -263,20 +263,20 @@ async fn play(
         "unsupported encoding"
     );
     let format = PcmFormat::parse(header("content-type").context("audio format required")?)?;
-    let mut player = (media.make_player)(format)
+    let mut child = (media.make_player)(format)
         .stdin(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true)
         .spawn()
         .context("install ALSA aplay to enable robot speech")?;
     let streamed = async {
-        let mut input = player.stdin.take().context("audio player input")?;
+        let mut input = child.stdin.take().context("audio player input")?;
         let mut stream = response.bytes_stream();
         let mut total = 0usize;
         loop {
             let bytes = tokio::select! {
                 biased;
-                status = player.wait() => bail!("audio player exited early ({:?})", status?.code()),
+                status = child.wait() => bail!("audio player exited early ({:?})", status?.code()),
                 next = stream.next() => match next {
                     Some(bytes) => bytes?,
                     None => break,
@@ -307,7 +307,7 @@ async fn play(
         );
         within(media.write_deadline, "audio player", input.shutdown()).await?;
         drop(input);
-        let status = timeout(DRAIN_DEADLINE, player.wait())
+        let status = timeout(DRAIN_DEADLINE, child.wait())
             .await
             .map_err(|_| anyhow!("audio player did not finish"))??;
         ensure!(status.success(), "audio player failed");
@@ -316,8 +316,8 @@ async fn play(
     .await;
     if streamed.is_err() {
         // Kill and reap a stuck or failed player before reporting.
-        let _ = player.start_kill();
-        let _ = timeout(Duration::from_secs(1), player.wait()).await;
+        let _ = child.start_kill();
+        let _ = timeout(Duration::from_secs(1), child.wait()).await;
     }
     streamed
 }
