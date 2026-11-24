@@ -1,0 +1,5 @@
+{
+  "owner": "issuer|user-1",
+  "token": "claim-token",
+  "type": "propose_claim"
+}

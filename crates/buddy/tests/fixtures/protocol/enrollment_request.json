@@ -1,0 +1,9 @@
+{
+  "certificate": {
+    "device_id": "device-1",
+    "issuer_signature": "c2lnbmF0dXJl",
+    "public_key": "ZXhhbXBsZS1wdWJsaWMta2V5LTMyLWJ5dGVzLWxvbmc="
+  },
+  "challenge": "header.payload.signature",
+  "proof": "cHJvb2Y="
+}

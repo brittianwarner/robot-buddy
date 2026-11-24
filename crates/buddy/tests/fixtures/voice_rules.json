@@ -1,0 +1,221 @@
+[
+  {
+    "name": "whisper_prefixes_the_word",
+    "rules": [{ "text": "secret", "style": "whisper" }],
+    "input": "Tell no one the secret.",
+    "expect": "Tell no one the [whispering] secret."
+  },
+  {
+    "name": "soft_also_whispers",
+    "rules": [{ "text": "goodnight", "style": "soft" }],
+    "input": "Okay, goodnight.",
+    "expect": "Okay, [whispering] goodnight."
+  },
+  {
+    "name": "emphasis_stays_plain",
+    "rules": [{ "text": "never", "style": "emphasis" }],
+    "input": "I never said that.",
+    "expect": "I never said that."
+  },
+  {
+    "name": "stress_stays_plain",
+    "rules": [{ "text": "that", "style": "stress" }],
+    "input": "I never said that.",
+    "expect": "I never said that."
+  },
+  {
+    "name": "forceful_stays_plain",
+    "rules": [{ "text": "Stop", "style": "forceful" }],
+    "input": "Stop right there.",
+    "expect": "Stop right there."
+  },
+  {
+    "name": "fast_stays_plain",
+    "rules": [{ "text": "quickly", "style": "fast" }],
+    "input": "Say it quickly.",
+    "expect": "Say it quickly."
+  },
+  {
+    "name": "slow_stays_plain",
+    "rules": [{ "text": "carefully", "style": "slow" }],
+    "input": "Read it carefully.",
+    "expect": "Read it carefully."
+  },
+  {
+    "name": "phoneme_stays_plain",
+    "rules": [{ "text": "read", "style": "phoneme", "phonemes": "R EH1 D" }],
+    "input": "I read it yesterday.",
+    "expect": "I read it yesterday."
+  },
+  {
+    "name": "every_occurrence_is_marked",
+    "rules": [{ "text": "secret", "style": "whisper" }],
+    "input": "A secret, then another secret.",
+    "expect": "A [whispering] secret, then another [whispering] secret."
+  },
+  {
+    "name": "matching_is_case_sensitive",
+    "rules": [{ "text": "secret", "style": "whisper" }],
+    "input": "Secret plans, secret base, SECRET door.",
+    "expect": "Secret plans, [whispering] secret base, SECRET door."
+  },
+  {
+    "name": "proper_noun_rule_ignores_lowercase",
+    "rules": [{ "text": "Pip", "style": "whisper" }],
+    "input": "Pip saw a pip in the apple.",
+    "expect": "[whispering] Pip saw a pip in the apple."
+  },
+  {
+    "name": "no_match_inside_a_longer_word",
+    "rules": [{ "text": "secret", "style": "whisper" }],
+    "input": "Secretary secrets are secretive.",
+    "expect": "Secretary secrets are secretive."
+  },
+  {
+    "name": "possessive_apostrophe_is_a_boundary",
+    "rules": [{ "text": "secret", "style": "whisper" }],
+    "input": "The secret's out.",
+    "expect": "The [whispering] secret's out."
+  },
+  {
+    "name": "typographic_apostrophe_is_a_boundary",
+    "rules": [{ "text": "secret", "style": "whisper" }],
+    "input": "The secret’s out.",
+    "expect": "The [whispering] secret’s out."
+  },
+  {
+    "name": "contraction_rule_matches_whole_contraction",
+    "rules": [{ "text": "don't", "style": "whisper" }],
+    "input": "I don't know, don'tcha think?",
+    "expect": "I [whispering] don't know, don'tcha think?"
+  },
+  {
+    "name": "hyphen_and_underscore_are_boundaries",
+    "rules": [{ "text": "secret", "style": "whisper" }],
+    "input": "top-secret and _secret_",
+    "expect": "top-[whispering] secret and _[whispering] secret_"
+  },
+  {
+    "name": "digits_are_word_characters",
+    "rules": [{ "text": "secret", "style": "whisper" }],
+    "input": "secret1 and 2secret but secret.",
+    "expect": "secret1 and 2secret but [whispering] secret."
+  },
+  {
+    "name": "accented_letters_are_word_characters",
+    "rules": [{ "text": "café", "style": "whisper" }],
+    "input": "Le café, les cafés.",
+    "expect": "Le [whispering] café, les cafés."
+  },
+  {
+    "name": "ascii_rule_does_not_match_inside_an_accented_word",
+    "rules": [{ "text": "caf", "style": "whisper" }],
+    "input": "Un café.",
+    "expect": "Un café."
+  },
+  {
+    "name": "emoji_is_a_boundary",
+    "rules": [{ "text": "secret", "style": "whisper" }],
+    "input": "🤫secret🤫",
+    "expect": "🤫[whispering] secret🤫"
+  },
+  {
+    "name": "cjk_text_has_no_word_boundaries",
+    "rules": [{ "text": "秘密", "style": "whisper" }],
+    "input": "これは秘密です。秘密。",
+    "expect": "これは秘密です。[whispering] 秘密。"
+  },
+  {
+    "name": "multi_word_phrase",
+    "rules": [{ "text": "good night", "style": "whisper" }],
+    "input": "Good night and good night.",
+    "expect": "Good night and [whispering] good night."
+  },
+  {
+    "name": "same_start_overlap_takes_the_longest_whisper",
+    "rules": [
+      { "text": "New York", "style": "emphasis" },
+      { "text": "New York City", "style": "whisper" }
+    ],
+    "input": "In New York City now.",
+    "expect": "In [whispering] New York City now."
+  },
+  {
+    "name": "same_start_overlap_takes_the_longest_plain",
+    "rules": [
+      { "text": "New York", "style": "whisper" },
+      { "text": "New York City", "style": "emphasis" }
+    ],
+    "input": "In New York City now, New York later.",
+    "expect": "In New York City now, [whispering] New York later."
+  },
+  {
+    "name": "rule_order_does_not_matter_for_same_start",
+    "rules": [
+      { "text": "New York City", "style": "whisper" },
+      { "text": "New York", "style": "emphasis" }
+    ],
+    "input": "In New York City now.",
+    "expect": "In [whispering] New York City now."
+  },
+  {
+    "name": "nested_shorter_match_is_absorbed",
+    "rules": [
+      { "text": "York", "style": "whisper" },
+      { "text": "New York City", "style": "emphasis" }
+    ],
+    "input": "In New York City now.",
+    "expect": "In New York City now."
+  },
+  {
+    "name": "adjacent_matches_both_apply",
+    "rules": [
+      { "text": "very", "style": "whisper" },
+      { "text": "quiet", "style": "soft" }
+    ],
+    "input": "very quiet",
+    "expect": "[whispering] very [whispering] quiet"
+  },
+  {
+    "name": "no_rules_is_identity",
+    "rules": [],
+    "input": "It's 3:00 — time for tea!",
+    "expect": "It's 3:00 — time for tea!"
+  },
+  {
+    "name": "empty_text",
+    "rules": [{ "text": "secret", "style": "whisper" }],
+    "input": "",
+    "expect": ""
+  },
+  {
+    "name": "bracket_in_rule_text_is_rejected",
+    "rules": [{ "text": "[laughs]", "style": "whisper" }],
+    "input": "Ha [laughs]",
+    "error": "invalid speech rule text"
+  },
+  {
+    "name": "angle_bracket_in_rule_text_is_rejected",
+    "rules": [{ "text": "<break>", "style": "emphasis" }],
+    "input": "Wait <break> now",
+    "error": "invalid speech rule text"
+  },
+  {
+    "name": "padded_rule_text_is_rejected",
+    "rules": [{ "text": " secret", "style": "whisper" }],
+    "input": "A secret.",
+    "error": "invalid speech rule text"
+  },
+  {
+    "name": "phoneme_rule_without_arpabet_is_rejected",
+    "rules": [{ "text": "read", "style": "phoneme", "phonemes": "reed" }],
+    "input": "I read.",
+    "error": "use CMU Arpabet phonemes"
+  },
+  {
+    "name": "phonemes_on_a_non_phoneme_rule_are_rejected",
+    "rules": [{ "text": "read", "style": "whisper", "phonemes": "R IY1 D" }],
+    "input": "I read.",
+    "error": "phonemes only apply to phoneme rules"
+  }
+]

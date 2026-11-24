@@ -1,1 +1,1 @@
-{"$schema":"https://turborepo.dev/schema.json","tasks":{"build":{"cache":false},"check":{"cache":false},"test":{"cache":false},"lint":{"cache":false},"format:check":{"cache":false}}}
+{"$schema":"https://turborepo.dev/schema.json","tasks":{"build":{"cache":false},"check":{"cache":false},"test":{"cache":false},"lint":{"cache":false},"format:check":{"cache":false},"lint:pedantic":{"cache":false}}}
