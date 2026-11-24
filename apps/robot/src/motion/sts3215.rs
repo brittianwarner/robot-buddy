@@ -81,9 +81,9 @@ impl Serial {
     ) -> std::result::Result<(), ReplyError> {
         let mut stream = Vec::with_capacity(64);
         loop {
-            if Instant::now() >= deadline {
-                return Err(ReplyError::Timeout);
-            }
+            // Sample the deadline before reading, but decide only after draining: a
+            // preempted caller whose reply is already buffered must not report a timeout.
+            let expired = Instant::now() >= deadline;
             let mut chunk = [0; 64];
             match self.0.read(&mut chunk) {
                 Ok(n) if n > 0 => {
@@ -103,8 +103,12 @@ impl Serial {
                         Err(e) => return Err(ReplyError::Other(e)),
                     }
                 }
+                Ok(_) if expired => return Err(ReplyError::Timeout),
                 Ok(_) => thread::sleep(Duration::from_micros(200)),
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    if expired {
+                        return Err(ReplyError::Timeout);
+                    }
                     thread::sleep(Duration::from_micros(200));
                 }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => (),
@@ -294,6 +298,44 @@ mod tests {
         assert_eq!(result, [0, 8]);
         done.send(()).unwrap();
         simulator.join().unwrap();
+    }
+    #[test]
+    fn reply_already_buffered_when_deadline_expires_is_not_a_timeout() {
+        // A 50 Hz worker preempted past its 20 ms I/O deadline must still accept a
+        // status reply the bus already delivered (soak: "servo 2 status timeout").
+        // A regular file stands in for a fully buffered tty input queue.
+        let dir = std::env::temp_dir().join(format!("sts-buffered-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let req = packet(2, INST_READ, &[TORQUE, 1]).unwrap();
+        let buffered = dir.join("buffered");
+        let mut wire = req.clone();
+        wire.extend_from_slice(&packet(2, 0, &[1]).unwrap());
+        std::fs::write(&buffered, &wire).unwrap();
+        let empty = dir.join("empty");
+        std::fs::write(&empty, []).unwrap();
+        let expired = Instant::now();
+
+        let mut driver = Serial(File::open(&buffered).unwrap(), IO_TIMEOUT);
+        let mut out = [0; 1];
+        assert!(driver.read_reply(&req, &mut out, expired).is_ok());
+        assert_eq!(out, [1]);
+
+        // Nothing buffered at an expired deadline is still a timeout, never a hang.
+        let mut driver = Serial(File::open(&empty).unwrap(), IO_TIMEOUT);
+        assert!(matches!(
+            driver.read_reply(&req, &mut out, expired),
+            Err(ReplyError::Timeout)
+        ));
+        // A corrupt buffered reply still fails closed after the deadline.
+        let mut corrupt = packet(2, 0, &[1]).unwrap();
+        *corrupt.last_mut().unwrap() ^= 1;
+        std::fs::write(&buffered, &corrupt).unwrap();
+        let mut driver = Serial(File::open(&buffered).unwrap(), IO_TIMEOUT);
+        assert!(matches!(
+            driver.read_reply(&req, &mut out, expired),
+            Err(ReplyError::Other(_))
+        ));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
     #[test]
     fn sync_write_packs_three_bounded_goals_in_one_frame() {
