@@ -94,7 +94,9 @@ impl Devices {
                                 recognized.send_replace(None);
                             }
                             let target = observation.target.unwrap_or((0., 0.));
-                            face.gaze(target.0, target.1);
+                            // An outward-facing camera and the eye firmware use
+                            // opposite horizontal frames (robot vs. viewer).
+                            face.gaze(-target.0, target.1);
                             if let Some((x, y)) = observation.target
                                 && let Some(motion) = &tracking
                             {
