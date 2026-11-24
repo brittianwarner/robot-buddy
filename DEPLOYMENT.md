@@ -1,6 +1,6 @@
 # Deploy Robot Buddy on a Raspberry Pi 5
 
-The Pi runs `robot-buddy-robot`. A separate host runs the Rust server and Rivet engine. Start with identity, network and playback; enable each peripheral independently after checking it. The Pi never needs the issuer key, Rivet admin token, OIDC secret or model-provider key. Models, voices, firmware and the private reference project are **not** part of the Pi binary or this repository.
+The Pi runs `robot-buddy-robot`. A separate host runs the Rust server and Rivet engine. Start with identity, network and playback; enable each peripheral independently after checking it. The Pi never needs the issuer key, Rivet admin token, OIDC secret or model-provider key. See [NOTICE.md](NOTICE.md) for provenance and licensing boundaries: the neck choreography/expression poses and local voice-coloring adaptations were developed in collaboration with ToschLogic (not as an MIT relicense or redistribution grant), while models, voices, firmware sources, recordings and the private reference tree are **not** bundled in the Pi binary or this repository.
 
 ## 1. Bring up the backend and issue one device identity
 
@@ -15,7 +15,12 @@ cp .env.example .env
 cargo run --locked -p robot-buddy-server -- provision secrets/issuer.key secrets/pip-01.identity.json
 ```
 
-On the **server host**, populate `.env` using the three values in `secrets/secrets.env` and [.env.example](.env.example). Set `BUDDY_PUBLIC_URL` and `BUDDY_PUBLIC_RIVET_URL` to two HTTPS origins reachable from the Pi. Set `AI_PROVIDER`, `AI_API_KEY`, `AI_MODEL`; for cloud speech set `TTS_MODEL=elevenlabs/eleven-v4-turbo` with an OpenRouter key. For claiming, register `<BUDDY_PUBLIC_URL>/auth/callback` at the OIDC provider and set `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`.
+On the **server host**, populate `.env` using the three values in `secrets/secrets.env` and [.env.example](.env.example). Set `BUDDY_PUBLIC_URL` and `BUDDY_PUBLIC_RIVET_URL` to two HTTPS origins reachable from the Pi. Set `AI_PROVIDER`, `AI_API_KEY`, `AI_MODEL`; for cloud speech set `TTS_MODEL=elevenlabs/eleven-v4-turbo` with an OpenRouter key.
+
+**OIDC requirements for claiming:** register `<BUDDY_PUBLIC_URL>/auth/callback` at your provider and set `OIDC_ISSUER`, `OIDC_CLIENT_ID`, and (for confidential clients) `OIDC_CLIENT_SECRET` (omit it for public PKCE clients; when set, it is sent via `client_secret_post`).
+- **Discovery availability at startup:** when `OIDC_ISSUER` is set, the server fetches `<OIDC_ISSUER>/.well-known/openid-configuration` once over HTTPS **at boot** with HTTP redirects disabled (20 s timeout). Startup fails if the discovery endpoint is unreachable, redirects, or returns an `issuer` string that does not match `OIDC_ISSUER` verbatim (including any trailing slash). Leave `OIDC_ISSUER` unset to boot without browser claiming.
+- **Provider capabilities:** the discovery document must publish HTTPS `authorization_endpoint`, `token_endpoint`, `userinfo_endpoint`, and `jwks_uri` (all answering without HTTP redirects). The client must support Authorization Code + PKCE (`S256`), `scope=openid profile`, `RS256` or `ES256` ID tokens carrying `kid` and `nonce`, and a `userinfo_endpoint` returning the same `sub` as the ID token.
+- **Browser redirect & error behavior:** multi-origin HTTPS redirects during sign-in (for example, federated SSO or a separate login domain) are permitted by `/claim`'s `form-action 'self' https:` policy; plaintext `http:` hops are not. If the user cancels or the IdP returns `?error=...&state=...`, `/auth/callback` verifies the login cookie and `state`, spends the transaction, clears `buddy_login`, and renders a static retry page without echoing query parameters.
 
 ```sh
 chmod 0600 .env
@@ -102,13 +107,32 @@ Install Raspberry Pi OS Lite and enable SSH over a trusted provisioning network.
 apt-get update
 apt-get install network-manager polkitd alsa-utils socat ca-certificates
 systemctl enable --now NetworkManager
-# Camera profile only. On Bookworm use the OpenCV prefix built above.
-apt-get install rpicam-apps
-# Trixie packaged/Buildx vision build ONLY: installs matching runtime libraries.
-# apt-get install libopencv-dev
+# Camera profile only (`rpicam-apps-lite` avoids desktop preview dependencies on Lite; `rpicam-apps` also works).
+apt-get install rpicam-apps-lite
+# Trixie prebuilt/Buildx vision binary runtime libraries ONLY (on Bookworm use the /opt/robot-buddy/opencv-4.10 prefix built above):
+# apt-get install libopencv-core410 libopencv-imgproc410 libopencv-imgcodecs410 libopencv-dnn410 libopencv-objdetect410
 ```
 
-On a standard MAX98357A I²S installation, enable `dtoverlay=max98357a` in `/boot/firmware/config.txt` and reboot. Use the overlay appropriate to your wiring, not two conflicting sound overlays. For OV5647 first try the default camera auto-detection; if necessary specify `dtoverlay=ov5647,cam0` with auto-detect disabled and the correct CSI socket. Use separately rated servo power, shared ground and a Pi supply rated for its attached USB load. Software can't confirm torque-off after lost power, a broken cable or a killed process; keep the servo supply switch reachable.
+**Power supply and `/boot/firmware/config.txt`:** Pip's reference power topology feeds a 12 V 5 A supply into three branches with a **shared ground** across every rail: (1) Buck A (12 V → 5 V 5 A plain USB-C buck, **not** USB-PD) dedicated to the Pi 5 alone (must actually hold 5 A at ~5.1 V); (2) Buck B (12 V → 5 V 5 A) for the MG90S ear servos and WS2812B chest ring (never join the Pi USB 5 V rail to Buck B); and (3) 12 V direct to the STS3215 serial bus servo adapter. Keep the 12 V servo power switch reachable: software cannot confirm torque-off after lost power, a broken cable or a killed process.
+
+Because a plain 5 V USB-C buck does not negotiate USB-PD 5 A, the Pi 5 defaults to capping total USB downstream current at 600 mA across the ESP32-S3, reSpeaker, and servo adapter. Edit `/boot/firmware/config.txt` and reboot:
+
+```ini
+# Set ONLY when powering the Pi 5 from a plain (non-USB-PD) supply genuinely rated
+# for 5 V / 5 A (such as Buck A above). Omit on an official 27 W USB-PD 5 A supply
+# (which negotiates 5 A over PD), and never set on an under-rated 3 A supply.
+usb_max_current_enable=1
+
+# MAX98357A I2S amp (BCLK GPIO18, LRCLK GPIO19, DIN GPIO21): disable onboard audio
+# so ALSA does not conflict with the I2S overlay. Use only the overlay for your wiring.
+dtparam=audio=off
+dtoverlay=max98357a
+
+# OV5647 CSI camera: default camera_auto_detect=1 usually finds it. If
+# `rpicam-hello --list-cameras` shows nothing, disable auto-detect and select the wired CSI port:
+# camera_auto_detect=0
+# dtoverlay=ov5647,cam0
+```
 
 Stage **only** the binary, this robot's identity, and the files under `infra/` on the Pi over SSH. Example from the provisioning machine (adjust user, hostname and binary):
 
@@ -132,7 +156,10 @@ ldd /usr/local/bin/robot-buddy-robot            # resolve every entry (none 'not
 install -m 0600 -o robot-buddy -g robot-buddy pip-01.identity.json /etc/robot-buddy/device.identity.json
 rm pip-01.identity.json                       # remove the extra staged private key
 install -m 0600 -o root -g root infra/device.env.example /etc/robot-buddy/device.env
-install -m 0644 infra/robot-buddy-nm.rules /etc/polkit-1/rules.d/50-robot-buddy-nm.rules
+# Priority 40 runs before Debian/RPi OS 49-polkit-pkla-compat.rules and 50-* defaults.
+# Inspect /etc/polkit-1/rules.d/ and /etc/polkit-1/localauthority/ first so this does not
+# overturn a stricter site NetworkManager policy; remove any legacy 50-robot-buddy-nm.rules.
+install -m 0644 infra/robot-buddy-nm.rules /etc/polkit-1/rules.d/40-robot-buddy-nm.rules
 install -m 0644 infra/robot-buddy.service /etc/systemd/system/
 ```
 
@@ -161,11 +188,11 @@ systemctl restart robot-buddy
 systemctl show robot-buddy -p SupplementaryGroups -p MemoryMax -p TasksMax
 ```
 
-The base unit has a 256 MiB budget and 128 tasks. The drop-in adds `video` and sets initial budgets of 1 GiB and 256 tasks for the entire cgroup (including children). These are starting ceilings, not measured requirements. Keep `MemoryDenyWriteExecute=yes`, the watchdog, unprivileged user and filesystem restrictions. On customized images inspect `ls -l /dev/{video*,media*,dma_heap/*}`; add only the necessary existing device group, not root or world-write permissions.
+The base unit has a 256 MiB budget and 128 tasks. The drop-in adds `video` and sets initial budgets of 1 GiB and 256 tasks for the entire cgroup (including children). These are starting ceilings, not measured requirements. Keep `MemoryDenyWriteExecute=yes`, the watchdog, unprivileged user, `SystemCallFilter` directives and filesystem restrictions. For camera hardware, also add `robot-buddy` to `video` (`usermod -aG video robot-buddy`) so unprivileged `runuser -u robot-buddy` camera checks have the same group membership as the unit. On customized images inspect `ls -l /dev/{video*,media*,v4l-subdev*,dma_heap/*}` (and `/dev/dri/renderD*` if present); add only the necessary existing device group(s) (typically `video`; add `render` only if a required node is `render`-owned) to both the user and `20-pip.conf`, never root or world-write permissions.
 
 ### Face and neck
 
-* **Face:** use the existing ESP32-S3 N16R8 firmware and its native **USB**, not UART. If reflashing is needed, use the authorized firmware checkout's `firmware/` PlatformIO project: `pio run`, `pio run -t upload`; unplug the serial monitor before starting the daemon. Pick its distinct path from `ls -l /dev/serial/by-id/` and set `BUDDY_FACE_SERIAL` to that path. Verify both eyes, ring, ear movement and firmware heartbeat; unplug/replug the face and check recovery.
+* **Face:** use the existing ESP32-S3 DevKitC-1 N16R8 firmware and its native **USB** port, not UART. If reflashing is needed, **stop the service first** (`systemctl stop robot-buddy`) so the daemon does not hold the CDC-ACM port open, then run `pio run` and `pio run -t upload` from the authorized firmware checkout's `firmware/` PlatformIO project. If automatic upload fails to enter download mode, enter the ROM bootloader manually (**hold `BOOT`, tap `RST`, release `BOOT`**), run `pio run -t upload` again, and tap `RST` afterwards if needed. Close `pio device monitor` before starting `robot-buddy` again. Pick its distinct path from `ls -l /dev/serial/by-id/` and set `BUDDY_FACE_SERIAL` to that path. Verify both eyes, ring, ear movement and firmware heartbeat; unplug/replug the face and check recovery.
 * **Neck:** the CH343/STS3215 adapter has a **different** serial path. If an adapter lacks a unique ID, use a stable USB topology path under `/dev/serial/by-path/`. With the service stopped and head supported, assign each servo a distinct ID in position mode using the vendor tool (one servo connected at a time). Record its straight-ahead raw position, inversion and conservative cable-safe range on the assembled robot. Do not copy calibration between robots.
 
 Create a root-owned `0640 root:robot-buddy` JSON file `/etc/robot-buddy/neck.json`. It has three required objects: `yaw`, `pitch`, `roll`; each contains `id`, `center`, `min_steps`, `max_steps`, `invert`, `max_speed_deg_s` and `accel`. Example **shape of one joint only**, not a calibration for your robot: `"yaw":{"id":1,"center":2048,"min_steps":2000,"max_steps":2100,"invert":false,"max_speed_deg_s":10,"accel":5}`. All counts are in 0–4095; min < center < max. Confirm all IDs and ranges before writing EEPROM. Never widen limits to make a failed verification pass.
@@ -188,7 +215,7 @@ After verification set `BUDDY_SERVO_PORT` and `BUDDY_SERVO_CALIBRATION` to those
 
 ### Microphone, transcription and speaker
 
-The integrated path uses local `arecord` → voice activity detection → `whisper-cli` → transcript wake matching. It does **not** need Python or a private wake model. Use `arecord -l`/`arecord -L` for the reSpeaker and `aplay -L` for the separate amplifier. Verify 16 kHz S16_LE capture with the correct USB channel count as `robot-buddy`, with the service stopped, e.g. `runuser -u robot-buddy -- arecord -D 'plughw:CARD=YOUR_MIC,DEV=0' -r16000 -fS16_LE -c1 -d2 -t raw /dev/null`.
+The integrated path uses local `arecord` → voice activity detection → `whisper-cli` → transcript wake matching. It does **not** need Python or a private wake model. Use `arecord -l`/`arecord -L` for the reSpeaker and `aplay -L` for the separate amplifier. Pip's USB reSpeaker (reSpeaker Lite 2-mic / XVF3800) presents a **2-channel** 16 kHz S16_LE capture stream: open it at its native 2-channel layout (`-c2`, `BUDDY_LISTEN_CHANNELS=2`) and select the processed beam (`BUDDY_LISTEN_CHANNEL=0`, or `1` if your firmware exposes the ASR beam on channel 1) so `plughw:` does not downmix both beams together. Verify capture as `robot-buddy`, with the service stopped, e.g. `runuser -u robot-buddy -- arecord -D 'plughw:CARD=YOUR_MIC,DEV=0' -r16000 -fS16_LE -c2 -d2 -t raw /dev/null` (adjust `-c` and `BUDDY_LISTEN_CHANNELS` only if your microphone's native channel count differs).
 
 Install a reviewed [whisper.cpp](https://github.com/ggml-org/whisper.cpp) release on the Pi (for example, configure its release source with `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF`, `cmake --build build -j2 --target whisper-cli`, then `install -m755 build/bin/whisper-cli /usr/local/bin/`). Select a local, license-reviewed English ggml model, e.g. `ggml-tiny.en.bin`. For every model in this guide, verify the pinned revision and publisher checksum **before installation**; keep the license/model card with the device inventory. The service does not download weights on first boot. Install models read-only by the service under `/opt/robot-buddy/models`, outside `/home`.
 
@@ -196,13 +223,25 @@ Install a reviewed [whisper.cpp](https://github.com/ggml-org/whisper.cpp) releas
 BUDDY_LISTEN_MODEL=/opt/robot-buddy/models/ggml-tiny.en.bin
 BUDDY_LISTEN_WHISPER=/usr/local/bin/whisper-cli
 BUDDY_LISTEN_DEVICE=plughw:CARD=YOUR_MIC,DEV=0
-BUDDY_LISTEN_CHANNELS=1
+BUDDY_LISTEN_CHANNELS=2
 BUDDY_LISTEN_CHANNEL=0
 ```
 
-`CHANNELS` is the captured interleaved channel count, `CHANNEL` the zero-based beam index. Say “Hey Pip, what time is it?”; check a reply, a short follow-up without a wake word, and a wake while speaking. If playback triggers the mic, check beam/amp routing and set `BUDDY_LISTEN_BARGE_IN=0` until tested. The external socket still works without this listener: put only the external STT account in `pip-control` (not `robot-buddy`). Test as that account: `printf '{"wake":true}\n' | socat - UNIX-CONNECT:/run/robot-buddy/control.sock`. Do not enable two capture processes on the same microphone.
+`CHANNELS` is the captured interleaved channel count, `CHANNEL` the zero-based beam index. With transcript wake, say “Hey Pip, what time is it?” and test a follow-up after the reply. **Spoken barge-in requires neural wake:** transcript mode does not transcribe playback echo to search for “Hey Pip”, even when `BUDDY_LISTEN_BARGE_IN=1`. With neural wake enabled, test an interruption during speech; set `BUDDY_LISTEN_BARGE_IN=0` if the beam/amp routing does not reject echo. The external socket still works without this listener: put only the external STT account in `pip-control` (not `robot-buddy`). Test as that account: `printf '{"wake":true}\n' | socat - UNIX-CONNECT:/run/robot-buddy/control.sock`. Do not enable two capture processes on the same microphone.
 
-**Optional neural wake:** the full image includes the `onnx-wake` Cargo feature. Install a compatible AArch64 Linux CPU build of [ONNX Runtime](https://github.com/microsoft/onnxruntime/releases) (1.20 or newer compatible ABI); point `ORT_DYLIB_PATH` at its actual `libonnxruntime.so`, not a directory. Use a local directory containing the authorized `hey_pip.onnx` classifier plus the matching openWakeWord `melspectrogram.onnx` and `embedding_model.onnx` frontend. Check each model's terms, especially for commercial use; no weights are supplied. Set e.g. `BUDDY_LISTEN_WAKE_DIR=/opt/robot-buddy/models/wake` alongside `BUDDY_LISTEN_MODEL`. This changes wake detection, not speech transcription. Validate quiet, noisy, positive and negative recorded clips against the reference before enabling it unattended; remove `BUDDY_LISTEN_WAKE_DIR` to return to transcript wake.
+**Optional neural wake:** the full image includes the `onnx-wake` Cargo feature. Install a compatible AArch64 Linux CPU build of [ONNX Runtime](https://github.com/microsoft/onnxruntime/releases) (1.20 or newer compatible ABI; verify the publisher checksum); point `ORT_DYLIB_PATH` at its actual `libonnxruntime.so`, not a directory. Use a local directory containing the authorized private `hey_pip.onnx` classifier plus the matching public openWakeWord `melspectrogram.onnx` and `embedding_model.onnx` frontend (`v0.5.1`). Check each model's terms, especially for commercial use; no weights are supplied and no hash is published here for the private `hey_pip.onnx` asset (verify it against the authorized owner's provisioning record). Set e.g. `BUDDY_LISTEN_WAKE_DIR=/opt/robot-buddy/models/wake` alongside `BUDDY_LISTEN_MODEL`. This changes wake detection, not speech transcription. Validate quiet, noisy, positive and negative recorded clips against the reference before enabling it unattended; remove `BUDDY_LISTEN_WAKE_DIR` to return to transcript wake.
+
+#### Verified public model pins
+
+Verify every public model's SHA-256 (`sha256sum`) before copying it to `/opt/robot-buddy/models` (fetch real LFS bytes, not text pointers). Private assets (`hey_pip.onnx`) and operator-chosen Piper voices are omitted from this table—verify those against their own owner/publisher checksums rather than fabricating hashes:
+
+| Public model | Upstream pin | Size (bytes) | SHA-256 |
+|---|---|---:|---|
+| `ggml-tiny.en.bin` | `ggerganov/whisper.cpp` (`5359861c739e955e79d9a303bcbc70fb988958b1`) | 77,704,715 | `921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f` |
+| `melspectrogram.onnx` | `dscripka/openWakeWord` release `v0.5.1` | 1,087,958 | `ba2b0e0f8b7b875369a2c89cb13360ff53bac436f2895cced9f479fa65eb176f` |
+| `embedding_model.onnx` | `dscripka/openWakeWord` release `v0.5.1` | 1,326,578 | `70d164290c1d095d1d4ee149bc5e00543250a7316b59f31d056cff7bd3075c1f` |
+| `face_detection_yunet_2023mar.onnx` | `opencv/opencv_zoo` (`48b10fa505aeb51fbd127fc60a5c660040e823b7`) | 232,589 | `8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4` |
+| `face_recognition_sface_2021dec.onnx` | `opencv/opencv_zoo` (`48b10fa505aeb51fbd127fc60a5c660040e823b7`) | 38,696,353 | `0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79` |
 
 For a repeatable wake check on a private test machine with the matching native ONNX Runtime installed, set `ORT_DYLIB_PATH`, `BUDDY_LISTEN_WAKE_DIR`, `BUDDY_WAKE_TEST_PCM` (16 kHz mono S16_LE, 1280 samples per hop) and `BUDDY_WAKE_TEST_SCORES` (one numeric reference score per hop). Include both classes after the four-second warmup. Run `cargo test --locked -p robot-buddy-robot --features onnx-wake compare_reference_scores -- --ignored`. No clips, reference scores or models should be added to the repo.
 
@@ -217,7 +256,7 @@ This announces a fixed offline status locally, not model replies. Ordinary speec
 
 ### Camera, gallery and operator controls
 
-With the service stopped check `rpicam-hello --list-cameras`. Then check `rpicam-vid --nopreview --frames 1 -t 0 --width 384 --height 288 --framerate 15 --codec yuv420 -o - | wc -c`: a full packed frame is **165888 bytes**. Use the `pi-vision` binary; matching occurs in-process with CPU OpenCV. Install the authorized YuNet 2023mar ONNX model for detection. Only for opt-in recognition also install SFace 2021dec. The [vision guide](apps/robot/src/vision/README.md) gives pinned upstream revisions, checksums and a private recognition fixture test. Fetch the actual LFS object, not its text pointer. No external vision worker is required.
+With the service stopped check camera access as the service user: `runuser -u robot-buddy -- rpicam-hello --list-cameras`, then `runuser -u robot-buddy -- rpicam-vid --nopreview --frames 1 -t 0 --width 384 --height 288 --framerate 15 --codec yuv420 -o - | wc -c` — a full packed frame is **165888 bytes**. Use the `pi-vision` binary; matching occurs in-process with CPU OpenCV. Install the authorized YuNet 2023mar ONNX model for detection. Only for opt-in recognition also install SFace 2021dec. Both hashes match the verified public model table above and the [vision guide](apps/robot/src/vision/README.md), which also covers the private recognition fixture test. Fetch the actual LFS object, not its text pointer. No external vision worker is required.
 
 ```ini
 BUDDY_VISION=1
@@ -237,21 +276,27 @@ ssh -N -L 127.0.0.1:8091:127.0.0.1:8091 pi@pip.local
 
 Open `http://127.0.0.1:8091/` locally; Basic auth username `operator`, password the token. Check preview and live events, then exercise a small bounded manual pose and release it; test enrollment with only one consenting person in view and test forgetting. This is separate from the unprivileged onboarding screen on `8090`. Do not publish either port to the LAN or your TLS reverse proxy. Remove the token and restart to disable the operator panel.
 
-## 5. Acceptance, upgrades and recovery
+## 5. Hardware bring-up checklist, upgrades and recovery
 
-Before leaving a robot unattended, record the binary revision/checksum, OS and model versions, calibration file revision and outcomes on **that robot**:
+Before leaving a robot unattended, record the binary revision/checksum, OS and model versions, calibration file revision, and outcomes on **that robot**.
+
+**Open release gates:** verify physical servo calibration and torque release, wake accuracy and echo rejection, tracking/recognition accuracy, and latency under simultaneous camera inference and 50 Hz neck motion. Follow the [loaded Pip measurement procedure](docs/performance-pip.md) (driven by `scripts/pip-perf.py`) and the release qualification gates in [docs/testing-pip-release.md](docs/testing-pip-release.md). The M4 Pro benchmark starts with a submitted transcript and uses simulated audio I/O; its numbers do not measure endpointing, Whisper model startup, an acoustic wake, or audible playback.
 
 **What was verified before bench commissioning:** both the Bookworm private-prefix OpenCV 4.10 build and the Trixie packaged OpenCV build linked the full `aarch64-unknown-linux-gnu` release (`pi-vision,onnx-wake`) inside ARM64 Debian containers. The Trixie binary ran `setup-card` unprivileged, and its full-feature robot test suite passed (189 passed; the two tests requiring private recordings or labeled images were skipped). These checks do not establish motor direction, camera accuracy, wake behavior, timing, or memory headroom on a physical Pi.
 
-| Exercise | Observable result |
-|---|---|
-| Cold boot, reboot with known Wi-Fi, then loss and return of the uplink | Same bot and ownership; setup remains available with no network, no stale speech after reconnect. |
-| Face heartbeat, disconnect/replug, invalid/missing helper or model | Diagnose locally in the journal; issue is visible, credentials and conversational text are not diagnostic material. |
-| Local wake in quiet/noisy conditions, mute, ten minutes of played speech | Measure misses, false triggers and actual stop latency; do not assume echo cancellation. |
-| Slow manual pose and release; stop/restart service with supported head | No unexpected jump or overtravel. Confirm physical torque release; if unconfirmed, cut servo power and inspect before restart. |
-| Camera present/absent, enrollment and forgetting, closed preview | Recognition is optional; no stale target controls access. Panel rejects unclaimed/unauthenticated access. |
-| Vision + speech + motion together | Measure peak memory, task count, CPU temperature and underruns; verify watchdog, no OOM and acceptable latency. |
+> **Important distinction:** Every numeric threshold in the bring-up checklist below is a **proposed engineering go/no-go threshold**, **not** observed Raspberry Pi 5 performance. Record the actual measurements from the target robot beside each gate before declaring a robot ready.
 
-Use `systemctl show robot-buddy -p NRestarts -p MemoryCurrent -p MemoryPeak -p TasksCurrent -p Result`, `systemd-cgtop`, `journalctl -u robot-buddy -b`, and `vcgencmd get_throttled`. For camera/ALSA permissions inspect groups on actual nodes; for absent ML dependencies check `ldd`, `pkg-config --modversion opencv4` (if development packages installed), executable paths and model file permissions. A `403` after valid operator credentials requires a connected, claimed bot and the expected origin; `401` means credentials are missing or wrong. The operator panel does not bind a non-loopback address.
+### Step-by-step bring-up and go/no-go gates
 
-**Upgrade:** save the current working binary, root-only env file, unit/drop-ins and calibration. Stop the service; replace the binary and any changed unit/rules, verify the new binary's dependencies, run `systemctl daemon-reload` and restart. Keep `/etc/robot-buddy/device.identity.json`, `/var/lib/robot-buddy/` (cache, setup card, gallery) and the server's volume/secrets. Do not re-run `init`, `provision` or overwrite the env file during an upgrade. To roll back, stop the unit, restore the saved binary and matching configuration/calibration, reload and restart. If EEPROM limits changed, reconcile them **with power to the motors under operator control** and verify before rearming. A device rollback does not roll back server state. Removing optional hardware flags is the quickest way to isolate a peripheral failure without changing identity.
+| Gate | Operator procedure / command | Proposed engineering go/no-go threshold (not observed Pi performance) |
+|---|---|---|
+| **1. Preflight** | Run `vcgencmd get_throttled`, `ldd /usr/local/bin/robot-buddy-robot`, `systemd-analyze verify /etc/systemd/system/robot-buddy.service`, `systemctl show robot-buddy -p SupplementaryGroups -p MemoryMax -p TasksMax`, `stat -c '%U:%G %a' /etc/robot-buddy/device.identity.json /run/robot-buddy/control.sock`, and `ls -l /etc/polkit-1/rules.d/`. Verify `/ready` (`200`), OIDC startup discovery, full multi-origin browser claim + 6-digit confirmation, and cancelled IdP callback (`error=access_denied`). | `vcgencmd get_throttled` == `0x0`; `0` unresolved `ldd` libraries; `0` `systemd-analyze verify` warnings/errors; identity `robot-buddy:robot-buddy 600`; control socket `robot-buddy:pip-control 660`; `40-robot-buddy-nm.rules` installed with no legacy `50-robot-buddy-nm.rules` and no unintended site-policy override; drop-in `MemoryMax=1G` / `TasksMax=256` active; claim + cancel-error flow pass cleanly; cold boot, known-Wi-Fi reboot and uplink recovery preserve bot ID and ownership. |
+| **2. Calibration & torque safety** | With head supported and service stopped, run `servo ping`, `servo read`, and `servo verify` as `robot-buddy`. Confirm face `hello`/`hb`, unplug/replug recovery, and board-reset QR/mood repaint. Start service, exercise a small bounded manual pose on `127.0.0.1:8091`, release it, then run `systemctl stop robot-buddy` and feel all three axes by hand. | `servo verify` passes with `0` warnings and `min_steps < center < max_steps` inside hand-checked cable clearance; EEPROM lock confirmed; `0` unexpected jumps or overtravel; **100% physical torque release confirmed on stop** (if unconfirmed, cut 12 V servo power immediately—no-go). |
+| **3. Acoustic wake, echo & p95 latency** | With camera tracking and 50 Hz neck motion active simultaneously (verified in-window by `total_ticks > 0`, `0` `neck motion stopped` events, positive `vision_frames` delta, and `0` camera errors), run `scripts/pip-perf.py run` (`≥ 20` turns after `≥ 1` warm-up and `≥ 10` barge-ins, `0` failed trials) and `scripts/pip-perf.py compare --strict`, plus 10 minutes of continuous speech playback and mute checks. | Wake detection ≥ 90% true-positive on held-out quiet/room clips; `0` false wake triggers during 10 min playback (if neural barge-in false-triggers, set `BUDDY_LISTEN_BARGE_IN=0`); acoustic end-of-speech → first audible (`eos_to_first_audible_ms`) proposed p95 ≤ 3,000 ms (3.0 s); wake END → actual playback stop (`wake_to_playback_stop_ms`) proposed p95 ≤ 500 ms (0.5 s) for neural wake (`--wake-mode neural`) or ≤ 2,500 ms provisional for transcript wake (`--wake-mode transcript`); mute silences audio immediately; 50 Hz neck skipped 20 ms slots (`skipped_slots / total_ticks`) ≤ 0.1%; `allow_inactive=false`, `simulated=false`. |
+| **4. Loaded memory, tasks & thermal soak** | During continuous simultaneous vision + speech + 50 Hz neck load, capture `scripts/pip-perf.py cgroup-snapshot`, `systemctl show robot-buddy -p NRestarts -p MemoryCurrent -p MemoryPeak -p TasksCurrent -p Result`, `systemd-cgtop`, and `vcgencmd measure_temp && vcgencmd get_throttled`. | `MemoryPeak` < 1 GiB (1,024 MiB) hard ceiling and ≤ 921.6 MiB (proposed 10% reserve under `MemoryMax=1G` in `20-pip.conf`); `0` OOM kills (`oom_kill == 0`); `TasksCurrent` / peak ≤ 200 (headroom under `TasksMax=256`); `NRestarts` delta == `0`, `0` watchdog timeouts, `0` panics or safety faults; `vcgencmd get_throttled == 0x0` (no under-voltage or thermal throttling) and SoC temperature < 80 °C under the Active Cooler. |
+| **5. Camera tracking, recognition & operator controls** | With service stopped run `runuser -u robot-buddy -- rpicam-vid --nopreview --frames 1 -t 0 --width 384 --height 288 --framerate 15 --codec yuv420 -o - \| wc -c`. Restart service; verify face tracking direction and recenter, camera-absent recovery, and (only if `BUDDY_VISION_SFACE` is enabled) enroll 2 views of one consenting person, test held-out recognition and a different person, then test Forget across restart. Inspect `ss -tlnp` and test operator auth (`401`/`403`). | Packed frame size == **165888** bytes; tracking moves in the true viewer-frame direction (set `BUDDY_VISION_ROTATE_180=1` if inverted) and recenters cleanly when no face is present; optional SFace recognition proposed ≥ 90% true-accept on held-out views and `0%` false-accept on another person at the 0.42 threshold; Forget deletes all samples and persists across restart; operator panel binds `127.0.0.1:8091` only and refuses unauthenticated (`401`) and unclaimed/wrong-origin (`403`) requests. |
+| **6. Upgrade & rollback drill** | Record pre-upgrade binary SHA-256, bot ID, ownership, calibration revision and gallery state; back up binary, `device.env`, unit/drop-in, polkit rule and `neck.json`. Perform an upgrade (see below), verify identity/state continuity, then execute a full rollback to the saved binary/config and verify `servo verify` before rearming. | Both upgrade and rollback preserve the same bot ID, ownership, cache and gallery without re-running `init` or `provision`; `ldd` and `systemd-analyze verify` exit `0`; `servo verify` passes before rearming; `0` unverified servo armings and `0` credential leaks in journals. |
+
+For troubleshooting, inspect `systemctl show robot-buddy -p NRestarts -p MemoryCurrent -p MemoryPeak -p TasksCurrent -p Result`, `systemd-cgtop`, `journalctl -u robot-buddy -b`, and `vcgencmd get_throttled`. For camera/ALSA permissions inspect groups on actual nodes; for absent ML dependencies check `ldd`, `pkg-config --modversion opencv4` (if development packages installed), executable paths and model file permissions. A `403` after valid operator credentials requires a connected, claimed bot and the expected origin; `401` means credentials are missing or wrong. The operator panel does not bind a non-loopback address.
+
+**Upgrade:** save the current working binary, root-only env file, unit/drop-ins, polkit rule and calibration. Stop the service; replace the binary and any changed unit/rules (install `40-robot-buddy-nm.rules` after checking site polkit policy and remove any legacy `/etc/polkit-1/rules.d/50-robot-buddy-nm.rules`), verify the new binary's dependencies (`ldd`) and unit (`systemd-analyze verify`), run `systemctl daemon-reload` and restart. Keep `/etc/robot-buddy/device.identity.json`, `/var/lib/robot-buddy/` (cache, setup card, gallery) and the server's volume/secrets. Do not re-run `init`, `provision` or overwrite the env file during an upgrade. To roll back, stop the unit, restore the saved binary and matching configuration/unit/polkit rule/calibration, reload and restart. If EEPROM limits changed, reconcile them **with power to the motors under operator control** and verify before rearming. A device rollback does not roll back server state. Removing optional hardware flags is the quickest way to isolate a peripheral failure without changing identity.

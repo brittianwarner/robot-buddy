@@ -1,4 +1,4 @@
-// /etc/polkit-1/rules.d/50-robot-buddy-nm.rules
+// /etc/polkit-1/rules.d/40-robot-buddy-nm.rules
 //
 // Lets the robot-buddy service account manage its NetworkManager profiles
 // without root: add, modify and delete system profiles (and save and read back
@@ -7,8 +7,17 @@
 // never opens an unprotected hotspot or turns the radio on or off, so those
 // actions are not granted. Nothing else is.
 //
+// Priority 40 places this rule before Debian/Raspberry Pi OS
+// 49-polkit-pkla-compat.rules and 50-* defaults so legacy .pkla rules do not
+// preempt Wi-Fi setup for robot-buddy. Inspect /etc/polkit-1/rules.d/ and
+// /etc/polkit-1/localauthority/ before installing so this rule does not
+// overturn an intentional site deny policy; keep stricter site deny rules at a
+// lower prefix (or adjust this prefix) if your site restricts NetworkManager.
+// When upgrading from 50-robot-buddy-nm.rules, remove the old file.
+//
 // polkit cannot see which profile a call names, so these actions cover every
-// profile. The account has no login shell and no other privileges.
+// profile. The account has no login shell and no other privileges, and every
+// other user or action falls through via NOT_HANDLED.
 polkit.addRule(function (action, subject) {
   if (subject.user !== "robot-buddy") {
     return polkit.Result.NOT_HANDLED;

@@ -39,7 +39,9 @@ install -m 0755 robot-buddy-robot /usr/local/bin/robot-buddy-robot
 install -d -m 0750 -o root -g robot-buddy /etc/robot-buddy
 install -m 0600 -o robot-buddy -g robot-buddy device.identity.json /etc/robot-buddy/
 install -m 0600 infra/device.env.example /etc/robot-buddy/device.env   # then edit it
-install -m 0644 infra/robot-buddy-nm.rules /etc/polkit-1/rules.d/50-robot-buddy-nm.rules
+# Priority 40 precedes Debian/RPi OS 49-polkit-pkla-compat.rules. Inspect existing
+# /etc/polkit-1/{rules.d,localauthority} first so this does not overturn a stricter site policy.
+install -m 0644 infra/robot-buddy-nm.rules /etc/polkit-1/rules.d/40-robot-buddy-nm.rules
 install -m 0644 infra/robot-buddy.service /etc/systemd/system/
 install -d -m 0700 -o robot-buddy -g robot-buddy /var/lib/robot-buddy
 runuser -u robot-buddy -- /usr/local/bin/robot-buddy-robot setup-card
@@ -58,7 +60,7 @@ sudo -u stt cat /etc/robot-buddy/device.identity.json # Permission denied (EACCE
 printf '{"wake":true}\n' | sudo -u stt socat - UNIX-CONNECT:/run/robot-buddy/control.sock
 ```
 
-Upgrading an older install: run the `groupadd`, `usermod -aG pip-control robot-buddy`, `gpasswd -d stt robot-buddy`, then `chown robot-buddy:robot-buddy` and `chmod 0600` the identity file, install the new unit and rules, and restart.
+Upgrading an older install: run the `groupadd`, `usermod -aG pip-control robot-buddy`, `gpasswd -d stt robot-buddy`, then `chown robot-buddy:robot-buddy` and `chmod 0600` the identity file, install the new unit and `40-robot-buddy-nm.rules` (removing any legacy `/etc/polkit-1/rules.d/50-robot-buddy-nm.rules` after checking site polkit policy), and restart.
 
 When the robot cannot join a network, it opens its setup hotspot. Join it using the printed card or left-eye QR code, then scan the right eye or visit `http://10.42.0.1` and enter home Wi-Fi credentials. The optional kiosk panel (`BUDDY_SCREEN_ADDR`, default `127.0.0.1:8090`) also shows setup information. A mistyped password leaves any working home network in place. Once connected, sign in with the configured OIDC provider from the claim link and confirm the matching six-digit code by speaking it to Pip or using the kiosk panel. No phone app is needed.
 
