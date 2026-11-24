@@ -296,6 +296,9 @@ fn start_history_backfill(ctx: &Ctx<Conversation>) {
                     return;
                 }
             }
+            if let Some(hold) = seam::at(&seam::Point::HistoryBackfillBatch { batches }) {
+                let _ = hold.await;
+            }
             // Queued actions and turn writes run between batches.
             tokio::task::yield_now().await;
         }
@@ -1234,6 +1237,8 @@ pub mod seam {
         Tool { name: &'a str, arguments: &'a str },
         /// The spoken phase's memory search, after its voice is pinned.
         SpokenFacts { text: &'a str },
+        /// After `batches` history-backfill batches committed, before the next batch starts.
+        HistoryBackfillBatch { batches: u32 },
     }
 
     /// What a hook runs in place of the work at its point.

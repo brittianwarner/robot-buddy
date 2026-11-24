@@ -1773,6 +1773,18 @@ async fn interrupt_until_rebuilt(
     let mut interrupted_mid_rebuild = 0;
     let mut finished = false;
     for cycle in 0..30 {
+        // On cycle 0, hold the backfill after its first committed batch so we deterministically
+        // stop mid-rebuild regardless of machine speed. Later cycles let it run freely to completion.
+        let (pause_tx, mut pause_rx) = tokio::sync::watch::channel(false);
+        let hold = (cycle == 0).then(|| {
+            seam::hook(move |point| match point {
+                seam::Point::HistoryBackfillBatch { batches: 1 } => {
+                    pause_tx.send_replace(true);
+                    Some(Box::pin(std::future::pending()))
+                }
+                _ => None,
+            })
+        });
         h.swap_registry(robot_buddy::registry).await?;
         // The first action wakes the real actor: `create` runs the current schema (DDL
         // over existing history) and the rebuild start transaction; `on_start` starts the
@@ -1791,8 +1803,15 @@ async fn interrupt_until_rebuilt(
             .filter_map(|hit| hit["turn_id"].as_str())
             .collect();
         ensure!(ids == ["turn-000123"], "cycle {cycle}: {hits}");
-        // Let batches run, longer each cycle, then stop the actor as a deploy would.
-        tokio::time::sleep(Duration::from_millis(150 * (cycle + 1))).await;
+        if cycle == 0 {
+            tokio::time::timeout(WAIT, pause_rx.wait_for(|reached| *reached))
+                .await
+                .context("backfill reached first batch")??;
+        } else {
+            // Let batches run, longer each cycle, then stop the actor as a deploy would.
+            tokio::time::sleep(Duration::from_millis(150 * cycle)).await;
+        }
+        drop(hold);
         h.swap_registry(upgrade::registry).await?;
         let state = old.send(upgrade_queries()).await?;
         ensure!(state["v1_triggers"] == false, "cycle {cycle}: {state}");
