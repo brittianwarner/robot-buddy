@@ -80,6 +80,7 @@ fn command_type(command: &Command) -> &'static str {
         Command::SearchMemory { .. } => "search_memory",
         Command::Submit { .. } => "submit",
         Command::Cancel { .. } => "cancel",
+        Command::CancelRequest { .. } => "cancel_request",
         Command::Replay { .. } => "replay",
         Command::Remember { .. } => "remember",
         Command::Forget { .. } => "forget",
@@ -197,6 +198,9 @@ fn all_commands() -> Vec<Command> {
         Command::Cancel {
             turn_id: TURN.into(),
         },
+        Command::CancelRequest {
+            request_id: "req-1".into(),
+        },
         Command::Replay { after: 41 },
         Command::Remember {
             key: "favorite_color".into(),
@@ -228,7 +232,7 @@ fn every_command_variant_has_a_golden_fixture() {
         assert_eq!(wire["type"], kind, "wire tag for {kind}");
         golden(&format!("command.{kind}"), command);
     }
-    assert_eq!(seen.len(), 29, "one fixture per Command variant");
+    assert_eq!(seen.len(), 30, "one fixture per Command variant");
 }
 
 #[test]

@@ -21,7 +21,7 @@ use config::Settings;
 use controller::RobotState;
 use face::Face;
 use input::Input;
-use robot_buddy::auth::Identity;
+use journal::Journal;
 use screen::Screen;
 use std::{sync::Arc, time::Duration};
 use tokio::time::Instant;
@@ -64,7 +64,8 @@ fn main() -> Result<()> {
 async fn robot() -> Result<()> {
     let stop = shutdown_signal()?;
     let settings = Settings::from_env()?;
-    let identity: Identity = serde_json::from_slice(&std::fs::read(&settings.identity_file)?)?;
+    let identity = config::read_identity(&settings.identity_file)?;
+    let journal = Journal::stdout(settings.events)?;
     let store = CacheStore::spawn(settings.cache_file.clone(), CHECKPOINT_INTERVAL);
     let mut state = RobotState {
         cache: cache::load(&settings.cache_file),
@@ -100,9 +101,10 @@ async fn robot() -> Result<()> {
         screen,
         media,
         manage_wifi: !settings.simulate,
+        insecure_local: settings.simulate,
     };
     let options = device::Options {
-        detail: settings.events,
+        journal,
         wifi_grace: settings.wifi_grace,
         pulse,
     };

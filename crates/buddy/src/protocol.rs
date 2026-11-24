@@ -121,6 +121,9 @@ pub enum Command {
     Cancel {
         turn_id: String,
     },
+    CancelRequest {
+        request_id: String,
+    },
     Replay {
         after: i64,
     },

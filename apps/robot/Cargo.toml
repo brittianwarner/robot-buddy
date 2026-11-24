@@ -21,8 +21,9 @@ uuid.workspace = true
 url.workspace = true
 qrcode.workspace = true
 # Safe termios for the ESP32 serial line (raw 115200, CLOCAL, no HUPCL) and ptys in
-# tests. Already in the lockfile through rivetkit-core; adds no new crates.
-nix = { version = "0.30.1", default-features = false, features = ["term"] }
+# tests; umask, chown and group lookup for the control socket. Already in the
+# lockfile through rivetkit-core; adds no new crates.
+nix = { version = "0.30.1", default-features = false, features = ["fs", "term", "user"] }
 
 [lints]
 workspace = true

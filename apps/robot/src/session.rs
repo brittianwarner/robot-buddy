@@ -39,6 +39,8 @@ use tokio::{
 };
 
 const CALL_DEADLINE: Duration = Duration::from_secs(15);
+/// A replay this far ahead reads no rows: the cheapest authenticated call.
+const PROBE_AFTER: i64 = i64::MAX;
 const PUSHED_EVENTS: usize = 256;
 /// The lifetime the robot plans a session with is the server's, clamped to
 /// this range, so a skewed or odd answer cannot cause a rotation storm or
@@ -56,6 +58,8 @@ pub struct Link {
     pub media: Arc<Media>,
     /// Hardware mode: check and set up Wi-Fi through `NetworkManager`.
     pub manage_wifi: bool,
+    /// `--simulate`: the engine endpoint may be plain HTTP on loopback.
+    pub insecure_local: bool,
 }
 
 impl Connector for Link {
@@ -108,6 +112,9 @@ impl Link {
         // Measured on the local monotonic clock from before the request, so
         // neither clock's offset matters.
         let expires = asked + lifetime(bundle.expires, server_now.unwrap_or_else(auth::now));
+        // The gateway token and session travel to this endpoint.
+        crate::config::safe_url(&bundle.endpoint, self.insecure_local)
+            .context("engine endpoint from /v1/enroll refused")?;
         let client = Client::new(
             ClientConfig::new(&bundle.endpoint)
                 .namespace(&bundle.namespace)
@@ -284,15 +291,18 @@ fn classify(message: &str) -> CallError {
     }
 }
 
-/// The open turn named by a busy refusal. The client renders a refused action
-/// as `RPC Error(group/code): message, metadata` with the metadata as JSON last.
-/// Anything else, including a busy refusal without readable metadata, is not one.
+/// The open turn named by a busy refusal, decoded as the typed [`Busy`]
+/// metadata. rivetkit-client 3.1 hands action errors over as text only
+/// (`RPC Error(group/code): message, metadata` with the metadata as JSON
+/// last), so the group and code are matched on that prefix and the metadata
+/// is the trailing JSON object, however the message reads. Anything else,
+/// including a busy refusal without readable metadata, is not one.
 fn busy_turn(message: &str) -> Option<String> {
     let (group, code) = BUSY_ERROR;
     let rest = message.strip_prefix(&format!("RPC Error({group}/{code}): "))?;
-    let metadata = &rest[rest.find('{')?..];
-    let busy: Busy = serde_json::from_str(metadata).ok()?;
-    Some(busy.turn_id)
+    rest.match_indices('{')
+        .find_map(|(at, _)| serde_json::from_str::<Busy>(&rest[at..]).ok())
+        .map(|busy| busy.turn_id)
 }
 
 #[derive(PartialEq, Eq)]
@@ -401,9 +411,26 @@ impl Remote for Conversation {
         self.call(command).await.map(drop)
     }
 
+    async fn cancel_request(&self, request_id: &str) -> Result<(), CallError> {
+        let command = Command::CancelRequest {
+            request_id: request_id.into(),
+        };
+        self.call(command).await.map(drop)
+    }
+
     async fn replay(&self, after: i64) -> Result<Vec<OutputEvent>, CallError> {
         let page = self.call(Command::Replay { after }).await?;
         serde_json::from_value(page).map_err(|e| CallError::Rejected(e.to_string()))
+    }
+
+    async fn probe(&self) -> Result<(), CallError> {
+        self.replay(PROBE_AFTER).await.map(drop)
+    }
+
+    async fn confirm(&self, code: &str) -> Result<()> {
+        let confirm = Command::ConfirmClaim { code: code.into() };
+        self.bot_call(confirm).await.context("confirm")?;
+        Ok(())
     }
 
     /// Keep the panel in step with ownership: the ready message once owned,
@@ -419,6 +446,7 @@ impl Remote for Conversation {
             return Ok(Registration {
                 owned: owner.is_some_and(|o| !o.is_empty()),
                 claim: None,
+                confirming: false,
             });
         }
         let now = auth::now();
@@ -447,13 +475,19 @@ impl Remote for Conversation {
             self.show(Shown::Claim(url)).await?;
         }
         let code = snapshot["confirm_code"].as_str().unwrap_or("");
+        // The optional loopback panel's button; the spoken code is the other way.
         if self.0.screen.confirmation(code).await && !code.is_empty() {
-            let confirm = Command::ConfirmClaim { code: code.into() };
-            self.bot_call(confirm).await.context("confirm")?;
+            self.confirm(code).await?;
         }
+        let confirming = !code.is_empty()
+            && snapshot["pending_owner"]
+                .as_str()
+                .is_some_and(|o| !o.is_empty())
+            && actor_expires > now;
         Ok(Registration {
             owned: false,
             claim,
+            confirming,
         })
     }
 
@@ -482,6 +516,27 @@ mod tests {
         // The bot holds a claim this cache never saw.
         assert_eq!(shown_claim_expiry(1_000, 2_000), 0);
         assert_eq!(shown_claim_expiry(0, 0), 0);
+    }
+
+    #[test]
+    fn request_cancels_and_probes_use_the_shared_wire_shape() {
+        let call = |command| {
+            serde_json::to_value(Call {
+                session: "s".into(),
+                command,
+            })
+            .unwrap()
+        };
+        assert_eq!(
+            call(Command::CancelRequest {
+                request_id: "r".into()
+            }),
+            json!({ "session": "s", "command": { "type": "cancel_request", "request_id": "r" } })
+        );
+        assert_eq!(
+            call(Command::Replay { after: PROBE_AFTER })["command"]["after"],
+            i64::MAX
+        );
     }
 
     #[test]
@@ -550,6 +605,9 @@ mod tests {
         // Unknown metadata fields are ignored; missing metadata is a plain refusal.
         let newer = r#"RPC Error(user/busy): Busy., {"turn_id": "t", "since": 1}"#;
         assert!(matches!(classify(newer), CallError::Busy(t) if t == "t"));
+        // A brace in the message text does not hide the metadata.
+        let braced = r#"RPC Error(user/busy): Busy {still open}., {"turn_id": "t2"}"#;
+        assert!(matches!(classify(braced), CallError::Busy(t) if t == "t2"));
         for refusal in [
             "RPC Error(user/busy): Busy., null",
             "RPC Error(internal/error): busy, null",

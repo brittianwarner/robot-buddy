@@ -21,7 +21,12 @@ use tokio::{
     time::Instant,
 };
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+/// Request IDs kept for cancellation at most. Each is an utterance replaced
+/// while its submit's answer was unknown; more than a few means the server
+/// has been unreachable through several interruptions, and the oldest go.
+pub const MAX_CANCEL_REQUESTS: usize = 8;
+
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Cache {
     pub bot_id: String,
     /// Highest applied conversation event sequence (at least once: events after
@@ -37,12 +42,17 @@ pub struct Cache {
     /// A turn the user interrupted that must be cancelled before submitting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cancel: Option<String>,
+    /// Request IDs of replaced utterances whose submit may have reached the
+    /// server without an answer. Each is cancelled by request ID until the
+    /// server acknowledges it. Oldest first, at most [`MAX_CANCEL_REQUESTS`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cancel_requests: Vec<String>,
     /// The last turn this robot started and has not yet seen finish.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_turn: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Pending {
     pub request_id: String,
     pub text: String,
@@ -51,6 +61,57 @@ pub struct Pending {
     /// read as 0, which is always expired.
     #[serde(default)]
     pub created: i64,
+}
+
+/// Never prints the claim URL (it carries the claim token) or utterance text.
+impl std::fmt::Debug for Cache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cache")
+            .field("bot_id", &self.bot_id)
+            .field("cursor", &self.cursor)
+            .field("claim_url", &redacted(&self.claim_url))
+            .field("claim_expires", &self.claim_expires)
+            .field("pending", &self.pending)
+            .field("cancel", &self.cancel)
+            .field("cancel_requests", &self.cancel_requests)
+            .field("active_turn", &self.active_turn)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for Pending {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Pending")
+            .field("request_id", &self.request_id)
+            .field("text", &redacted(&self.text))
+            .field("created", &self.created)
+            .finish()
+    }
+}
+
+fn redacted(value: &str) -> &'static str {
+    if value.is_empty() { "" } else { "[redacted]" }
+}
+
+impl Cache {
+    /// Remember `request_id` for cancellation, dropping the oldest beyond the bound.
+    pub fn cancel_request(&mut self, request_id: String) {
+        if self.cancel_requests.contains(&request_id) {
+            return;
+        }
+        if self.cancel_requests.len() >= MAX_CANCEL_REQUESTS {
+            self.cancel_requests.remove(0);
+            tracing::info!("oldest request cancellation dropped");
+        }
+        self.cancel_requests.push(request_id);
+    }
+
+    /// Forget a request cancellation; whether it was kept.
+    pub fn cancelled_request(&mut self, request_id: &str) -> bool {
+        let before = self.cancel_requests.len();
+        self.cancel_requests.retain(|id| id != request_id);
+        self.cancel_requests.len() != before
+    }
 }
 
 /// Read the cache, or start empty when it is missing or unreadable. Also
@@ -349,7 +410,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn coalesces_a_burst_of_checkpoints_into_few_fsyncs() {
         let (write, count, seen) = counting();
         let store = CacheStore::spawn_with(write, Duration::from_millis(200));
@@ -365,7 +426,7 @@ mod tests {
         assert_eq!(seen.lock().unwrap().last().unwrap().cursor, 1000);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn terminal_checkpoint_is_written_without_waiting_for_the_interval() {
         let (write, count, seen) = counting();
         let store = CacheStore::spawn_with(write, Duration::from_secs(30));
@@ -411,7 +472,7 @@ mod tests {
         assert!(count.load(Ordering::SeqCst) <= 2);
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn shutdown_writes_the_outstanding_checkpoint() {
         let (write, count, seen) = counting();
         let store = CacheStore::spawn_with(write, Duration::from_secs(30));
@@ -425,6 +486,38 @@ mod tests {
             "both coalesced into the shutdown write"
         );
         assert_eq!(seen.lock().unwrap().last().unwrap().cursor, 7);
+    }
+
+    #[test]
+    fn debug_output_never_shows_the_claim_token_or_utterance_text() {
+        let cache = Cache {
+            claim_url: "https://buddy.example/claim?bot=b&token=SENTINEL-CLAIM".into(),
+            pending: Some(Pending {
+                request_id: "r".into(),
+                text: "SENTINEL-PROMPT my question".into(),
+                created: 1,
+            }),
+            ..Cache::default()
+        };
+        let shown = format!("{cache:?} {:#?}", cache.pending);
+        assert!(!shown.contains("SENTINEL"), "{shown}");
+        assert!(shown.contains("request_id: \"r\""));
+    }
+
+    #[test]
+    fn request_cancellations_are_bounded_and_deduplicated() {
+        let mut cache = Cache::default();
+        for id in 0..MAX_CANCEL_REQUESTS + 3 {
+            cache.cancel_request(format!("r{id}"));
+        }
+        cache.cancel_request(format!("r{}", MAX_CANCEL_REQUESTS + 2));
+        assert_eq!(cache.cancel_requests.len(), MAX_CANCEL_REQUESTS);
+        assert_eq!(cache.cancel_requests[0], "r3", "oldest dropped");
+        assert!(cache.cancelled_request("r3"));
+        assert!(!cache.cancelled_request("r3"));
+        // Absent from the file until used, so old robots read new caches.
+        let empty = serde_json::to_value(Cache::default()).unwrap();
+        assert!(empty.get("cancel_requests").is_none());
     }
 
     #[test]
@@ -475,7 +568,9 @@ mod tests {
         let dir = temp_dir();
         // The store creates the directory once at start, not on every write.
         let path = dir.join("state").join("cache.json");
-        let store = CacheStore::spawn(path.clone(), Duration::from_millis(10));
+        // The ordinary checkpoint below is not due before shutdown, so
+        // nothing is mid-write while the test reads the file.
+        let store = CacheStore::spawn(path.clone(), Duration::from_mins(1));
         store.flush(&at(5)).await.unwrap();
         assert_eq!(load(&path).cursor, 5);
         let later = store.flush_later(&at(6));
@@ -486,6 +581,9 @@ mod tests {
             6,
             "the snapshot is taken when the flush is requested"
         );
+        // The later checkpoint is written before the store stops.
+        store.shutdown().await;
+        assert_eq!(load(&path).cursor, 7);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
