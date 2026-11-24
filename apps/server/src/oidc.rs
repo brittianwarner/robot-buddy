@@ -1,13 +1,14 @@
 //! Strict `OpenID` Connect ID-token validation against the configured issuer's keys.
-use super::{
-    Arc, Context, Deserialize, Duration, LOGIN_TTL, LoginState, Result, Value, auth, ensure, env,
-    safe_url,
-};
+use super::config::{env, safe_url};
+use anyhow::{Context, Result, ensure};
 use jsonwebtoken::{
     Algorithm, DecodingKey, Validation, decode, decode_header,
     jwk::{Jwk, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse},
 };
-use std::collections::HashMap;
+use robot_buddy::auth;
+use serde::Deserialize;
+use serde_json::Value;
+use std::{sync::Arc, time::Duration};
 use tokio::{sync::Mutex, time::Instant};
 
 /// How long fetched issuer keys are trusted before a refetch.
@@ -161,49 +162,6 @@ fn key_matches(jwk: &Jwk, alg: Algorithm) -> bool {
     usable && verifies && compatible
 }
 
-/// Login transactions already presented at the callback, so each signed login cookie is
-/// spent once: a failed or repeated exchange needs a fresh sign-in. Process-local, which
-/// matches the single server instance. Bounded: expired entries go first; when every
-/// entry is still live the callback is refused (429) instead of forgetting one, since
-/// forgetting would allow a replay.
-#[derive(Default)]
-pub struct UsedLogins(std::sync::Mutex<HashMap<String, i64>>);
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum Spend {
-    Fresh,
-    Replayed,
-    Full,
-}
-
-impl UsedLogins {
-    const MAX: usize = 4096;
-
-    /// Marks the transaction named by `state` spent until `expires`, atomically.
-    pub fn spend(&self, state: &str, expires: i64, now: i64) -> Spend {
-        self.spend_bounded(state, expires, now, Self::MAX)
-    }
-
-    fn spend_bounded(&self, state: &str, expires: i64, now: i64, max: usize) -> Spend {
-        let mut used = self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let key = auth::digest(state);
-        if used.contains_key(&key) {
-            return Spend::Replayed;
-        }
-        if used.len() >= max {
-            used.retain(|_, until| *until > now);
-            if used.len() >= max {
-                return Spend::Full;
-            }
-        }
-        used.insert(key, expires);
-        Spend::Fresh
-    }
-}
-
 #[derive(Clone, Deserialize)]
 struct Claims {
     sub: String,
@@ -214,10 +172,18 @@ struct Claims {
     iat: i64,
 }
 
+/// What the ID token must match: the sign-in's nonce, and an issue time after it began.
+#[derive(Clone, Copy)]
+pub struct Expected<'a> {
+    pub nonce: &'a str,
+    /// When the sign-in began (Unix seconds).
+    pub started: i64,
+}
+
 pub(super) async fn validate(
     http: &reqwest::Client,
     provider: &Oidc,
-    state: &LoginState,
+    expected: Expected<'_>,
     token: &str,
     subject: &str,
 ) -> Result<()> {
@@ -240,11 +206,11 @@ pub(super) async fn validate(
     ensure!(
         claims.sub == subject
             && !claims.sub.is_empty()
-            && auth::ct_eq(claims.nonce.as_bytes(), state.nonce.as_bytes()),
+            && auth::ct_eq(claims.nonce.as_bytes(), expected.nonce.as_bytes()),
         "ID token subject/nonce mismatch"
     );
     ensure!(
-        claims.iat <= auth::now() + 30 && claims.iat >= state.expires - LOGIN_TTL - 60,
+        claims.iat <= auth::now() + 30 && claims.iat >= expected.started - 60,
         "ID token issued outside login window"
     );
     if claims.aud.as_array().is_some_and(|v| v.len() > 1) || claims.azp.is_some() {
@@ -314,14 +280,10 @@ pub(crate) mod tests {
         }
     }
 
-    fn login_state() -> LoginState {
-        LoginState {
-            bot: String::new(),
-            token: String::new(),
-            state: "state".into(),
-            nonce: "nonce".into(),
-            verifier: String::new(),
-            expires: auth::now() + LOGIN_TTL,
+    fn login_state() -> Expected<'static> {
+        Expected {
+            nonce: "nonce",
+            started: auth::now(),
         }
     }
 
@@ -360,9 +322,9 @@ pub(crate) mod tests {
         let state = login_state();
         let http = reqwest::Client::new();
         let token = sign(&claims(), "test-only")?;
-        validate(&http, &provider, &state, &token, "owner").await?;
+        validate(&http, &provider, state, &token, "owner").await?;
         assert!(
-            validate(&http, &provider, &state, &token, "different-owner")
+            validate(&http, &provider, state, &token, "different-owner")
                 .await
                 .is_err()
         );
@@ -380,7 +342,7 @@ pub(crate) mod tests {
             claims[field] = value;
             let token = sign(&claims, "test-only")?;
             assert!(
-                validate(&http, &provider, &state, &token, "owner")
+                validate(&http, &provider, state, &token, "owner")
                     .await
                     .is_err(),
                 "accepted invalid {field}"
@@ -393,7 +355,7 @@ pub(crate) mod tests {
             validate(
                 &http,
                 &provider,
-                &state,
+                state,
                 std::str::from_utf8(&tampered)?,
                 "owner"
             )
@@ -414,7 +376,7 @@ pub(crate) mod tests {
             let (url, _, server) = jwks_server(keys).await?;
             let provider = provider(url, JwksCache::default());
             assert!(
-                validate(&http, &provider, &login_state(), &token, "owner")
+                validate(&http, &provider, login_state(), &token, "owner")
                     .await
                     .is_err(),
                 "accepted JWK {field}={value}"
@@ -427,7 +389,7 @@ pub(crate) mod tests {
             keys["keys"][0]["key_ops"] = ops.clone();
             let (url, _, server) = jwks_server(keys).await?;
             let provider = provider(url, JwksCache::default());
-            let result = validate(&http, &provider, &login_state(), &token, "owner").await;
+            let result = validate(&http, &provider, login_state(), &token, "owner").await;
             assert_eq!(result.is_ok(), accepted, "JWK key_ops={ops}");
             server.abort();
         }
@@ -438,7 +400,7 @@ pub(crate) mod tests {
         key.remove("alg");
         let (url, _, server) = jwks_server(keys).await?;
         let provider = provider(url, JwksCache::default());
-        validate(&http, &provider, &login_state(), &token, "owner").await?;
+        validate(&http, &provider, login_state(), &token, "owner").await?;
         server.abort();
         Ok(())
     }
@@ -452,12 +414,12 @@ pub(crate) mod tests {
         let rotated = sign(&claims(), "rotated")?;
 
         let cached = provider(url.clone(), JwksCache::default());
-        validate(&http, &cached, &state, &good, "owner").await?;
-        validate(&http, &cached, &state, &good, "owner").await?;
+        validate(&http, &cached, state, &good, "owner").await?;
+        validate(&http, &cached, state, &good, "owner").await?;
         assert_eq!(hits.load(Ordering::SeqCst), 1, "fresh keys come from cache");
         // Within the cooldown an unknown kid does not refetch.
         assert!(
-            validate(&http, &cached, &state, &rotated, "owner")
+            validate(&http, &cached, state, &rotated, "owner")
                 .await
                 .is_err()
         );
@@ -465,9 +427,9 @@ pub(crate) mod tests {
 
         hits.store(0, Ordering::SeqCst);
         let eager = provider(url.clone(), JwksCache::new(JWKS_TTL, Duration::ZERO));
-        validate(&http, &eager, &state, &good, "owner").await?;
+        validate(&http, &eager, state, &good, "owner").await?;
         assert!(
-            validate(&http, &eager, &state, &rotated, "owner")
+            validate(&http, &eager, state, &rotated, "owner")
                 .await
                 .is_err()
         );
@@ -479,8 +441,8 @@ pub(crate) mod tests {
 
         hits.store(0, Ordering::SeqCst);
         let expiring = provider(url, JwksCache::new(Duration::ZERO, JWKS_REFRESH_COOLDOWN));
-        validate(&http, &expiring, &state, &good, "owner").await?;
-        validate(&http, &expiring, &state, &good, "owner").await?;
+        validate(&http, &expiring, state, &good, "owner").await?;
+        validate(&http, &expiring, state, &good, "owner").await?;
         assert_eq!(hits.load(Ordering::SeqCst), 2, "expired keys are refetched");
         server.abort();
         Ok(())
@@ -494,18 +456,5 @@ pub(crate) mod tests {
         provider.client_secret = Some(auth::Secret::new("s3cret".into()));
         let form = provider.token_form("code", "verifier", "https://b/auth/callback");
         assert!(form.contains(&("client_secret", "s3cret")));
-    }
-
-    #[test]
-    fn a_login_transaction_is_spent_once_and_the_ledger_is_bounded() {
-        let used = UsedLogins::default();
-        assert_eq!(used.spend_bounded("a", 100, 0, 2), Spend::Fresh);
-        assert_eq!(used.spend_bounded("a", 100, 50, 2), Spend::Replayed);
-        assert_eq!(used.spend_bounded("b", 10, 0, 2), Spend::Fresh);
-        // Full of live entries: refuse rather than forget one.
-        assert_eq!(used.spend_bounded("c", 100, 5, 2), Spend::Full);
-        // "b" expired: it makes room, and "a" stays spent.
-        assert_eq!(used.spend_bounded("c", 100, 11, 2), Spend::Fresh);
-        assert_eq!(used.spend_bounded("a", 100, 12, 2), Spend::Replayed);
     }
 }

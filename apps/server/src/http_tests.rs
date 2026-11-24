@@ -1,20 +1,30 @@
 //! Router tests driven with `tower::ServiceExt::oneshot`. No engine, registry or network:
 //! the Rivet client points at a closed port and is never reached by these routes.
 use super::*;
-use axum::{Extension, body::Body, extract::ConnectInfo, http::Request};
+use axum::{
+    Extension,
+    body::Body,
+    extract::ConnectInfo,
+    http::{HeaderMap, Request, StatusCode, header},
+};
+use rivetkit::client::ClientConfig;
 use tower::ServiceExt;
 
 const PUBLIC: &str = "https://buddy.example";
 const LAB_TOKEN: &str = "lab-token-for-tests-only-0123456789abcdef";
 
 fn app(oidc: bool, lab: bool) -> Arc<App> {
+    app_with(oidc, lab, "http://127.0.0.1:9")
+}
+
+fn app_with(oidc: bool, lab: bool, engine: &str) -> Arc<App> {
     let issuer = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
     Arc::new(App {
         key: Secret::new(vec![9; 32]),
         issuer: issuer.verifying_key(),
         client: Client::new(ClientConfig::new("http://127.0.0.1:9").namespace("default")),
         http: reqwest::Client::new(),
-        engine: "http://127.0.0.1:9".into(),
+        engine: engine.into(),
         admin: Secret::new("a".repeat(32)),
         public_engine: "https://rivet.buddy.example".into(),
         public_url: PUBLIC.into(),
@@ -24,13 +34,23 @@ fn app(oidc: bool, lab: bool) -> Arc<App> {
         lab_token: lab.then(|| Secret::new(LAB_TOKEN.into())),
         speech: None,
         limiter: limit::RateLimiter::new(Vec::new()),
-        logins: oidc::UsedLogins::default(),
+        logins: claim::Logins::default(),
+        lab_sessions: lab::Sessions::default(),
+        readiness: Readiness::default(),
     })
+}
+
+/// `app` with speech configured: `streams` slots and a provider on a closed port.
+fn with_speech(app: Arc<App>, streams: usize) -> Arc<App> {
+    let mut full = Arc::into_inner(app).expect("no other reference");
+    full.speech = Some(speech::Speech::for_tests(streams));
+    Arc::new(full)
 }
 
 fn service(app: &Arc<App>, peer: [u8; 4]) -> Router {
     // What `into_make_service_with_connect_info` inserts for a real socket.
-    router(app.clone()).layer(Extension(ConnectInfo(SocketAddr::from((peer, 4000)))))
+    let peer = serve::Peer::detached(std::net::SocketAddr::from((peer, 4000)));
+    router(app.clone()).layer(Extension(ConnectInfo(peer)))
 }
 
 struct Reply {
@@ -190,6 +210,20 @@ async fn login_redirects_with_independent_state_and_nonce() {
             .iter()
             .any(|c| c.starts_with("buddy_login=") && c.contains("; Secure"))
     );
+    // The login state lives on the server; the cookie is an opaque id that names it.
+    let id = cookie_pair(&reply.headers, "buddy_login");
+    let id = id.trim_start_matches("buddy_login=");
+    assert!(
+        id.len() >= 64 && id.bytes().all(|b| b.is_ascii_hexdigit()),
+        "{id}"
+    );
+    for secret in [
+        query["state"].as_str(),
+        query["nonce"].as_str(),
+        "claim-token",
+    ] {
+        assert!(!id.contains(secret), "the cookie carries no login secret");
+    }
     assert!(
         cookies
             .iter()
@@ -274,6 +308,10 @@ async fn missing_configuration_is_503_and_disabled_lab_is_404() {
     assert_eq!(reply.status, StatusCode::NOT_FOUND);
     let reply = send(&router, lab_login(LAB_TOKEN, Some(PUBLIC))).await;
     assert_eq!(reply.status, StatusCode::NOT_FOUND);
+    for path in ["/lab/app.js", "/lab/api/state"] {
+        let reply = send(&router, Request::get(path).body(Body::empty()).unwrap()).await;
+        assert_eq!(reply.status, StatusCode::NOT_FOUND, "{path} is not mounted");
+    }
     // The engine is unreachable: liveness still answers, readiness reports 503 without
     // internal detail.
     let reply = send(
@@ -369,6 +407,37 @@ async fn lab_login_and_csrf_statuses() {
     let reply = send(&router, logout).await;
     assert_eq!(reply.status, StatusCode::NO_CONTENT);
     assert!(set_cookies(&reply.headers)[0].ends_with("Max-Age=0; Secure"));
+    // Logout revoked the session: the old cookie no longer opens the lab.
+    let state = Request::get("/lab/api/state")
+        .header(header::COOKIE, cookie.as_str())
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(send(&router, state).await.status, StatusCode::UNAUTHORIZED);
+    let status = send(&router, lab_action(&cookie, Some(&csrf), &snapshot))
+        .await
+        .status;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+/// The lab cookie names a server-side session: it carries neither the lab token nor
+/// the CSRF value, and a forged id opens nothing.
+#[tokio::test]
+async fn the_lab_cookie_is_an_opaque_session_id() {
+    let app = app(false, true);
+    let router = service(&app, [192, 0, 2, 1]);
+    let reply = send(&router, lab_login(LAB_TOKEN, Some(PUBLIC))).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    let csrf = serde_json::from_str::<Value>(&reply.body).unwrap()["csrf"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let cookie = cookie_pair(&reply.headers, "buddy_lab");
+    assert!(!cookie.contains(LAB_TOKEN) && !cookie.contains(&csrf));
+    let forged = Request::get("/lab/api/state")
+        .header(header::COOKIE, "buddy_lab=00000000000000000000000000000000")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(send(&router, forged).await.status, StatusCode::UNAUTHORIZED);
 }
 
 fn challenge_request() -> Request<Body> {
@@ -410,7 +479,7 @@ async fn only_an_extended_request_outlives_the_header_deadline() {
     let router = Router::new()
         .route("/v1/speech", post(slow))
         .route("/admitted", post(admitted))
-        .layer(axum::middleware::from_fn(limit::limit_requests));
+        .layer(from_fn_with_state(app(false, false), limit::limit_requests));
     let request = |path: &str| Request::post(path).body(Body::empty()).unwrap();
     // The path earns nothing: an unadmitted speech request gets the 30 s deadline.
     assert_eq!(
@@ -438,133 +507,262 @@ fn stalled_speech(path: &str, headers: &[(header::HeaderName, String)]) -> Reque
     request.body(stalled()).unwrap()
 }
 
+fn enroll_body(body: Body) -> Request<Body> {
+    Request::post("/v1/enroll")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(body)
+        .unwrap()
+}
+
+fn speech_body(bearer: &str, body: Body) -> Request<Body> {
+    Request::post("/v1/speech")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::AUTHORIZATION, format!("Bearer {bearer}"))
+        .body(body)
+        .unwrap()
+}
+
+/// Unauthenticated speech bodies are refused from their headers: none is ever read.
 #[tokio::test(start_paused = true)]
-async fn slow_unauthenticated_speech_bodies_cannot_delay_enrollment_or_health() {
+async fn slow_unauthenticated_speech_bodies_are_refused_from_headers() {
     let app = app(false, true);
     let router = service(&app, [192, 0, 2, 1]);
     let started = tokio::time::Instant::now();
-    // As many stalled bodies as the shared pool has permits, on both speech routes.
-    let stalled: Vec<_> = (0..limit::IN_FLIGHT)
-        .map(|i| {
-            let path = if i % 2 == 0 {
-                "/v1/speech"
-            } else {
-                "/lab/api/speech"
-            };
+    for path in ["/v1/speech", "/lab/api/speech"] {
+        let status = send(&router, stalled_speech(path, &[])).await.status;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{path}");
+    }
+    assert_eq!(started.elapsed(), Duration::ZERO, "no body was awaited");
+}
+
+/// security #1: slow unauthenticated bodies, from many clients, hold the shared pool
+/// for at most the body deadline and cannot delay liveness, enrollment from another
+/// client, or a speech admission.
+#[tokio::test(start_paused = true)]
+async fn slow_bodies_cannot_delay_health_enrollment_or_speech() {
+    let app = with_speech(app(false, false), 1);
+    // Ten clients, each stalling as many enrollments as its rate limit allows.
+    let mut held = Vec::new();
+    for client in 1..=10 {
+        let router = service(&app, [198, 51, 100, client]);
+        for _ in 0..10 {
             let router = router.clone();
-            tokio::spawn(async move { send(&router, stalled_speech(path, &[])).await.status })
-        })
-        .collect();
-    tokio::task::yield_now().await;
-    let health = send(
-        &router,
+            held.push(tokio::spawn(async move {
+                let begun = tokio::time::Instant::now();
+                let status = send(&router, enroll_body(stalled())).await.status;
+                (status, begun.elapsed())
+            }));
+        }
+    }
+    for _ in 0..8 {
+        tokio::task::yield_now().await;
+    }
+    let begun = tokio::time::Instant::now();
+    let health = service(&app, [198, 51, 100, 1]);
+    let reply = send(
+        &health,
         Request::get("/health").body(Body::empty()).unwrap(),
     )
     .await;
-    assert_eq!(health.status, StatusCode::OK);
-    // Enrollment is admitted: it fails on its own merits, not 429 or 504.
-    let enroll = send(
-        &router,
-        Request::post("/v1/enroll")
-            .header(header::CONTENT_TYPE, "application/json")
-            .body(Body::from("{}"))
-            .unwrap(),
+    assert_eq!(reply.status, StatusCode::OK);
+    // Another client's enrollment is admitted and judged on its merits (a bad body).
+    let other = service(&app, [198, 51, 100, 11]);
+    let reply = send(&other, enroll_body(Body::from("{}"))).await;
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+    // A speech request is admitted, authenticated and read (an empty turn id is 400).
+    let speaker = service(&app, [198, 51, 100, 12]);
+    let device = app.session("bot-1", "device").unwrap();
+    let reply = send(
+        &speaker,
+        speech_body(&device, Body::from(r#"{"turn_id":""}"#)),
     )
     .await;
-    assert!(
-        enroll.status.is_client_error() && enroll.status != StatusCode::TOO_MANY_REQUESTS,
-        "{}",
-        enroll.status
-    );
-    for task in stalled {
-        let status = task.await.unwrap();
-        assert!(
-            [
-                StatusCode::UNAUTHORIZED,
-                StatusCode::FORBIDDEN,
-                StatusCode::NOT_FOUND
-            ]
-            .contains(&status),
-            "{status}"
-        );
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+    assert_eq!(begun.elapsed(), Duration::ZERO, "nothing above waited");
+    for task in held {
+        let (status, elapsed) = task.await.unwrap();
+        assert_eq!(status, StatusCode::REQUEST_TIMEOUT);
+        assert_eq!(elapsed, web::BODY_DEADLINE);
     }
-    assert!(
-        started.elapsed() < Duration::from_secs(1),
-        "no body was awaited"
+}
+
+/// `/health` sits outside the shared pool: it answers while the pool is full.
+#[tokio::test(start_paused = true)]
+async fn health_answers_while_the_pool_is_full() {
+    let app = with_speech(app(false, false), 1);
+    let device = app.session("bot-1", "device").unwrap();
+    let mut held = Vec::new();
+    for client in 0..limit::IN_FLIGHT / limit::PER_CLIENT {
+        let router = service(&app, [203, 0, 113, u8::try_from(client).unwrap()]);
+        for _ in 0..limit::PER_CLIENT {
+            let (router, device) = (router.clone(), device.clone());
+            held.push(tokio::spawn(async move {
+                send(&router, speech_body(&device, stalled())).await.status
+            }));
+        }
+    }
+    for _ in 0..8 {
+        tokio::task::yield_now().await;
+    }
+    let late = service(&app, [203, 0, 113, 200]);
+    let reply = send(&late, Request::get("/health").body(Body::empty()).unwrap()).await;
+    assert_eq!(reply.status, StatusCode::OK);
+    let reply = send(
+        &late,
+        speech_body(&device, Body::from(r#"{"turn_id":"t"}"#)),
+    )
+    .await;
+    assert_eq!(
+        reply.status,
+        StatusCode::TOO_MANY_REQUESTS,
+        "the pool is full"
     );
+    for task in held {
+        assert_eq!(task.await.unwrap(), StatusCode::REQUEST_TIMEOUT);
+    }
+}
+
+/// One client cannot take more than its share of the shared pool.
+#[tokio::test(start_paused = true)]
+async fn one_client_holds_at_most_its_share_of_the_pool() {
+    let app = with_speech(app(false, false), 1);
+    let device = app.session("bot-1", "device").unwrap();
+    let router = service(&app, [203, 0, 113, 9]);
+    let held: Vec<_> = (0..limit::PER_CLIENT)
+        .map(|_| {
+            let (router, device) = (router.clone(), device.clone());
+            tokio::spawn(async move { send(&router, speech_body(&device, stalled())).await.status })
+        })
+        .collect();
+    for _ in 0..8 {
+        tokio::task::yield_now().await;
+    }
+    let reply = send(
+        &router,
+        speech_body(&device, Body::from(r#"{"turn_id":""}"#)),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::TOO_MANY_REQUESTS);
+    let other = service(&app, [203, 0, 113, 10]);
+    let reply = send(
+        &other,
+        speech_body(&device, Body::from(r#"{"turn_id":""}"#)),
+    )
+    .await;
+    assert_eq!(
+        reply.status,
+        StatusCode::BAD_REQUEST,
+        "another client is admitted"
+    );
+    for task in held {
+        assert_eq!(task.await.unwrap(), StatusCode::REQUEST_TIMEOUT);
+    }
 }
 
 #[tokio::test(start_paused = true)]
 async fn an_authenticated_speech_body_gets_a_short_read_deadline() {
-    let app = app(false, false);
+    let app = with_speech(app(false, false), 1);
     let router = service(&app, [192, 0, 2, 1]);
     let device = app.session("bot-1", "device").unwrap();
     let started = tokio::time::Instant::now();
-    let reply = send(
-        &router,
-        stalled_speech(
-            "/v1/speech",
-            &[(header::AUTHORIZATION, format!("Bearer {device}"))],
-        ),
-    )
-    .await;
-    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
-    assert_eq!(started.elapsed(), speech::BODY_DEADLINE);
+    let reply = send(&router, speech_body(&device, stalled())).await;
+    assert_eq!(reply.status, StatusCode::REQUEST_TIMEOUT);
+    assert_eq!(started.elapsed(), web::BODY_DEADLINE);
     // An admin session is not a speaker: rejected before the body.
     let admin = app.session("bot-1", "admin").unwrap();
     let started = tokio::time::Instant::now();
+    let reply = send(&router, speech_body(&admin, stalled())).await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(started.elapsed(), Duration::ZERO);
+}
+
+/// A fake engine whose `/health` counts its probes.
+async fn counting_engine() -> (String, Arc<std::sync::atomic::AtomicUsize>) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let hits = Arc::new(AtomicUsize::new(0));
+    let counter = hits.clone();
+    let engine = Router::new().route(
+        "/health",
+        get(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+            async { "ok" }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, engine).await });
+    (format!("http://{address}"), hits)
+}
+
+/// security #1: `/ready` shares one engine probe among concurrent and recent callers,
+/// and is rate-limited per client.
+#[tokio::test]
+async fn readiness_coalesces_its_engine_probe() {
+    use std::sync::atomic::Ordering;
+    let (engine, hits) = counting_engine().await;
+    let app = app_with(false, false, &engine);
+    let router = service(&app, [192, 0, 2, 50]);
+    let ready = || Request::get("/ready").body(Body::empty()).unwrap();
+    let replies = futures_util::future::join_all((0..8).map(|_| send(&router, ready()))).await;
+    assert!(replies.iter().all(|r| r.status == StatusCode::OK));
+    assert_eq!(
+        hits.load(Ordering::SeqCst),
+        1,
+        "concurrent callers share one probe"
+    );
+    assert_eq!(send(&router, ready()).await.status, StatusCode::OK);
+    assert_eq!(hits.load(Ordering::SeqCst), 1, "a fresh result is reused");
+    // Age the cached result past its freshness.
+    *app.readiness.0.lock().await = Some((Instant::now() - READY_FRESH, true));
+    assert_eq!(send(&router, ready()).await.status, StatusCode::OK);
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
+    let reply = send(&router, ready()).await;
+    assert_eq!(
+        reply.status,
+        StatusCode::TOO_MANY_REQUESTS,
+        "11th from one client"
+    );
+    let other = service(&app, [192, 0, 2, 51]);
+    assert_eq!(send(&other, ready()).await.status, StatusCode::OK);
+}
+
+/// security #9: every response carries the hardening headers once, and HSTS when the
+/// public URL is HTTPS.
+#[tokio::test]
+async fn responses_carry_security_headers() {
+    let app = app(false, true);
+    let router = service(&app, [192, 0, 2, 1]);
+    for path in ["/health", "/claim?bot=b&token=t", "/lab", "/nowhere"] {
+        let reply = send(&router, Request::get(path).body(Body::empty()).unwrap()).await;
+        let headers = &reply.headers;
+        assert_eq!(
+            headers.get_all("x-frame-options").iter().count(),
+            1,
+            "{path}"
+        );
+        assert_eq!(headers["x-frame-options"], "DENY", "{path}");
+        assert_eq!(headers["x-content-type-options"], "nosniff", "{path}");
+        assert_eq!(headers["cache-control"], "no-store", "{path}");
+        assert!(
+            headers.contains_key(header::CONTENT_SECURITY_POLICY),
+            "{path}"
+        );
+        assert_eq!(
+            headers["strict-transport-security"], "max-age=31536000",
+            "{path}"
+        );
+    }
+    drop(router);
+    let mut plain = Arc::into_inner(app).unwrap();
+    plain.public_url = "http://127.0.0.1:8080".into();
+    let plain = Arc::new(plain);
     let reply = send(
-        &router,
-        stalled_speech(
-            "/v1/speech",
-            &[(header::AUTHORIZATION, format!("Bearer {admin}"))],
-        ),
+        &service(&plain, [192, 0, 2, 1]),
+        Request::get("/health").body(Body::empty()).unwrap(),
     )
     .await;
-    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
-    assert!(started.elapsed() < Duration::from_secs(1));
-}
-
-#[test]
-fn the_engine_endpoint_needs_tls_off_loopback() {
-    for ok in [
-        "https://rivet.example",
-        "http://127.0.0.1:6420",
-        "http://[::1]:6420",
-        "http://localhost:6420",
-    ] {
-        assert!(engine_url(ok, None).is_ok(), "{ok}");
-    }
-    for bad in [
-        "http://rivet.example",
-        "http://10.0.0.5:6420",
-        "http://engine:6420",
-        "https://user:pass@rivet.example",
-        "https://rivet.example#x",
-        "ws://127.0.0.1:6420",
-    ] {
-        assert!(engine_url(bad, None).is_err(), "{bad}");
-    }
-    // The explicit exception names exactly one host.
-    assert!(engine_url("http://engine:6420", Some("engine")).is_ok());
-    assert!(engine_url("http://engine.evil:6420", Some("engine")).is_err());
-}
-
-#[test]
-fn engine_config_is_private_ephemeral_and_removed() -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    let dir = std::env::temp_dir();
-    let first = write_runtime_config(&dir, b"{\"auth\":{}}")?;
-    let second = write_runtime_config(&dir, b"{}")?;
-    assert_ne!(first.0, second.0, "unique names");
-    let mode = std::fs::metadata(&first.0)?.permissions().mode() & 0o777;
-    assert_eq!(mode, 0o600);
-    assert_eq!(std::fs::read(&first.0)?, b"{\"auth\":{}}");
-    let path = first.0.clone();
-    drop(first);
-    assert!(!path.exists(), "removed on drop");
-    assert!(!runtime_dir().starts_with("/data"));
-    Ok(())
+    assert!(!reply.headers.contains_key("strict-transport-security"));
+    assert_eq!(reply.headers["x-frame-options"], "DENY");
 }
 
 fn speech_request(bearer: Option<&str>) -> Request<Body> {
@@ -592,15 +790,42 @@ async fn speech_statuses_name_the_failure() {
     );
     let device = app.session("bot-1", "device").unwrap();
     let reply = send(&router, speech_request(Some(&device))).await;
-    assert_eq!(reply.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        reply.status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "speech unconfigured"
+    );
+    let expired = app
+        .session_until("bot-1", "device", auth::now() - 1)
+        .unwrap();
+    let reply = send(&router, speech_request(Some(&expired))).await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "expired bearer");
 
     // The router holds the only other reference to the app.
     drop(router);
-    let mut full = Arc::into_inner(app).unwrap();
-    full.speech = Some(speech::Speech::without_capacity());
-    let full = Arc::new(full);
+    let full = with_speech(app, 0);
     let router = service(&full, [192, 0, 2, 1]);
     let device = full.session("bot-1", "device").unwrap();
     let reply = send(&router, speech_request(Some(&device))).await;
-    assert_eq!(reply.status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        reply.status,
+        StatusCode::TOO_MANY_REQUESTS,
+        "no stream slot"
+    );
+    let long = format!(r#"{{"turn_id":"{}"}}"#, "t".repeat(129));
+    let reply = send(&router, speech_body(&device, Body::from(long))).await;
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST, "turn id too long");
+    let reply = send(&router, speech_body(&device, Body::from("not json"))).await;
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST, "malformed body");
+    drop(router);
+
+    // With a slot, an unreachable engine is named, not reported as a bad request.
+    let open = with_speech(full, 1);
+    let router = service(&open, [192, 0, 2, 1]);
+    let reply = send(&router, speech_request(Some(&device))).await;
+    assert!(
+        [StatusCode::SERVICE_UNAVAILABLE, StatusCode::GATEWAY_TIMEOUT].contains(&reply.status),
+        "{}",
+        reply.status
+    );
 }

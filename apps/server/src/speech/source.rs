@@ -1,5 +1,8 @@
 //! Committed speech read from the Conversation actor over the server's Rivet client.
-use super::pipeline::{Chunk, ChunkSource, Spoken};
+use super::{
+    error,
+    pipeline::{Chunk, ChunkSource, Spoken},
+};
 use anyhow::{Context, Result, bail};
 use rivetkit::{
     TypedClientExt,
@@ -62,6 +65,7 @@ impl ActorSource {
         })
     }
 
+    /// One actor call. Its error carries the [`error::SpeechError`] kind.
     async fn call(&self, command: Command) -> Result<Value> {
         self.handle
             .send(Call {
@@ -69,6 +73,7 @@ impl ActorSource {
                 command,
             })
             .await
+            .map_err(error::engine)
     }
 
     async fn answer(&self) -> Result<Chunk> {

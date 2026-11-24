@@ -7,7 +7,13 @@
 //! The caller is authenticated from headers before the body is read. The body read has
 //! a short deadline. Only an authenticated request that took a stream slot gets the long
 //! speech head deadline.
+//!
+//! The caller's bearer is checked once, at admission. The stream then runs on a session
+//! the server mints for it, valid for the stream's own deadline, so a bearer that expires
+//! mid-answer does not cut the audio. Every actor call still re-authorizes against Bot,
+//! so revoking the bot stops the stream.
 mod admission;
+mod error;
 mod pipeline;
 mod provider;
 mod source;
@@ -17,7 +23,7 @@ mod tests;
 use super::{
     App,
     limit::{Admitted, SPEECH_HEAD_DEADLINE},
-    web::{Kind, Reject, Web, require},
+    web::{self, ApiError, Kind, Reject, Web, require},
 };
 use admission::Admission;
 use anyhow::{Context, Result, ensure};
@@ -28,6 +34,7 @@ use axum::{
     http::{HeaderMap, HeaderValue, header},
     response::Response,
 };
+use error::SpeechError;
 use pipeline::{Head, Job, Limits};
 use provider::OpenRouter;
 use robot_buddy::{auth, protocol::SpeechRequest};
@@ -39,9 +46,12 @@ use tokio::sync::Semaphore;
 const STREAMS: usize = 4;
 /// Upstream synthesis requests per stream: the sentence playing and one prefetched.
 const REQUESTS_PER_STREAM: usize = 2;
-/// A speech body is a turn ID and a flag; it is read after authentication, briefly.
-pub const BODY_DEADLINE: Duration = Duration::from_secs(5);
+/// A speech body is a turn ID and a flag, read after authentication within
+/// [`web::BODY_DEADLINE`].
 const BODY_LIMIT: usize = 1024;
+/// A stream's own session outlives its deadline by this much, so the last check of a
+/// stream that runs to its deadline is still valid.
+const STREAM_SESSION_SLACK: Duration = Duration::from_mins(1);
 
 pub struct Speech {
     pub model: String,
@@ -71,16 +81,17 @@ impl Speech {
             limits: Limits::default(),
         })))
     }
-    /// A configured service with no stream capacity, for status tests. Never dials out.
+    /// A configured service with `streams` slots, for status tests. Its provider is a
+    /// closed port.
     #[cfg(test)]
-    pub fn without_capacity() -> Arc<Self> {
+    pub fn for_tests(streams: usize) -> Arc<Self> {
         let model = robot_buddy::voice::SPEECH_MODEL.to_owned();
         let key = auth::Secret::new("test-key".to_owned());
         Arc::new(Self {
             synth: Arc::new(OpenRouter::new(key, model.clone(), "http://127.0.0.1:9").unwrap()),
             model,
-            admission: Admission::new(0),
-            upstream: Arc::new(Semaphore::new(1)),
+            admission: Admission::new(streams),
+            upstream: Arc::new(Semaphore::new(streams.max(1) * REQUESTS_PER_STREAM)),
             limits: Limits::default(),
         })
     }
@@ -107,8 +118,8 @@ fn speech_key(custom_base: bool) -> Result<auth::Secret<String>> {
         .context("TTS_API_KEY or OpenRouter AI_API_KEY required")
 }
 
-/// `POST /v1/speech`. A bad or missing session is 401 before any body byte is read,
-/// unconfigured speech 503, a full stream cap 429 and anything else 400.
+/// `POST /v1/speech`. A bad or missing session is 401 before any body byte is read and
+/// unconfigured speech 503; then [`read`] and [`stream`] name the failure.
 pub async fn device(
     State(app): State<Arc<App>>,
     admitted: Option<Extension<Admitted>>,
@@ -125,28 +136,35 @@ pub async fn device(
     session
         .validate(&session.bot_id, Some("device"))
         .reject(Kind::Unauthorized)?;
+    require(app.speech.is_some(), Kind::Unavailable)?;
     let body = read(body).await?;
     let admitted = admitted.map(|Extension(admitted)| admitted);
-    stream(&app, admitted.as_ref(), &session.bot_id, bearer, body).await
+    stream(&app, admitted.as_ref(), &session.bot_id, body).await
 }
 
-/// Reads an already-authenticated speech body: at most 1 KiB within 5 s, else 400.
+/// Reads an already-authenticated speech body: at most 1 KiB, 408 when it does not arrive
+/// within [`web::BODY_DEADLINE`], else 400 when malformed.
 pub async fn read(body: Body) -> Web<SpeechRequest> {
-    let bytes = tokio::time::timeout(BODY_DEADLINE, axum::body::to_bytes(body, BODY_LIMIT))
-        .await
-        .reject(Kind::BadRequest)?
-        .reject(Kind::BadRequest)?;
+    let bytes = web::read_body(body, BODY_LIMIT).await?;
     serde_json::from_slice(&bytes).reject(Kind::BadRequest)
 }
 
-/// Starts one speech stream. The newest request for a bot replaces any older stream.
-/// Unconfigured speech is 503 and a full stream cap 429; every other failure is 400.
-/// The caller is already authenticated; holding a stream slot earns the long deadline.
+/// When a stream's own session expires, for a stream admitted at `now`.
+fn stream_session_expiry(now: i64, limits: &Limits) -> i64 {
+    let lifetime = limits.deadline + STREAM_SESSION_SLACK;
+    now.saturating_add(i64::try_from(lifetime.as_secs()).unwrap_or(i64::MAX))
+}
+
+/// Starts one speech stream for an authenticated caller. The newest request for a bot
+/// replaces any older stream; holding a stream slot earns the long head deadline.
+///
+/// Statuses: 400 bad turn id, 503 unconfigured or engine unreachable, 429 stream cap,
+/// then before the first audio 403 access revoked, 409 turn unknown, stopped or
+/// replaced, 404 nothing to speak, 502 engine or provider failure, 504 timeout.
 pub async fn stream(
     app: &App,
     admitted: Option<&Admitted>,
     bot: &str,
-    session: &str,
     body: SpeechRequest,
 ) -> Web<Response> {
     require(
@@ -162,7 +180,13 @@ pub async fn stream(
     if let Some(admitted) = admitted {
         admitted.extend(SPEECH_HEAD_DEADLINE);
     }
-    let source = ActorSource::open(&app.client, bot, session, &body.turn_id, body.stream).await?;
+    let expires = stream_session_expiry(auth::now(), &service.limits);
+    let session = app
+        .session_until(bot, "device", expires)
+        .reject(Kind::Internal)?;
+    let source = ActorSource::open(&app.client, bot, &session, &body.turn_id, body.stream)
+        .await
+        .reject(Kind::BadGateway)?;
     let (head, audio) = pipeline::spawn(Job {
         source,
         synth: service.synth.clone(),
@@ -170,12 +194,33 @@ pub async fn stream(
         lease,
         limits: service.limits,
     });
-    let head = head.await.context("speech stream stopped")??;
-    Ok(response(
-        &head,
-        &body.turn_id,
-        Body::from_stream(audio.into_stream()),
-    )?)
+    let head = match head.await {
+        Ok(Ok(head)) => head,
+        Ok(Err(error)) => return Err(ApiError(failure(app, bot, &session, &error).await)),
+        Err(_) => return Err(ApiError(Kind::BadGateway)),
+    };
+    response(&head, &body.turn_id, Body::from_stream(audio.into_stream())).reject(Kind::Internal)
+}
+
+/// The status for a stream that failed before its first audio. An actor's refusal is
+/// masked, so a refusal is followed by an access check: refused again means the bot's
+/// access is gone (403); allowed means the turn itself cannot be spoken (409).
+async fn failure(app: &App, bot: &str, session: &str, error: &anyhow::Error) -> Kind {
+    match SpeechError::of(error) {
+        Some(SpeechError::Refused) => {
+            let check = robot_buddy::actor::check_access(app.client.clone(), bot, session);
+            match tokio::time::timeout(Duration::from_secs(5), check).await {
+                Ok(Ok(())) => Kind::Conflict,
+                Ok(Err(error)) => match SpeechError::from_client(&error) {
+                    SpeechError::Refused => Kind::Forbidden,
+                    other => other.kind(),
+                },
+                Err(_) => Kind::GatewayTimeout,
+            }
+        }
+        Some(kind) => kind.kind(),
+        None => Kind::BadGateway,
+    }
 }
 
 fn response(head: &Head, turn_id: &str, body: Body) -> Result<Response> {
