@@ -1,5 +1,10 @@
 //! Request admission: a process-wide concurrency cap, header deadlines and a per-client
 //! token bucket on the unauthenticated credential endpoints.
+//!
+//! Every route, speech included, starts under the shared cap and the 30 s head deadline.
+//! A speech handler that has authenticated the caller and taken a speech stream slot
+//! calls [`Admitted::extend`]: that returns its shared permit and grants the longer
+//! speech deadline, so the speech cap, not the shared pool, bounds long waits.
 use super::App;
 use axum::{
     extract::{ConnectInfo, Request, State},
@@ -15,37 +20,81 @@ use std::{
 };
 
 /// Requests in flight before the server answers 429. A permit is held until the response
-/// head is ready; a streaming body (speech PCM) does not hold one. Speech streams are
-/// capped separately by the speech admission.
-const IN_FLIGHT: usize = 128;
-/// Deadline for an ordinary route to produce its response head.
+/// head is ready; a streaming body (speech PCM) does not hold one. An admitted speech
+/// stream returns its permit early; speech streams have their own cap.
+pub const IN_FLIGHT: usize = 128;
+/// Deadline for a route to produce its response head, including reading its body.
 pub const HEAD_DEADLINE: Duration = Duration::from_secs(30);
-/// Speech routes wait for the first committed sentence, which can follow a long tool turn.
-/// The pipeline has its own 300 s deadline; this backstop only bounds a stuck handler.
+/// Granted only to an authenticated, admitted speech stream, which waits for the first
+/// committed sentence (it can follow a long tool turn). The pipeline has its own 300 s
+/// deadline; this backstop only bounds a stuck handler.
 pub const SPEECH_HEAD_DEADLINE: Duration = Duration::from_secs(330);
-const SPEECH_PATHS: [&str; 2] = ["/v1/speech", "/lab/api/speech"];
-/// Unauthenticated endpoints that verify a credential or start a sign-in.
-const LIMITED_PATHS: [&str; 4] = ["/v1/challenge", "/v1/enroll", "/login", "/lab/api/login"];
+/// Unauthenticated endpoints that verify a credential or start or finish a sign-in.
+const LIMITED_PATHS: [&str; 5] = [
+    "/v1/challenge",
+    "/v1/enroll",
+    "/login",
+    "/auth/callback",
+    "/lab/api/login",
+];
 /// Burst per client and route, then one request per `REFILL`.
 const BURST: f64 = 10.0;
 const REFILL: Duration = Duration::from_secs(6);
 /// Tracked clients. When full, idle (refilled) buckets go first, then the oldest.
 const MAX_CLIENTS: usize = 4096;
 
+static CAPACITY: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(IN_FLIGHT);
+
+/// A request's place in the shared pool and its head deadline. Inserted into every
+/// request by [`limit_requests`].
+#[derive(Clone)]
+pub struct Admitted(Arc<Admission>);
+
+struct Admission {
+    permit: Mutex<Option<tokio::sync::SemaphorePermit<'static>>>,
+    deadline: tokio::sync::watch::Sender<tokio::time::Instant>,
+}
+
+impl Admitted {
+    /// For an authenticated request that holds its own capacity (a speech stream slot):
+    /// leaves the shared pool and allows `deadline` from now to produce the head.
+    pub fn extend(&self, deadline: Duration) {
+        drop(
+            self.0
+                .permit
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take(),
+        );
+        self.0
+            .deadline
+            .send_replace(tokio::time::Instant::now() + deadline);
+    }
+}
+
 /// Fail fast under overload; do not create an unbounded HTTP work queue.
-pub async fn limit_requests(request: Request, next: Next) -> Response {
-    static CAPACITY: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(IN_FLIGHT);
-    let Ok(_permit) = CAPACITY.try_acquire() else {
+pub async fn limit_requests(mut request: Request, next: Next) -> Response {
+    let Ok(permit) = CAPACITY.try_acquire() else {
         return StatusCode::TOO_MANY_REQUESTS.into_response();
     };
-    let deadline = if SPEECH_PATHS.contains(&request.uri().path()) {
-        SPEECH_HEAD_DEADLINE
-    } else {
-        HEAD_DEADLINE
-    };
-    match tokio::time::timeout(deadline, next.run(request)).await {
-        Ok(response) => response,
-        Err(_) => StatusCode::GATEWAY_TIMEOUT.into_response(),
+    let admitted = Admitted(Arc::new(Admission {
+        permit: Mutex::new(Some(permit)),
+        deadline: tokio::sync::watch::channel(tokio::time::Instant::now() + HEAD_DEADLINE).0,
+    }));
+    let mut deadline = admitted.0.deadline.subscribe();
+    request.extensions_mut().insert(admitted.clone());
+    let run = next.run(request);
+    tokio::pin!(run);
+    loop {
+        let until = *deadline.borrow_and_update();
+        tokio::select! {
+            response = &mut run => return response,
+            () = tokio::time::sleep_until(until) => {
+                return StatusCode::GATEWAY_TIMEOUT.into_response();
+            }
+            // The sender lives in `admitted`, held here, so this never closes.
+            _ = deadline.changed() => {}
+        }
     }
 }
 
