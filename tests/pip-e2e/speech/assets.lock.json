@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "description": "Pinned official public assets for ARM64 Pip speech qualification. Private models (hey_pip.onnx) and private human recordings are NEVER listed here or copied into the repo.",
+  "runtime": {
+    "whisper_cpp": {
+      "version": "v1.9.6",
+      "license": "MIT (https://github.com/ggml-org/whisper.cpp/blob/v1.9.6/LICENSE)",
+      "url": "https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v1.9.6.tar.gz",
+      "sha256": "7ab15dc88022d2425ad94dcffd8abbf1b6d7018089b4e48d6b40780738e0b445",
+      "cache_relpath": "speech/src/whisper.cpp-v1.9.6.tar.gz"
+    },
+    "onnxruntime_nupkg": {
+      "version": "1.20.1",
+      "ort_api_version": 20,
+      "matches_crate": "ort =2.0.0-rc.9 (ort-sys ORT_API_VERSION=20)",
+      "license": "MIT (Microsoft.ML.OnnxRuntime 1.20.1 NuGet package)",
+      "url": "https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/1.20.1/microsoft.ml.onnxruntime.1.20.1.nupkg",
+      "sha256": "9c32108e9a1c78b090a95c2a219f244dd5f067d4caf68fb0f967103f3f20839c",
+      "cache_relpath": "speech/src/microsoft.ml.onnxruntime.1.20.1.nupkg",
+      "extracted": {
+        "libonnxruntime.so": {
+          "member": "runtimes/linux-arm64/native/libonnxruntime.so",
+          "sha256": "f8407a59e7e4c4dddf3b6e01198a24444aa66ac4ad93b4b4284b6e98d1f938b1"
+        },
+        "libonnxruntime_providers_shared.so": {
+          "member": "runtimes/linux-arm64/native/libonnxruntime_providers_shared.so",
+          "sha256": "d93c6b9016eb23a46b7ace5a6c7d56139fdf11bfe0228e93801de758707dee2b"
+        },
+        "onnxruntime_c_api.h": {
+          "member": "build/native/include/onnxruntime_c_api.h"
+        }
+      }
+    }
+  },
+  "models": {
+    "whisper_tiny_en": {
+      "name": "ggml-tiny.en.bin",
+      "license": "MIT (OpenAI Whisper weights: https://github.com/openai/whisper/blob/main/LICENSE; GGML conversion by ggerganov/whisper.cpp)",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
+      "size_bytes": 77704715,
+      "sha256": "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
+      "cache_relpath": "speech/models/ggml-tiny.en.bin"
+    },
+    "openwakeword_melspectrogram": {
+      "name": "melspectrogram.onnx",
+      "version": "v0.5.1",
+      "license": "upstream_model_terms_review_required",
+      "upstream_notice": "dscripka/openWakeWord v0.5.1 release binary (ONNX export of torchaudio MelSpectrogram). Repository code is Apache-2.0, but release ONNX weights do not include a separate model-specific license file; operator review required prior to distribution.",
+      "url": "https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/melspectrogram.onnx",
+      "sha256": "ba2b0e0f8b7b875369a2c89cb13360ff53bac436f2895cced9f479fa65eb176f",
+      "cache_relpath": "speech/models/wake/melspectrogram.onnx"
+    },
+    "openwakeword_embedding": {
+      "name": "embedding_model.onnx",
+      "version": "v0.5.1",
+      "license": "upstream_model_terms_review_required",
+      "upstream_notice": "dscripka/openWakeWord v0.5.1 release binary. Per upstream README, derived from Google TFHub google/speech_embedding/1 (listed as Apache-2.0 on TFHub), re-implemented and exported by openWakeWord without a separate weight-specific license file; operator review required prior to distribution.",
+      "url": "https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/embedding_model.onnx",
+      "sha256": "70d164290c1d095d1d4ee149bc5e00543250a7316b59f31d056cff7bd3075c1f",
+      "cache_relpath": "speech/models/wake/embedding_model.onnx"
+    }
+  },
+  "human_recordings": [
+    {
+      "id": "human_jfk_negative",
+      "kind": "wake_negative",
+      "provenance": "human_recorded",
+      "is_human_recording": true,
+      "license": "Public Domain (1961 JFK inaugural excerpt bundled in ggml-org/whisper.cpp v1.9.6 samples/jfk.wav)",
+      "source": "whisper_cpp_tarball:whisper.cpp-1.9.6/samples/jfk.wav",
+      "sha256": "59dfb9a4acb36fe2a2affc14bacbee2920ff435cb13cc314a08c13f66ba7860e",
+      "expected_text": "And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.",
+      "expected_substrings": ["fellow americans", "country", "do for you"],
+      "cache_relpath": "speech/fixtures/human/human_jfk_negative.wav"
+    },
+    {
+      "id": "human_voices_followup",
+      "kind": "followup",
+      "provenance": "human_recorded",
+      "is_human_recording": true,
+      "license": "CC-BY-4.0 (VOiCES / LibriSpeech sp0307 via PyTorch torchaudio tutorial-assets)",
+      "url": "https://download.pytorch.org/torchaudio/tutorial-assets/Lab41-SRI-VOiCES-src-sp0307-ch127535-sg0042.wav",
+      "sha256": "c65fcd726d6b08c82c1e5dc7558f863cd8d483e3ed2f4a7bcf271dc1865ada14",
+      "expected_text": "I had that curiosity beside me at this moment.",
+      "expected_substrings": ["curiosity", "beside", "moment"],
+      "cache_relpath": "speech/fixtures/human/human_voices_followup.wav"
+    },
+    {
+      "id": "human_librispeech_negative",
+      "kind": "wake_negative",
+      "provenance": "human_recorded",
+      "is_human_recording": true,
+      "license": "CC-BY-4.0 (OpenSLR-12 LibriSpeech test-clean 1688-142285-0007 via PyTorch torchaudio tutorial-assets)",
+      "url": "https://download.pytorch.org/torchaudio/tutorial-assets/ctc-decoding/1688-142285-0007.wav",
+      "sha256": "67dfc27041e572bea27936e75eedc542ccf6f3af5cc251a0ab4e1e947d787fc8",
+      "upstream_format": "ieee_float32_wav",
+      "expected_text": "I really was very much afraid of showing him how much shock I was at some part of what he said.",
+      "expected_substrings": ["really", "afraid", "showing", "what he said"],
+      "cache_relpath": "speech/fixtures/human/human_librispeech_negative.wav"
+    }
+  ]
+}
