@@ -48,3 +48,17 @@ Same Mac mini, shared with other jobs.
 - `cargo test --workspace --locked`: 170 passed, 18 ignored (54 buddy unit, 8 history SQL, 11 protocol golden, 4 sentence, 11 voice rule, 52 robot, 30 server; ignored are the 17 engine scenarios and the container test).
 - `bun run test:integration`: 17 of 17 passed in two consecutive runs; nothing left listening on 16420, 16421, 16430 or 19091 and no run directory left. The one `rivet-engine` process still running belonged to another checkout and predated these runs.
 - `bun run bench:e2e` (short runs, 2 to 3 turns): the 4 s warm-up first audio reproduced in 1 of 5 runs and was traced to the fake player's first launch, not to backend or robot code. See [e2e latency](e2e-latency.md).
+
+## November 23, 2026: tests, evals and benchmarks (wave5-tests, 8ea8cd7-dirty)
+
+Same Mac mini, shared with other jobs, load average 34 to 39. The tree was uncommitted;
+`git describe --always --dirty` gives `8ea8cd7-dirty`.
+
+- `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` and `bun run lint:pedantic`: clean, 0 warnings.
+- `cargo test --workspace --locked`: 171 passed, 20 ignored (54 buddy unit, 8 history SQL, 12 protocol golden, 4 sentence, 11 voice rule, 52 robot, 30 server; ignored are the 19 engine scenarios and the container test).
+- `bun run test:integration`: 19 of 19 passed in 81 s; nothing left on 16420, 16421, 16430 or 19091 and no run directory. New: `output_events_match_their_golden_fixtures` (fixtures recaptured from the actor with `BUDDY_UPDATE_GOLDEN=1`; `turn.completed` usage now shows the `total_tokens` the actor actually sends, which the hand-built fixture lacked; `speech.ready` carries only `index`) and `version_one_history_upgrades_on_the_engine_across_interruptions` (12,000 version 1 turns, stopped mid-rebuild twice, exact search hits at every stop and after). Timing lines: submit to first `speech.ready` 579 ms, provider closed 43 ms after cancel.
+- `history_sql.rs` at 5,000 turns: startup DDL 54 pages on the first start after the upgrade and 0 after; rebuild start 5 pages; 42 batches, largest 84 pages.
+- `bun run bench:e2e` (50 turns, 10 barge-ins, `--publish`): exit 0, all checks passed, no leaks. Raw JSON in [e2e-latency.json](e2e-latency.json), table in [e2e latency](e2e-latency.md).
+- `bun run test:reconnect`: 6 checks ok and 1 XFAIL (the open wave5-robot bug above), in two runs after one test fix (the first run's long reply finished before the wake).
+- `bun run eval:voice`: PASS. p95 first `speech.ready` 541 ms, p95 first PCM 1095 ms, longest silence 26 ms, p95 barge-in to player stop 3.6 ms, p95 barge-in to model stream closed 37 ms, 0 old-speech requests after the reconnect.
+- `bun run test:shutdown`: failed its first case in two runs ("exited null": killed by the default SIGTERM action, cache not flushed). The test signalled at a fixed 1500 ms after spawn. The robot registers its stop handler only when the main `select!` in `apps/robot/src/main.rs` first polls, after the panel, `Media::new`, both HTTP clients and the input thread are set up; on this Mac that takes more than 300 ms after the panel answers, and over 1500 ms on a binary's first launch. The test now signals after the robot's first connection to its server URL, which comes from inside that `select!`: 15 of 15 stops in three runs exited 0 in 16 to 145 ms with the cache flushed. Open for wave5-robot: a SIGTERM in that startup window (systemd stopping a robot that just started) still kills it without a cache flush.

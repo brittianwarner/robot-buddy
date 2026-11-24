@@ -36,9 +36,14 @@ const QUERIES: &[&str] = &[
     "fresh",
 ];
 
-/// The create path's history step: one transaction, as `begin_history_backfill`.
+/// The create path: the startup schema, then the history step.
 fn begin(db: &mut Connection) -> Begin {
     db.execute_batch(SCHEMA).expect("schema");
+    begin_backfill(db)
+}
+
+/// The create path's history step alone: one transaction, as `begin_history_backfill`.
+fn begin_backfill(db: &mut Connection) -> Begin {
     let tx = db.transaction().expect("begin");
     let flags = tx
         .query_row(history::STATUS_SQL, [], |r| {
@@ -530,8 +535,13 @@ fn five_thousand_turns_rebuild_in_bounded_batches() {
     drop(one_shot);
 
     let mut db = copy_of(&dir, &fixture, "batched.db");
+    // Startup DDL is measured apart from the rebuild: it runs on every start, and its
+    // index builds read all of history once, on the first start after the upgrade.
     reset_wal(&db);
-    assert_eq!(begin(&mut db), Begin::Reset);
+    db.execute_batch(SCHEMA).expect("schema");
+    let ddl_pages = wal_pages(&db);
+    reset_wal(&db);
+    assert_eq!(begin_backfill(&mut db), Begin::Reset);
     let begin_pages = wal_pages(&db);
     let mut fresh = fresh_copy_of(&db);
     assert_searches_match(&db, &fresh, false);
@@ -557,9 +567,19 @@ fn five_thousand_turns_rebuild_in_bounded_batches() {
             break;
         }
     }
+    // A later start runs the same DDL as a no-op.
+    reset_wal(&db);
+    db.execute_batch(SCHEMA).expect("schema again");
+    let ddl_again_pages = wal_pages(&db);
     println!(
-        "{LARGE} turns: {batches} batches, largest {largest} pages (start {begin_pages}); \
+        "{LARGE} turns: startup DDL {ddl_pages} pages (next start {ddl_again_pages}); \
+         rebuild start {begin_pages} pages; {batches} batches, largest {largest} pages; \
          one-shot rebuild {one_shot_pages} pages"
+    );
+    assert!(ddl_pages * 20 < RIVET_TRANSACTION_PAGES, "{ddl_pages}");
+    assert_eq!(
+        ddl_again_pages, 0,
+        "startup DDL is not a no-op once applied"
     );
     assert_rebuilt(&db);
     assert_searches_match(&db, &fresh, true);

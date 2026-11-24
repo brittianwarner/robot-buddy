@@ -20,8 +20,8 @@ use std::{
     time::{Duration, Instant},
 };
 use support::{
-    DropGuard, Events, Harness, Seen, TestBot, WAIT, harness, init_tracing, kinds, sse,
-    streamed_text, terminal,
+    DropGuard, Events, Harness, Seen, TestBot, WAIT, golden_event, harness, init_tracing, kinds,
+    sse, streamed_text, terminal, timing_bound,
 };
 
 /// Gap between mock tokens of about four characters.
@@ -415,10 +415,11 @@ async fn speech_streams_one_numbered_chunk_per_sentence() -> Result<()> {
         ready.len()
     );
     ensure!(ready.len() >= 4, "one chunk per sentence: {}", ready.len());
-    ensure!(
-        first < Duration::from_millis(1500),
-        "first speech.ready took {first:?}"
-    );
+    timing_bound(
+        "submit_to_first_speech_ready",
+        first,
+        Duration::from_millis(1500),
+    )?;
     let indexes: Vec<i64> = ready
         .iter()
         .filter_map(|s| s.event.payload["index"].as_i64())
@@ -510,11 +511,14 @@ async fn barge_in_closes_the_provider_stream_and_commits_nothing_after() -> Resu
         acked.as_millis(),
         close.as_millis()
     );
+    // Functional: the provider stream closed (within the 5 s wait above) and nothing was
+    // committed after the cancellation. The 300 ms wall-clock bound depends on the machine.
     ensure!(late == 0, "{late} events committed after cancellation");
-    ensure!(
-        close < Duration::from_millis(300),
-        "provider closed {close:?} after cancel"
-    );
+    timing_bound(
+        "provider_close_after_cancel",
+        close,
+        Duration::from_millis(300),
+    )?;
     Ok(())
 }
 
@@ -1110,6 +1114,12 @@ async fn restart_interrupts_streams_and_fails_closed_on_unresolved_tools() -> Re
             let end = terminal(&done).context("terminal")?;
             assert_eq!(end.event.kind, "turn.interrupted", "{:?}", kinds(&done));
             assert_eq!(end.event.payload["reason"], "server_restart");
+            // Committed by the new process before anyone subscribed: the replayed copy.
+            let replayed = events.replayed(end.event.sequence - 1).await?;
+            golden_event(
+                "turn_interrupted",
+                replayed.first().context("interrupted event replay")?,
+            )?;
             let record = custom.bot.turn_record(&custom.slow_turn).await?;
             assert_eq!(status(&record), "interrupted");
             assert_eq!(record["answer"], "Partial output.");
@@ -1159,5 +1169,445 @@ async fn restart_interrupts_streams_and_fails_closed_on_unresolved_tools() -> Re
         .turn("after-restart", "Hello after restart")
         .await?;
     assert_eq!(end_kind(&after), Some("turn.completed"));
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------------------
+// Wire fixtures captured from the actor
+// ---------------------------------------------------------------------------------------
+
+/// Every output event kind the actor emits, captured from real turns. Each event is checked
+/// twice: the pushed copy must equal the replayed copy, and both must equal the fixture in
+/// `fixtures/protocol/` once sequence and turn ID are normalized. `turn.interrupted` is
+/// captured by the restart test. `BUDDY_UPDATE_GOLDEN=1` rewrites the fixtures.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs the isolated engine; run bun run test:integration"]
+async fn output_events_match_their_golden_fixtures() -> Result<()> {
+    const CHAT: &str = "Golden fixture chat turn";
+    const TOOL: &str = "Golden fixture tool turn";
+    const CANCEL: &str = "Golden fixture cancelled turn";
+    const FAIL: &str = "Golden fixture failed turn";
+    let (h, _shared) = start().await;
+    h.mock.script(CHAT, |_| sse::text("Hi there."));
+    h.mock.script(TOOL, |r| {
+        if r.spoken {
+            sse::text("Saved.")
+        } else if r.tool_results == 0 {
+            let args = json!({"key":"golden","value":"teal"});
+            sse::tool("golden_call", "memory_remember", &args)
+        } else {
+            sse::text("READY")
+        }
+    });
+    h.mock.script(CANCEL, |_| {
+        sse::hang_after(sse::content("Partial output."), Duration::from_mins(1))
+    });
+    h.mock.script(FAIL, |_| {
+        let args = json!({"key":"golden_late","value":"never"});
+        sse::body(format!(
+            "{}{}",
+            sse::content("Let me check. "),
+            sse::tool_call("golden_late", "memory_remember", &args)
+        ))
+    });
+    let b = TestBot::enroll(h).await?;
+    let mut events = b.events().await?;
+    let chat = b.submit("golden-chat", CHAT).await?;
+    events.wait_terminal(&chat, WAIT).await?;
+    let tool = b.submit("golden-tool", TOOL).await?;
+    events.wait_terminal(&tool, WAIT).await?;
+    let cancel = b.submit("golden-cancel", CANCEL).await?;
+    events.wait_kind(&cancel, "text.delta", WAIT).await?;
+    b.conv(Command::Cancel {
+        turn_id: cancel.clone(),
+    })
+    .await?;
+    events.wait_terminal(&cancel, WAIT).await?;
+    let fail = b.submit("golden-fail", FAIL).await?;
+    events.wait_terminal(&fail, WAIT).await?;
+
+    let cases = [
+        ("turn_started", &chat, "turn.started"),
+        ("text_delta", &chat, "text.delta"),
+        ("speech_ready", &chat, "speech.ready"),
+        ("turn_completed", &chat, "turn.completed"),
+        ("tool_started", &tool, "tool.started"),
+        ("tool_completed", &tool, "tool.completed"),
+        ("turn_cancelled", &cancel, "turn.cancelled"),
+        ("turn_failed", &fail, "turn.failed"),
+    ];
+    for (name, turn, kind) in cases {
+        let sequence = events
+            .of_turn(turn)
+            .iter()
+            .find(|s| s.event.kind == kind)
+            .with_context(|| format!("no {kind} on {turn}: {:?}", kinds(&events.of_turn(turn))))?
+            .event
+            .sequence;
+        let pushed = events.wait_pushed(sequence, WAIT).await?;
+        let page = events.replayed(sequence - 1).await?;
+        let replayed = page.first().context("replay page")?;
+        ensure!(
+            serde_json::to_value(&pushed)? == serde_json::to_value(replayed)?,
+            "{kind}: pushed {pushed:?} differs from replayed {replayed:?}"
+        );
+        golden_event(name, replayed)?;
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------------------
+// Version 1 history upgrade on the real engine
+// ---------------------------------------------------------------------------------------
+
+mod upgrade {
+    //! Stands in for the version 1 conversation actor: the same actor name and key, a
+    //! database built by the version 1 schema, and test-only actions to fill and read it.
+    //! It never runs DDL on its own, so serving it again only inspects the database the
+    //! real actor left.
+    use anyhow::{Context, Result};
+    use rivetkit::{BindParam as P, SqliteDbExt, SqliteTransactionOptions, action, prelude::*};
+    use robot_buddy::{
+        conversation::history,
+        db::{integer, string},
+        protocol::Connection,
+    };
+    use serde::{Deserialize, Serialize};
+    use serde_json::{Value, json};
+    use std::sync::Arc;
+
+    const SCHEMA_V1: &str = include_str!("fixtures/conversation-v1.sql");
+    /// `count` completed turns from `from`, inserted through version 1's search trigger.
+    const SEED_SQL: &str = r"
+        WITH RECURSIVE n(i) AS (SELECT ? UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+        INSERT INTO turns(id, request_id, text, status, answer, created)
+        SELECT printf('turn-%06d', i), printf('turn-%06d', i),
+            'question ' || i || ' about topic' || (i % 50), 'completed',
+            'answer ' || i || ' mentions marker' || i, i
+        FROM n";
+    /// Rewrites every 97th answer, so version 1 search row IDs have gaps.
+    const REWRITE_SQL: &str = r"
+        UPDATE turns SET answer = 'rewritten answer ' || created
+        WHERE created % 97 = 0 AND created >= ? AND created <= ?";
+
+    pub struct VersionOne;
+
+    #[derive(Serialize, Deserialize)]
+    pub struct Seed {
+        pub from: i64,
+        pub count: i64,
+    }
+    impl rivetkit::Action for Seed {
+        type Output = Value;
+        const NAME: &'static str = "test_seed_v1";
+    }
+
+    #[derive(Serialize, Deserialize)]
+    pub struct Inspect {
+        pub queries: Vec<String>,
+    }
+    impl rivetkit::Action for Inspect {
+        type Output = Value;
+        const NAME: &'static str = "test_inspect";
+    }
+
+    #[async_trait::async_trait]
+    impl Actor for VersionOne {
+        type Input = ();
+        type Actions = (Seed, Inspect);
+        type Events = ();
+        type ConnParams = Connection;
+        type Action = action::Raw;
+        async fn create(_ctx: &Ctx<Self>) -> Result<Self> {
+            Ok(Self)
+        }
+    }
+
+    impl Handler<Seed> for VersionOne {
+        async fn handle(self: Arc<Self>, ctx: Ctx<Self>, seed: Seed) -> Result<Value> {
+            if seed.from == 0 {
+                ctx.sql().exec(SCHEMA_V1).await?;
+            }
+            let (from, to) = (seed.from, seed.from + seed.count - 1);
+            let fill = move |tx: rivetkit::SqliteTransaction| async move {
+                let range = || Some(vec![P::Integer(from), P::Integer(to)]);
+                tx.execute(SEED_SQL, range()).await?;
+                tx.execute(REWRITE_SQL, range()).await?;
+                Ok(())
+            };
+            let options = SqliteTransactionOptions {
+                name: Some("test.seed_v1"),
+                timeout: None,
+            };
+            ctx.sql().transaction(fill, options).await?;
+            Ok(json!({ "to": to }))
+        }
+    }
+
+    const INSPECT_SQL: &str = r"
+        SELECT
+            EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'trigger'
+                AND name IN ('turns_search_insert', 'turns_search_update')),
+            EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'schema_migrations')
+                AND EXISTS(SELECT 1 FROM sqlite_master WHERE name = 'history_rows'),
+            (SELECT count(*) FROM turns),
+            (SELECT count(*) FROM history_search)";
+    const PROGRESS_SQL: &str = r"
+        SELECT
+            EXISTS(SELECT 1 FROM schema_migrations WHERE name = 'history_search_rowids'),
+            (SELECT count(*) FROM history_rows WHERE turn_id <> ''),
+            (SELECT count(*) FROM history_backfill)";
+
+    impl Handler<Inspect> for VersionOne {
+        async fn handle(self: Arc<Self>, ctx: Ctx<Self>, inspect: Inspect) -> Result<Value> {
+            let sql = ctx.sql();
+            let rows = sql.query(INSPECT_SQL, None).await?.rows;
+            let row = rows.first().context("inspect row")?;
+            let current = integer(row, 1)? != 0;
+            let mut out = json!({
+                "v1_triggers": integer(row, 0)? != 0,
+                "current_schema": current,
+                "turns": integer(row, 2)?,
+                "search_rows": integer(row, 3)?,
+            });
+            if !current {
+                return Ok(out);
+            }
+            let rows = sql.query(PROGRESS_SQL, None).await?.rows;
+            let row = rows.first().context("progress row")?;
+            out["finished"] = json!(integer(row, 0)? != 0);
+            out["mapped"] = json!(integer(row, 1)?);
+            out["in_progress"] = json!(integer(row, 2)? != 0);
+            let state = sql.query(history::STATE_SQL, None).await?.rows;
+            if let Some(row) = state.first() {
+                out["cursor"] = json!(string(row, 1)?);
+                out["sweeping"] = json!(integer(row, 2)? != 0);
+            }
+            let mut hits = serde_json::Map::new();
+            for query in inspect.queries {
+                let phrase = format!("\"{}\"", query.replace('"', "\"\""));
+                let rows = sql
+                    .query(history::SEARCH_SQL, Some(vec![P::Text(phrase)]))
+                    .await?
+                    .rows;
+                let ids = rows
+                    .iter()
+                    .map(|r| string(r, 0))
+                    .collect::<Result<Vec<_>>>()?;
+                hits.insert(query, json!(ids));
+            }
+            out["hits"] = Value::Object(hits);
+            Ok(out)
+        }
+    }
+
+    /// The real `Bot` and `Memory`, and this actor in place of `Conversation`.
+    pub fn registry() -> rivetkit::Registry {
+        let mut r = rivetkit::Registry::new();
+        r.register_actor::<robot_buddy::Bot>("bot");
+        r.register_actor::<VersionOne>("conversation");
+        r.register_actor::<robot_buddy::memory::Memory>("memory");
+        r
+    }
+}
+
+/// Turns in the version 1 database: enough that the rebuild spans many batches.
+const UPGRADE_TURNS: i64 = 12_000;
+const UPGRADE_SEED_BATCH: i64 = 1_000;
+
+fn turn_number(id: &Value) -> Option<i64> {
+    id.as_str()?.strip_prefix("turn-")?.parse().ok()
+}
+
+/// Search hits for the inspected queries must be exact while the rebuild runs: one hit per
+/// marker, and only matching turns for a broad query.
+fn check_hits(state: &Value) -> Result<()> {
+    let hits = &state["hits"];
+    let ids = |query: &str| -> Vec<i64> {
+        hits[query]
+            .as_array()
+            .map(|a| a.iter().filter_map(turn_number).collect())
+            .unwrap_or_default()
+    };
+    ensure!(
+        ids("marker123") == [123],
+        "marker123: {}",
+        hits["marker123"]
+    );
+    let last = UPGRADE_TURNS - 1;
+    ensure!(
+        ids(&format!("marker{last}")) == [last],
+        "last marker: {hits}"
+    );
+    let topic = ids("topic7");
+    ensure!(
+        topic.len() == 6 && topic.iter().all(|i| i % 50 == 7),
+        "topic7: {}",
+        hits["topic7"]
+    );
+    let rewritten = ids("rewritten");
+    ensure!(
+        rewritten.len() == 6 && rewritten.iter().all(|i| i % 97 == 0),
+        "rewritten: {}",
+        hits["rewritten"]
+    );
+    Ok(())
+}
+
+/// Version 1 history upgraded by the actual actor on the real engine: the actor's own
+/// startup (DDL, the rebuild start transaction, the background batch task) runs, is
+/// interrupted by a registry stop at least once mid-rebuild, resumes on the next start,
+/// and ends with correct search results through the actor's `search_history`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs the isolated engine; run bun run test:integration"]
+async fn version_one_history_upgrades_on_the_engine_across_interruptions() -> Result<()> {
+    let (h, _exclusive) = start_alone().await;
+    let result = upgrade_scenario(h).await;
+    // Later tests need the real registry, whatever happened above.
+    let restored = h.swap_registry(robot_buddy::registry).await;
+    result?;
+    restored?;
+    Ok(())
+}
+
+fn upgrade_queries() -> upgrade::Inspect {
+    upgrade::Inspect {
+        queries: [
+            "marker123".to_owned(),
+            format!("marker{}", UPGRADE_TURNS - 1),
+            "topic7".to_owned(),
+            "rewritten".to_owned(),
+        ]
+        .into(),
+    }
+}
+
+async fn upgrade_scenario(h: &'static Harness) -> Result<()> {
+    h.swap_registry(upgrade::registry).await?;
+    let b = TestBot::enroll(h).await?;
+    let old: support::Handle<upgrade::VersionOne> =
+        support::handle(&b.client, "conversation", &b.id, &b.device)?;
+    let seeding = Instant::now();
+    for from in (0..UPGRADE_TURNS).step_by(usize::try_from(UPGRADE_SEED_BATCH)?) {
+        old.send(upgrade::Seed {
+            from,
+            count: UPGRADE_SEED_BATCH,
+        })
+        .await?;
+    }
+    let state = old.send(upgrade_queries()).await?;
+    println!(
+        "UPGRADE seeded {UPGRADE_TURNS} version 1 turns in {} ms",
+        seeding.elapsed().as_millis()
+    );
+    ensure!(
+        state["v1_triggers"] == true && state["current_schema"] == false,
+        "{state}"
+    );
+    ensure!(state["turns"] == UPGRADE_TURNS, "{state}");
+
+    let (wakes, interrupted_mid_rebuild) = interrupt_until_rebuilt(h, &b, &old).await?;
+    check_upgraded(&b, &wakes, interrupted_mid_rebuild).await
+}
+
+/// Serves the real actor and stops it again, longer each cycle, until the rebuild is done.
+/// Returns the wake time of each start and how many stops landed mid-rebuild.
+async fn interrupt_until_rebuilt(
+    h: &'static Harness,
+    b: &TestBot,
+    old: &support::Handle<upgrade::VersionOne>,
+) -> Result<(Vec<u128>, usize)> {
+    let mut wakes = Vec::new();
+    let mut interrupted_mid_rebuild = 0;
+    let mut finished = false;
+    for cycle in 0..30 {
+        h.swap_registry(robot_buddy::registry).await?;
+        // The first action wakes the real actor: `create` runs the current schema (DDL
+        // over existing history) and the rebuild start transaction; `on_start` starts the
+        // batch task. The search answers while batches run.
+        let woke = Instant::now();
+        let hits = b
+            .conv(Command::SearchHistory {
+                query: "marker123".into(),
+            })
+            .await?;
+        wakes.push(woke.elapsed().as_millis());
+        let ids: Vec<&str> = hits
+            .as_array()
+            .context("hits")?
+            .iter()
+            .filter_map(|hit| hit["turn_id"].as_str())
+            .collect();
+        ensure!(ids == ["turn-000123"], "cycle {cycle}: {hits}");
+        // Let batches run, longer each cycle, then stop the actor as a deploy would.
+        tokio::time::sleep(Duration::from_millis(150 * (cycle + 1))).await;
+        h.swap_registry(upgrade::registry).await?;
+        let state = old.send(upgrade_queries()).await?;
+        ensure!(state["v1_triggers"] == false, "cycle {cycle}: {state}");
+        check_hits(&state).with_context(|| format!("cycle {cycle}"))?;
+        println!(
+            "UPGRADE cycle {cycle}: wake_ms={} in_progress={} sweeping={} mapped={} cursor={}",
+            wakes.last().copied().unwrap_or_default(),
+            state["in_progress"],
+            state["sweeping"],
+            state["mapped"],
+            state["cursor"]
+        );
+        if state["finished"] == true {
+            ensure!(state["in_progress"] == false, "{state}");
+            ensure!(state["mapped"] == UPGRADE_TURNS, "{state}");
+            ensure!(state["search_rows"] == UPGRADE_TURNS, "{state}");
+            finished = true;
+            break;
+        }
+        ensure!(state["in_progress"] == true, "cycle {cycle}: {state}");
+        interrupted_mid_rebuild += 1;
+    }
+    ensure!(finished, "the rebuild never finished");
+    ensure!(
+        interrupted_mid_rebuild >= 1,
+        "the rebuild finished before the first stop, so no interruption was exercised"
+    );
+
+    h.swap_registry(robot_buddy::registry).await?;
+    Ok((wakes, interrupted_mid_rebuild))
+}
+
+/// Upgraded: the real actor answers from the rebuilt index and indexes new turns.
+async fn check_upgraded(b: &TestBot, wakes: &[u128], interrupted_mid_rebuild: usize) -> Result<()> {
+    let woke = Instant::now();
+    let hits = b
+        .conv(Command::SearchHistory {
+            query: "rewritten".into(),
+        })
+        .await?;
+    let done_wake = woke.elapsed().as_millis();
+    let hits = hits.as_array().context("hits")?;
+    ensure!(hits.len() == 6, "{hits:?}");
+    for hit in hits {
+        let n = turn_number(&hit["turn_id"]).context("turn id")?;
+        ensure!(n % 97 == 0, "{hit}");
+        ensure!(hit["assistant"] == format!("rewritten answer {n}"), "{hit}");
+    }
+    let (turn, done) = b
+        .turn("after-upgrade", "Upgrade check fresh question")
+        .await?;
+    ensure!(
+        end_kind(&done) == Some("turn.completed"),
+        "{:?}",
+        kinds(&done)
+    );
+    let fresh = b
+        .conv(Command::SearchHistory {
+            query: "fresh question".into(),
+        })
+        .await?;
+    ensure!(fresh[0]["turn_id"] == turn.as_str(), "{fresh}");
+    println!(
+        "UPGRADE turns={UPGRADE_TURNS} interrupted_mid_rebuild={interrupted_mid_rebuild} \
+         wake_with_migration_ms={} later_wakes_ms={:?} wake_after_upgrade_ms={done_wake}",
+        wakes.first().copied().unwrap_or_default(),
+        &wakes[1..]
+    );
     Ok(())
 }

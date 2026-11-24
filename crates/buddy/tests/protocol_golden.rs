@@ -5,8 +5,12 @@
 //! fixture and serializes it again, so both directions are pinned. A changed wire format
 //! fails here before it reaches a robot in the field.
 //!
-//! Regenerate after a deliberate wire change with `BUDDY_UPDATE_GOLDEN=1 cargo test -p
-//! robot-buddy --test protocol_golden`, then review the fixture diff.
+//! Output events are the exception: their fixtures are captured from the real actor by the
+//! integration suite (`BUDDY_UPDATE_GOLDEN=1 bun run test:integration`), and this file only
+//! checks they parse, round-trip and cover every kind.
+//!
+//! Regenerate the rest after a deliberate wire change with `BUDDY_UPDATE_GOLDEN=1 cargo test
+//! -p robot-buddy --test protocol_golden`, then review the fixture diff.
 use robot_buddy::{
     auth::{Certificate, Challenge, Session},
     context::ContextConfig,
@@ -247,42 +251,80 @@ fn action_envelope_and_connection_params_are_pinned() {
     );
 }
 
+/// Every output event kind the actor emits. The fixtures are captured from real turns by
+/// `actors.rs::output_events_match_their_golden_fixtures` (and the restart test for
+/// `turn.interrupted`), not built here, so they show what a robot actually receives.
+const OUTPUT_EVENTS: [&str; 9] = [
+    "turn_started",
+    "text_delta",
+    "speech_ready",
+    "tool_started",
+    "tool_completed",
+    "turn_completed",
+    "turn_cancelled",
+    "turn_failed",
+    "turn_interrupted",
+];
+
+fn read_fixture(name: &str) -> Value {
+    let path = fixture_path(name);
+    let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!(
+            "{}: {e}; capture it with BUDDY_UPDATE_GOLDEN=1 bun run test:integration",
+            path.display()
+        )
+    });
+    serde_json::from_str(&raw).expect("fixture is JSON")
+}
+
 #[test]
 fn output_events_are_pinned() {
-    for (name, kind, payload) in [
-        ("turn_started", "turn.started", json!({"text":"Hello"})),
-        ("text_delta", "text.delta", json!({"text":"Hi there. "})),
-        (
-            "speech_ready",
-            "speech.ready",
-            json!({"index":0,"text":"Hi there."}),
-        ),
-        (
-            "tool_started",
-            "tool.started",
-            json!({"name":"memory_remember"}),
-        ),
-        (
-            "turn_completed",
-            "turn.completed",
-            json!({"text":"Hi there.","usage":{"input_tokens":3,"output_tokens":2}}),
-        ),
-        (
-            "turn_interrupted",
-            "turn.interrupted",
-            json!({"reason":"server_restart"}),
-        ),
-    ] {
-        golden(
-            &format!("output_event.{name}"),
-            &OutputEvent {
-                sequence: 7,
-                turn_id: TURN.into(),
-                kind: kind.into(),
-                payload,
-            },
+    let dir = fixture_path("x").parent().expect("dir").to_path_buf();
+    let mut found: Vec<String> = std::fs::read_dir(&dir)
+        .expect("fixture dir")
+        .filter_map(|e| {
+            let name = e.ok()?.file_name().into_string().ok()?;
+            Some(
+                name.strip_prefix("output_event.")?
+                    .strip_suffix(".json")?
+                    .to_owned(),
+            )
+        })
+        .collect();
+    found.sort();
+    let mut expected: Vec<String> = OUTPUT_EVENTS.iter().map(|s| (*s).to_owned()).collect();
+    expected.sort();
+    assert_eq!(found, expected, "output event fixtures");
+    for name in OUTPUT_EVENTS {
+        let fixture = read_fixture(&format!("output_event.{name}"));
+        let event: OutputEvent = serde_json::from_value(fixture.clone())
+            .unwrap_or_else(|e| panic!("{name}: fixture does not parse: {e}"));
+        assert_eq!(
+            serde_json::to_value(&event).expect("serialize"),
+            fixture,
+            "{name}: fixture does not round-trip"
         );
+        assert_eq!(event.kind, name.replacen('_', ".", 1), "{name}: kind");
+        assert_eq!(
+            (event.sequence, event.turn_id.as_str()),
+            (7, TURN),
+            "{name}: normalized"
+        );
+        assert!(event.payload.is_object(), "{name}: payload is an object");
     }
+}
+
+#[test]
+fn speech_ready_carries_only_the_sentence_index() {
+    // Speech is fetched by turn ID and index; the event never carries the text to speak.
+    let event = read_fixture("output_event.speech_ready");
+    let keys: Vec<&String> = event["payload"]
+        .as_object()
+        .expect("payload")
+        .keys()
+        .collect();
+    assert_eq!(keys, ["index"], "{event}");
+    assert!(event["payload"]["index"].is_u64(), "{event}");
 }
 
 #[test]
@@ -375,7 +417,13 @@ fn accepts<T: DeserializeOwned>(name: &str) -> bool {
 #[test]
 fn messages_a_client_reads_ignore_additive_fields() {
     // docs/architecture/robot-client.md: "Clients ignore additive unknown fields."
-    assert!(accepts::<OutputEvent>("output_event.speech_ready"));
+    for name in OUTPUT_EVENTS {
+        let name = format!("output_event.{name}");
+        assert!(
+            accepts::<OutputEvent>(&name),
+            "{name} rejects an additive field"
+        );
+    }
     assert!(accepts::<Bundle>("bundle"));
     assert!(accepts::<SpeechRequest>("speech_request"));
     assert!(accepts::<Call>("call"));
