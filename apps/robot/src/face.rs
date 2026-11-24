@@ -5,24 +5,29 @@
 //! after 5 s of silence), and reopens the device if it disappears. Only the
 //! latest mood matters, so the session never waits on the serial port.
 //!
-//! The device is opened `O_WRONLY | O_NOCTTY | O_NONBLOCK` and set to raw
+//! The device is opened `O_RDWR | O_NOCTTY | O_NONBLOCK` and set to raw
 //! 115200 baud with `CLOCAL` and without `HUPCL` on every open, because a
 //! re-enumerated CDC-ACM port comes back at the kernel defaults (9600, cooked,
 //! echo). Writes are non-blocking and driven by reactor readiness, so a
 //! stalled port times out and is closed without parking a blocking-pool
 //! thread on `write(2)`.
 use nix::sys::termios::{self, BaudRate, ControlFlags, SetArg, Termios};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
     future::Future,
     io::{self, Write},
     os::unix::fs::OpenOptionsExt,
     path::{Path, PathBuf},
-    sync::OnceLock,
+    sync::{Arc, OnceLock},
     time::Duration,
 };
-use tokio::{io::AsyncWriteExt, net::unix::pipe, sync::watch, time::Instant};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::unix::pipe,
+    sync::{mpsc, watch},
+    time::Instant,
+};
 
 pub const HEARTBEAT: Duration = Duration::from_millis(1500);
 const WRITE_DEADLINE: Duration = Duration::from_millis(500);
@@ -36,13 +41,17 @@ const OPEN_DEADLINE: Duration = Duration::from_secs(2);
 const STALLED_OPEN_RETRY: Duration = Duration::from_secs(15);
 pub const SORRY: Duration = Duration::from_millis(1500);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Expression {
     Neutral,
     Happy,
     Thinking,
-    Listening,
+    Curious,
+    Surprised,
+    Angry,
+    Love,
+    Asleep,
     Sad,
     Sleepy,
 }
@@ -64,6 +73,15 @@ pub enum FaceCommand {
     Expression { e: Expression, i: f32 },
     Look { look: [f32; 2] },
     Led { led: Led },
+    Gesture { g: FaceGesture },
+    Ping { ping: u32 },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FaceGesture {
+    Blink,
+    EarWiggle,
 }
 
 impl FaceCommand {
@@ -111,7 +129,7 @@ impl Mood {
         let (led, e, i) = match self {
             Self::Offline => (Led::Idle, Expression::Sleepy, 0.5),
             Self::Idle => (Led::Idle, Expression::Neutral, 0.5),
-            Self::Listening => (Led::Listening, Expression::Listening, 0.8),
+            Self::Listening => (Led::Listening, Expression::Curious, 0.8),
             Self::Thinking => (Led::Thinking, Expression::Thinking, 0.6),
             Self::Speaking => (Led::Speaking, Expression::Happy, 0.7),
             Self::Muted => (Led::Muted, Expression::Neutral, 0.3),
@@ -180,10 +198,13 @@ pub fn mood(s: Signals) -> Mood {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Target {
     mood: Mood,
     flash: Option<(Mood, Instant)>,
+    expression: Option<(Expression, f32, Instant)>,
+    gaze: Option<[f32; 2]>,
+    qr: Option<Arc<[u8]>>,
 }
 
 impl Target {
@@ -199,15 +220,88 @@ impl Target {
 #[derive(Clone)]
 pub struct Face {
     target: watch::Sender<Target>,
+    impulses: mpsc::Sender<(Instant, FaceGesture)>,
+}
+
+pub struct FaceRx {
+    state: watch::Receiver<Target>,
+    impulses: mpsc::Receiver<(Instant, FaceGesture)>,
 }
 
 impl Face {
-    pub fn new() -> (Self, watch::Receiver<Target>) {
+    pub fn new() -> (Self, FaceRx) {
         let (target, rx) = watch::channel(Target {
             mood: Mood::Offline,
             flash: None,
+            expression: None,
+            gaze: None,
+            qr: None,
         });
-        (Self { target }, rx)
+        let (tx, impulses) = mpsc::channel(4);
+        (
+            Self {
+                target,
+                impulses: tx,
+            },
+            FaceRx {
+                state: rx,
+                impulses,
+            },
+        )
+    }
+
+    /// Board overrides never replace the controller-owned chest LED.
+    pub fn express(&self, emotion: Expression, intensity: f32) {
+        if intensity.is_finite() {
+            self.target.send_modify(|s| {
+                s.expression = Some((
+                    emotion,
+                    intensity.clamp(0., 1.),
+                    Instant::now() + Duration::from_secs(4),
+                ))
+            });
+        }
+    }
+    pub fn gaze(&self, x: f32, y: f32) {
+        if x.is_finite() && y.is_finite() {
+            let gaze = Some([x.clamp(-1., 1.), y.clamp(-1., 1.)]);
+            self.target.send_if_modified(|s| {
+                let changed = s.gaze != gaze;
+                s.gaze = gaze;
+                changed
+            });
+        }
+    }
+    pub fn gesture(&self, g: FaceGesture) {
+        let _ = self.impulses.try_send((Instant::now(), g));
+    }
+    /// Retain the desired display across USB re-enumeration. Encoded QR lines may
+    /// contain network credentials and are deliberately absent from diagnostics.
+    pub fn qr(&self, left: &str, right: &str, width: u16) -> io::Result<()> {
+        if [left, right]
+            .iter()
+            .any(|s| s.len() > 255 || s.chars().any(char::is_control))
+        {
+            return Err(io::Error::other("invalid eye QR text"));
+        }
+        let frame = if left.is_empty() && right.is_empty() {
+            None
+        } else {
+            let mut bytes = serde_json::to_vec(
+                &serde_json::json!({"qr":[left,right],"w":width.clamp(60,200)}),
+            )?;
+            if bytes.len() > 560 {
+                return Err(io::Error::other("eye QR command too long"));
+            }
+            bytes.push(b'\n');
+            Some(Arc::from(bytes))
+        };
+        self.target.send_if_modified(|s| {
+            let changed = s.qr != frame;
+            s.qr = frame;
+            changed
+        });
+        Ok(())
     }
 
     /// Set the steady mood. Listening, speaking and muted end any flash, so an
@@ -217,6 +311,14 @@ impl Face {
         self.target.send_if_modified(|t| {
             let cleared = mood.active() && t.flash.take().is_some();
             let changed = t.mood != mood || cleared;
+            if changed
+                && matches!(
+                    mood,
+                    Mood::Muted | Mood::Listening | Mood::Offline | Mood::Sorry | Mood::Confirming
+                )
+            {
+                t.expression = None;
+            }
             t.mood = mood;
             changed
         });
@@ -241,7 +343,7 @@ impl Face {
 
     #[cfg(test)]
     pub fn flashing(&self) -> Option<Mood> {
-        let target = *self.target.borrow();
+        let target = self.target.borrow();
         target.flash.map(|(mood, _)| mood)
     }
 }
@@ -249,6 +351,12 @@ impl Face {
 pub trait LineSink: Send {
     /// Write one frame: one or more complete lines.
     fn write_frame(&mut self, frame: &[u8]) -> impl Future<Output = io::Result<()>> + Send;
+    fn read_status(&mut self, _buf: &mut [u8]) -> impl Future<Output = io::Result<usize>> + Send {
+        std::future::pending()
+    }
+    fn has_board(&self) -> bool {
+        false
+    }
 }
 
 pub trait Opener: Send + 'static {
@@ -264,7 +372,7 @@ pub enum DeviceSink {
     /// A tty or FIFO: non-blocking writes driven by readiness. Tokio's pipe
     /// sender is only `write(2)` on a registered non-blocking descriptor, so it
     /// serves a tty as well as a FIFO.
-    Poll(pipe::Sender),
+    Poll((pipe::Sender, Option<pipe::Receiver>)),
     /// A regular file (debugging, tests): writes never wait.
     File(File),
 }
@@ -286,7 +394,15 @@ impl Opener for Device {
         if file.metadata()?.is_file() {
             return Ok(DeviceSink::File(file));
         }
-        Ok(DeviceSink::Poll(pipe::Sender::from_file_unchecked(file)?))
+        let reader = if nix::unistd::isatty(&file)? {
+            Some(pipe::Receiver::from_file_unchecked(file.try_clone()?)?)
+        } else {
+            None
+        };
+        Ok(DeviceSink::Poll((
+            pipe::Sender::from_file_unchecked(file)?,
+            reader,
+        )))
     }
 }
 
@@ -294,6 +410,7 @@ impl Opener for Device {
 /// carrier, then apply the line settings when the file is a tty.
 fn open_serial(path: &Path) -> io::Result<File> {
     let file = std::fs::OpenOptions::new()
+        .read(true)
         .write(true)
         .custom_flags(nix::libc::O_NOCTTY | nix::libc::O_NONBLOCK)
         .open(path)?;
@@ -326,78 +443,199 @@ impl LineSink for DeviceSink {
     async fn write_frame(&mut self, frame: &[u8]) -> io::Result<()> {
         match self {
             Self::File(file) => file.write_all(frame),
-            Self::Poll(port) => port.write_all(frame).await,
+            Self::Poll((port, _)) => port.write_all(frame).await,
         }
+    }
+    async fn read_status(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if let Self::Poll((_, Some(port))) = self {
+            port.read(buf).await
+        } else {
+            std::future::pending().await
+        }
+    }
+    fn has_board(&self) -> bool {
+        matches!(self, Self::Poll((_, Some(_))))
     }
 }
 
 /// Drive the face until every `Face` handle is dropped.
-pub async fn run<O: Opener>(mut target: watch::Receiver<Target>, mut opener: O) {
-    let mut sink: Option<O::Sink> = None;
-    let mut shown: Option<Mood> = None;
-    let mut next_beat = Instant::now();
-    let mut reopen_at = Instant::now();
+pub async fn run<O: Opener>(
+    FaceRx {
+        state: mut target,
+        mut impulses,
+    }: FaceRx,
+    mut opener: O,
+) {
     let mut warned = false;
     loop {
-        let wanted = *target.borrow_and_update();
-        let now = Instant::now();
-        let mood = wanted.current(now);
-        if shown != Some(mood) || now >= next_beat {
-            if sink.is_none() && now >= reopen_at {
-                match opener.open().await {
-                    Ok(fresh) => {
-                        sink = Some(fresh);
-                        warned = false;
-                        tracing::info!("face device open");
-                    }
-                    Err(error) => {
-                        if !warned {
-                            tracing::warn!(%error, "face device unavailable; retrying");
-                            warned = true;
-                        }
-                        let wait = if error.kind() == io::ErrorKind::TimedOut {
-                            STALLED_OPEN_RETRY
-                        } else {
-                            REOPEN_DELAY
-                        };
-                        reopen_at = Instant::now() + wait;
-                    }
+        let wait = match opener.open().await {
+            Ok(mut port) => {
+                tracing::info!("face device open");
+                warned = false;
+                if let Err(error) = drive(&mut port, &mut target, &mut impulses).await {
+                    tracing::warn!(%error, "face link lost; reopening");
+                } else {
+                    return;
+                }
+                REOPEN_DELAY
+            }
+            Err(error) => {
+                if !warned {
+                    tracing::warn!(%error, "face device unavailable; retrying");
+                    warned = true;
+                }
+                if error.kind() == io::ErrorKind::TimedOut {
+                    STALLED_OPEN_RETRY
+                } else {
+                    REOPEN_DELAY
                 }
             }
-            match sink.as_mut() {
-                Some(device) => match send(device, mood).await {
-                    Ok(()) => {
-                        shown = Some(mood);
-                        next_beat = Instant::now() + HEARTBEAT;
-                    }
-                    Err(error) => {
-                        tracing::warn!(%error, "face write failed; reopening");
-                        sink = None;
-                        shown = None;
-                        reopen_at = Instant::now() + REOPEN_DELAY;
-                        next_beat = reopen_at;
-                    }
-                },
-                None => next_beat = reopen_at,
+        };
+        let deadline = Instant::now() + wait;
+        loop {
+            tokio::select! {
+                ()=tokio::time::sleep_until(deadline)=>break,
+                changed=target.changed()=>if changed.is_err(){return},
+                gesture=impulses.recv()=>if gesture.is_none(){return},
             }
         }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct Display {
+    mood: Mood,
+    expression: Option<(Expression, f32)>,
+    gaze: Option<[f32; 2]>,
+}
+
+impl Display {
+    fn append(self, previous: Option<Self>, beat: bool, frame: &mut Vec<u8>) {
+        let base =
+            beat || previous.is_none_or(|p| p.mood != self.mood || p.expression != self.expression);
+        if base && self.expression.is_none() && self.gaze.is_none() {
+            frame.extend_from_slice(self.mood.frame());
+            return;
+        }
+        if base {
+            for command in self.mood.commands() {
+                match command {
+                    FaceCommand::Look { .. } if self.gaze.is_some() => {}
+                    FaceCommand::Expression { .. } if self.expression.is_some() => {}
+                    _ => frame.extend(command.line()),
+                }
+            }
+            if let Some((e, i)) = self.expression {
+                frame.extend(FaceCommand::Expression { e, i }.line());
+            }
+        }
+        if let Some(look) = self.gaze
+            && (base || previous.is_none_or(|p| p.gaze != self.gaze))
+        {
+            frame.extend(FaceCommand::Look { look }.line());
+        }
+    }
+}
+
+async fn drive<S: LineSink>(
+    device: &mut S,
+    target: &mut watch::Receiver<Target>,
+    impulses: &mut mpsc::Receiver<(Instant, FaceGesture)>,
+) -> io::Result<()> {
+    let mut shown = None;
+    let mut shown_qr = None;
+    let mut status = StatusLines::default();
+    let mut buf = [0; 512];
+    let mut next_beat = Instant::now();
+    let mut frame = Vec::with_capacity(256);
+    loop {
+        let wanted = target.borrow_and_update().clone();
+        let now = Instant::now();
+        let mood = wanted.current(now);
+        let expression = wanted.expression.filter(|(_, _, until)| *until > now);
+        let desired = Display {
+            mood,
+            expression: expression.map(|(e, i, _)| (e, i)),
+            gaze: wanted.gaze,
+        };
+        frame.clear();
+        desired.append(shown, now >= next_beat, &mut frame);
+        if shown_qr != wanted.qr || (shown.is_none() && device.has_board()) {
+            frame.extend_from_slice(wanted.qr.as_deref().unwrap_or(b"{\"qr\":[]}\n"));
+        }
+        if shown.is_none() && device.has_board() {
+            frame.extend(FaceCommand::Ping { ping: 0 }.line());
+        }
+        if !frame.is_empty() {
+            send(device, &frame).await?;
+        }
+        if now >= next_beat {
+            next_beat = Instant::now() + HEARTBEAT;
+        }
+        shown = Some(desired);
+        shown_qr = wanted.qr;
         let mut wake = next_beat;
+        if let Some((_, _, until)) = expression {
+            wake = wake.min(until);
+        }
         if let Some((_, until)) = wanted.flash
             && until > Instant::now()
         {
             wake = wake.min(until);
         }
         tokio::select! {
-            changed = target.changed() => if changed.is_err() { return },
+            changed = target.changed() => if changed.is_err() { return Ok(()) },
             () = tokio::time::sleep_until(wake) => {},
+            event = impulses.recv() => {
+                let Some((at,g))=event else {return Ok(())};
+                if at.elapsed()<WRITE_DEADLINE {send(device,&FaceCommand::Gesture{g}.line()).await?;}
+            },
+            result = device.read_status(&mut buf) => {
+                let n=result?;
+                if n==0{return Err(io::ErrorKind::UnexpectedEof.into());}
+                status.push(&buf[..n]);
+            },
         }
     }
 }
 
-async fn send<S: LineSink>(sink: &mut S, mood: Mood) -> io::Result<()> {
-    tokio::time::timeout(WRITE_DEADLINE, sink.write_frame(mood.frame()))
+async fn send<S: LineSink>(sink: &mut S, frame: &[u8]) -> io::Result<()> {
+    tokio::time::timeout(WRITE_DEADLINE, sink.write_frame(frame))
         .await
         .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "face write stalled"))?
+}
+
+/// Boot ROM noise and truncated lines are normal after a USB reconnect. Never
+/// log raw board data: a misconfigured serial adapter could echo Wi-Fi QR text.
+#[derive(Default)]
+struct StatusLines {
+    line: Vec<u8>,
+    overflow: bool,
+}
+impl StatusLines {
+    fn push(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            match b {
+                b'\n' => {
+                    if !self.overflow
+                        && let Ok(v) = serde_json::from_slice::<serde_json::Value>(&self.line)
+                    {
+                        if v["hb"].is_u64() {
+                            tracing::debug!(fps = v["fps"].as_u64(), "face heartbeat");
+                        } else if v["hello"].is_string() {
+                            tracing::info!(version = v["v"].as_u64(), "face hello");
+                        } else if v["err"].is_string() {
+                            tracing::warn!("face board rejected command");
+                        }
+                    }
+                    self.line.clear();
+                    self.overflow = false;
+                }
+                _ if self.line.len() < 512 => self.line.push(b),
+                _ => self.overflow = true,
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -542,6 +780,53 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn heartbeat_refreshes_expression_but_never_replays_gestures_or_qr() {
+        let log = Log::default();
+        let (face, rx) = Face::new();
+        let task = tokio::spawn(run(
+            rx,
+            Memory {
+                log: log.clone(),
+                fail_opens: 0,
+                fail_writes: 0,
+            },
+        ));
+        face.set(Mood::Speaking);
+        face.express(Expression::Love, 1.5);
+        face.gaze(-2., 0.25);
+        face.gesture(FaceGesture::EarWiggle);
+        face.qr("left", "right", 132).unwrap();
+        assert!(face.qr(&"x".repeat(256), "", 132).is_err());
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        face.qr("", "", 132).unwrap();
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        let wire = lines(&log).concat();
+        assert_eq!(wire.matches("ear_wiggle").count(), 1);
+        assert_eq!(wire.matches("\"qr\":[\"left\",\"right\"]").count(), 1);
+        assert!(wire.contains("\"qr\":[]"));
+        assert!(wire.contains("\"look\":[-1.0,0.25]"));
+        assert!(wire.contains("\"e\":\"love\",\"i\":1.0"));
+        assert!(wire.rfind("happy") > wire.rfind("love"));
+        drop(face);
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn reads_board_status_from_the_same_raw_tty() {
+        let (pair, path) = pty();
+        let mut port = Device(path).open().await.unwrap();
+        let mut master = File::from(pair.master);
+        let hb = b"{\"hb\":123,\"fps\":22}\n";
+        master.write_all(hb).unwrap();
+        let mut bytes = [0; 128];
+        let n = tokio::time::timeout(Duration::from_secs(1), port.read_status(&mut bytes))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&bytes[..n], hb);
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn heartbeat_keeps_the_esp32_out_of_its_5s_fallback() {
         let log = Log::default();
         let (face, rx) = Face::new();
@@ -587,7 +872,7 @@ mod tests {
             lines(&log),
             [
                 "{\"led\":\"listening\"}\n",
-                "{\"e\":\"listening\",\"i\":0.8}\n",
+                "{\"e\":\"curious\",\"i\":0.8}\n",
                 "{\"look\":[0.0,0.0]}\n"
             ]
         );
