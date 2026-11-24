@@ -104,7 +104,7 @@ ProtectProc=invisible
 # over AF_UNIX.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 SystemCallArchitectures=native
-SystemCallFilter=@system-service ~@privileged
+SystemCallFilter=@system-service ~@privileged @chown
 SystemCallErrorNumber=EPERM
 # Not set, on purpose: PrivateDevices/DevicePolicy=closed (ALSA and the
 # hotplugged CDC-ACM face need /dev/snd and /dev/ttyACM*), ProcSubset=pid
