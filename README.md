@@ -160,7 +160,7 @@ Every variable is described in [.env.example](.env.example). To try a robot with
 
 Follow **[DEPLOYMENT.md](DEPLOYMENT.md)** from top to bottom. It covers the hardware and wiring, face firmware, getting the ARM64 binary (including the exact soaked ELF), models and checksums, systemd install, enrollment and the OIDC claim, the bring-up checklist with pass thresholds, troubleshooting and rollback.
 
-Before you start, read [DEPLOYMENT.md §0](DEPLOYMENT.md#0-what-you-need-before-you-start). It lists what comes from your butty checkout (face firmware, `hey_pip.onnx`, hardware reference), what you create yourself (an OpenRouter key at <https://openrouter.ai/keys>, in `AI_API_KEY`), what Gage must get from Brittian (OIDC client credentials; server hosting, domain and TLS access; a Brave Search key if Brittian holds one), and the open "Check with Brittian" items.
+Before you start, read [DEPLOYMENT.md §0](DEPLOYMENT.md#0-what-you-need-before-you-start). It lists what comes from your butty checkout (face firmware, `hey_pip.onnx`, hardware reference), what you create yourself (an OpenRouter key at <https://openrouter.ai/keys>, in `AI_API_KEY`), the one decision to make with Brittian (run your own backend, or reuse his), optional OIDC owner sign-in in three steps, and the "Confirm on your Pip" checks for things your build decides (mic, serial paths, servo IDs, audio card names, camera orientation).
 
 ## More
 

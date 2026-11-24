@@ -40,7 +40,7 @@
 ### Docs
 
 - Release qualification gates (`docs/testing-pip-release.md`), performance procedure (`docs/performance-pip.md`), provenance (`NOTICE.md`) and robot-client updates. The e2e latency baseline was republished at `82e8d5b`. (`5c197de`, `0d73c26`, `d4ef544`)
-- Handoff docs after `d4ef544` (docs only): the README front door and butty comparison, DEPLOYMENT.md (hardware reference, binary choice, model pins including butty's `hey_pip.onnx`, check items), AGENTS.md commands, NOTICE.md provenance, the [docs index](docs/README.md) and this changelog.
+- Handoff docs after `d4ef544` (docs only): the README front door and butty comparison, DEPLOYMENT.md (hardware reference, binary choice, model pins including butty's `hey_pip.onnx`, "Confirm on your Pip" checks), AGENTS.md commands, NOTICE.md provenance, the [docs index](docs/README.md) and this changelog.
 
 ## Validation status
 
