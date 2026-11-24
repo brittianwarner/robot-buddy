@@ -50,8 +50,8 @@ An animated architecture walkthrough and the full soak report exist outside this
 
 robot-buddy's code fixes what it expects; your butty build fixes what is fitted. Where they could differ, check your robot before you rely on it. Each item says how. Numbers in brackets in the hardware table point here.
 
-1. **Pi model and RAM.** Any Raspberry Pi 5 works; butty's own docs say 8 GB (`SPEC.md`) and 4 GB (`SHOPPING.md`). The robot service peaked at 185.9 MiB (process) and 207.6 MiB (with sampled children) over the 30-minute soak, and its systemd budget is 1 GiB, so either fits. Check: `free -h`.
-2. **Microphone.** The robot needs a USB capture device that delivers 16 kHz S16_LE. butty names two models: reSpeaker Flex XVF3800 (`SPEC.md`, `cad/params.py`) and reSpeaker Lite (`SHOPPING.md`, `brain/README.md`). Both present 2 channels with the processed beam on channel 0 (butty `brain/config.yaml`). Check with the service stopped: `arecord -L`, then the capture command in §4. Set `BUDDY_LISTEN_DEVICE`, `BUDDY_LISTEN_CHANNELS=2` and `BUDDY_LISTEN_CHANNEL=0` (try `1` only if channel 0 is not the processed beam).
+1. **Pi model and RAM.** The spec part is a Raspberry Pi 5, **8 GB** (butty `SPEC.md`). The robot service peaked at 185.9 MiB (process) and 207.6 MiB (with sampled children) over the 30-minute soak, and its systemd budget is 1 GiB. butty's own docs also mention a 4 GB Pi 5; that fits the same budget. Check: `free -h`.
+2. **Microphone.** The spec part is a Seeed **reSpeaker Flex (XVF3800)**, USB (butty `SPEC.md`, `cad/params.py`). butty `brain/config.yaml` gives its layout: channel 0 is the processed beam, channel 1 the ASR beam. robot-buddy captures 16 kHz S16_LE through `arecord` with 1 to 8 channels and keeps the one you pick (`apps/robot/src/listen`). Check with the service stopped: `arecord -L`, then the capture command in §4. Set `BUDDY_LISTEN_DEVICE`, `BUDDY_LISTEN_CHANNELS=2` and `BUDDY_LISTEN_CHANNEL=0`. butty's docs also mention a reSpeaker Lite (`brain/README.md`); it works with robot-buddy if it captures at 16 kHz S16_LE, with `BUDDY_LISTEN_CHANNELS` and `BUDDY_LISTEN_CHANNEL` set to its own layout.
 3. **Operating system.** **Default:** Raspberry Pi OS (64-bit) **Bookworm**, as in Brittian's spec sheet and butty `brain/README.md`, with the native full build on the Pi (§2). That binary passed the ARM64 matrix but not the soak. **Alternative:** Trixie and the soaked ELF (§2), which is the exact binary that passed the soak but moves off the spec's OS. The soaked ELF does not run on Bookworm. Check: `cat /etc/os-release`.
 4. **Neck servo IDs and limits.** robot-buddy has no default calibration: you write a per-robot `neck.json` in raw steps (§4). butty `brain/config.yaml` uses IDs yaw `1`, pitch `2`, roll `3` at 1 Mbaud (yaw and pitch inverted, roll centre `2107`); butty's yaw centre shift (about 228 steps) lives in an untracked `config.local.yaml`. Check: `robot-buddy-robot servo ping`, `read` and `verify` in §4 (it has no ID-assignment command; §4 says how to set IDs); measure your own limits, never copy another robot's.
 5. **Serial paths.** robot-buddy does not auto-detect. Use the two distinct names under `/dev/serial/by-id/` (face board vendor `303a`, servo adapter `1a86`), or butty's udev names `/dev/pip-face` and `/dev/pip-servos` if that rule is installed. Check: `ls -l /dev/serial/by-id/`.
@@ -68,7 +68,7 @@ If your own rebuild of the soaked recipe gives a SHA-256 other than the one in �
 
 ### Hardware reference
 
-This table is a wiring and verification reference. Sources: Brittian's spec sheet, butty `SPEC.md`, `SHOPPING.md` (part names only), `REV2.md`, `README.md`, `firmware/README.md`, `firmware/include/pins.h`, `brain/config.yaml`, `brain/README.md` and `cad/params.py`, all at `c0ca680`. Numbers in brackets refer to the "Confirm on your Pip" items above.
+This table is a wiring and verification reference. Sources: Brittian's spec sheet, butty `SPEC.md`, `REV2.md`, `README.md`, `firmware/README.md`, `firmware/include/pins.h`, `brain/config.yaml`, `brain/README.md` and `cad/params.py`, all at `c0ca680`. Numbers in brackets refer to the "Confirm on your Pip" items above.
 
 | Area | Part | Connects to, and the robot-buddy setting |
 | --- | --- | --- |
@@ -79,9 +79,9 @@ This table is a wiring and verification reference. Sources: Brittian's spec shee
 | Ears | 2 × MG90S micro servos | Signal from ESP32 GPIO 4 (left) and 5 (right), 50 Hz. Power from buck B 5 V, never the ESP32 5 V pin |
 | Chest light | WS2812B 12-LED ring | Data from ESP32 GPIO 6 through 330 Ω, 5 V from buck B, 470–1000 µF across 5 V/GND. Modes `idle`, `listening` (orange), `thinking`, `speaking`, `muted`; robot-buddy drives the same five |
 | Camera | **OV5647** 160° wide-angle CSI, in the visor between the eyes, with a 22→15-pin Pi 5 camera cable | Pi CSI port. `rpicam-vid`, `BUDDY_VISION` [7] |
-| Microphone | Seeed **reSpeaker**, USB: Flex (XVF3800) in the spec, Lite in `SHOPPING.md` [2] | Pi USB, 16 kHz S16_LE. `BUDDY_LISTEN_DEVICE`, `BUDDY_LISTEN_CHANNELS`, `BUDDY_LISTEN_CHANNEL` [6] |
+| Microphone | Seeed **reSpeaker Flex (XVF3800)**, USB [2] | Pi USB, 16 kHz S16_LE, 2 channels: 0 processed beam, 1 ASR beam. `BUDDY_LISTEN_DEVICE`, `BUDDY_LISTEN_CHANNELS=2`, `BUDDY_LISTEN_CHANNEL=0` [6] |
 | Speaker | **MAX98357A** I2S amp and a 3 W speaker | Pi GPIO 18 (BCLK), 19 (LRCLK), 21 (DIN), SD tied to 3.3 V. `dtoverlay=max98357a` [10]. `BUDDY_ALSA_DEVICE` [6] |
-| Power | 12 V 5 A supply into one 5.5 × 2.1 mm barrel jack in the base; 2 × 12 V→5 V 5 A **plain** USB-C buck converters (not USB-PD) | Wiring below. butty has not designed a power switch; any panel switch rated for 12 V 5 A works |
+| Power | 12 V 5 A supply into one 5.5 × 2.1 mm barrel jack in the base; 2 × 12 V→5 V 5 A **plain** USB-C buck converters (not USB-PD) | Wiring below. Keep a 12 V cut-off within reach |
 | Structure | Parametric CAD in Python (build123d), printed on a Bambu P1S | Matte PLA shell, PETG neck yokes and eye pods |
 
 **Face board pin map** (butty `firmware/include/pins.h` at `c0ca680`):
@@ -106,10 +106,12 @@ This table is a wiring and verification reference. Sources: Brittian's spec shee
           └── servo bus adapter (12 V) ── 3 × STS3215
 Pi USB ── ESP32-S3 native USB (rev 1: a cut USB cable soldered to 5V, GND, GPIO19 D-, GPIO20 D+)
 GND: buck A, buck B, ESP32, ring and ear servos all share ground
+Servo ground jumper: ESP32 top-right GND pin ── head's ear-servo ground splice (both servo browns + buck B GND)
 ```
 
+- The servo ground jumper is a short wire that gives the ear servos' signals a short ground reference (butty `firmware/README.md`, "Servo ground jumper").
 - Never connect the Pi or ESP32 USB 5 V to buck B. Never power the ear servos from the ESP32's 5 V pin: a stall pulls about 700 mA and resets the board.
-- Keep a way to cut the 12 V servo power within reach. Software cannot confirm torque-off after a power loss, a broken cable or a killed process.
+- Keep a 12 V cut-off within reach. Software cannot confirm torque-off after a power loss, a broken cable or a killed process.
 - Rev-1 fit issues, including the head hitting a stop at about +21.5° pitch-up (butty's software limit is +20°), are in butty `REV2.md`. Measure your own build's limits (§4).
 
 ## 1. Bring up the backend and issue one device identity
@@ -287,7 +289,7 @@ apt-get install rpicam-apps-lite
 # apt-get install libopencv-core410 libopencv-imgproc410 libopencv-imgcodecs410 libopencv-dnn410 libopencv-objdetect410
 ```
 
-**Power supply and `/boot/firmware/config.txt`:** Pip's reference power topology feeds a 12 V 5 A supply into three branches with a **shared ground** across every rail: (1) Buck A (12 V → 5 V 5 A plain USB-C buck, **not** USB-PD) dedicated to the Pi 5 alone (must actually hold 5 A at ~5.1 V); (2) Buck B (12 V → 5 V 5 A) for the MG90S ear servos and WS2812B chest ring (never join the Pi USB 5 V rail to Buck B); and (3) 12 V direct to the STS3215 serial bus servo adapter. Keep the 12 V servo power switch reachable: software cannot confirm torque-off after lost power, a broken cable or a killed process.
+**Power supply and `/boot/firmware/config.txt`:** Pip's reference power topology feeds a 12 V 5 A supply into three branches with a **shared ground** across every rail: (1) Buck A (12 V → 5 V 5 A plain USB-C buck, **not** USB-PD) dedicated to the Pi 5 alone (must actually hold 5 A at ~5.1 V); (2) Buck B (12 V → 5 V 5 A) for the MG90S ear servos and WS2812B chest ring (never join the Pi USB 5 V rail to Buck B); and (3) 12 V direct to the STS3215 serial bus servo adapter. Keep a 12 V cut-off within reach: software cannot confirm torque-off after lost power, a broken cable or a killed process.
 
 Because a plain 5 V USB-C buck does not negotiate USB-PD 5 A, the Pi 5 defaults to capping total USB downstream current at 600 mA across the ESP32-S3, reSpeaker, and servo adapter. Edit `/boot/firmware/config.txt` and reboot. These lines are the same as butty `brain/README.md` ("Raspberry Pi OS setup", step 1); if the Pi already ran butty's brain they may be there already ("Confirm on your Pip" item 10):
 
@@ -363,7 +365,7 @@ systemctl status --no-pager robot-buddy
 stat -c '%U:%G %a' /run/robot-buddy/control.sock   # robot-buddy:pip-control 660
 ```
 
-When no working network is available, join the printed per-device setup SSID with its password, open `http://10.42.0.1` and choose the home network. Do not enable a wait-online dependency: this unit provides setup when offline. Once connected, open the claim URL on the optional loopback panel (`127.0.0.1:8090`) or obtain it locally with `runuser -u robot-buddy -- robot-buddy-robot claim-url`. Complete OIDC sign-in and confirm the **matching six digits** on the robot's panel or through speech. Treat setup cards, claim URLs and device journals as private. Preserve the printed card even if the eyes display setup QR codes.
+When no working network is available, join the printed per-device setup SSID with its password, open `http://10.42.0.1` and choose the home network. Do not enable a wait-online dependency: this unit provides setup when offline. Once connected, print the claim URL on the Pi with `runuser -u robot-buddy -- robot-buddy-robot claim-url` and open it on your phone. The claim panel on `127.0.0.1:8090` also shows it, but only on the Pi's loopback; from another computer, tunnel it first with `ssh -N -L 127.0.0.1:8090:127.0.0.1:8090 <user>@<pip-host>` and open `http://127.0.0.1:8090/`. Complete OIDC sign-in and confirm the **matching six digits** on the robot's panel or through speech. Treat setup cards, claim URLs and device journals as private. Preserve the printed card even if the eyes display setup QR codes.
 
 ## 4. Enable hardware one subsystem at a time
 
@@ -387,7 +389,7 @@ The base unit has a 256 MiB budget and 128 tasks. The drop-in adds `video` and s
   To flash it from a Mac or the Pi:
 
   ```sh
-  pip install platformio            # or: uv tool install platformio (butty firmware/README.md)
+  pipx install platformio           # or: uv tool install platformio. Plain pip install fails on Bookworm (PEP 668)
   cd <butty checkout>/firmware
   pio run                           # build the default pip-face env
   pio run -t upload                 # flash over the board's native USB port
@@ -486,8 +488,8 @@ Check every file's SHA-256 (`sha256sum`) before you copy it to `/opt/robot-buddy
 | `embedding_model.onnx` | `dscripka/openWakeWord` release `v0.5.1` | 1,326,578 | `70d164290c1d095d1d4ee149bc5e00543250a7316b59f31d056cff7bd3075c1f` |
 | `face_detection_yunet_2023mar.onnx` | `opencv/opencv_zoo` (`48b10fa505aeb51fbd127fc60a5c660040e823b7`) | 232,589 | `8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4` |
 | `face_recognition_sface_2021dec.onnx` | `opencv/opencv_zoo` (`48b10fa505aeb51fbd127fc60a5c660040e823b7`) | 38,696,353 | `0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79` |
-| `hey_pip.onnx` | butty `brain/models/wake/hey_pip.onnx`, butty's custom-trained openWakeWord classifier, **as of butty `c0ca680`** (not in this repo; "Confirm on your Pip" item 12) | 415,225 | `5986afeaa8c7d406aa19dd871703ba792ca611e689676dc37273a5ffb80164ee` |
-| Piper voice `.onnx` + `.onnx.json` | Not pinned. robot-buddy names no voice, and butty names three ("Confirm on your Pip" item 11). No voice files are in butty at `c0ca680` | | None. Record the checksum of the voice you install |
+| `hey_pip.onnx` | butty `brain/models/wake/hey_pip.onnx`, butty's custom-trained openWakeWord classifier, **as of butty `c0ca680`** (not in this repo; see [From butty](#from-butty)) | 415,225 | `5986afeaa8c7d406aa19dd871703ba792ca611e689676dc37273a5ffb80164ee` |
+| Piper voice `.onnx` + `.onnx.json` | Not pinned. butty uses `en_US-amy-medium` (`brain/config.yaml`); no voice files are in butty at `c0ca680` | | None. Record the checksum of the voice you install |
 
 The wake directory (`BUDDY_LISTEN_WAKE_DIR`) must contain these three file names: `melspectrogram.onnx`, `embedding_model.onnx` and `hey_pip.onnx`.
 

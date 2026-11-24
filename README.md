@@ -91,7 +91,7 @@ Both run the neck at 50 Hz, show Wi-Fi setup QR codes on the eyes when offline, 
 | `apps/server/` | `robot-buddy-server`: `init`/`provision` CLI, enrollment, OIDC claims, `/v1/speech`, optional `/lab`. Spawns the Rivet engine |
 | `crates/buddy/` | Shared crate: Bot/Conversation/Memory actors, Rig model and tools, wire protocol (`src/protocol.rs`), prompts |
 | `tooling/rust-workspace/` | The one Turborepo package that wraps the Cargo workspace tasks |
-| `infra/` | Pi systemd unit, `20-pip.conf` drop-in, polkit rule, `device.env.example`, Pi build image, ARM64 toolchain matrix and its evidence |
+| `infra/` | Pi systemd unit, `robot-buddy-pip.conf` drop-in (installed as `20-pip.conf`), polkit rule, `device.env.example`, Pi build image, ARM64 toolchain matrix and its evidence |
 | `scripts/` | `check-all.mjs` (full local gate), `pip-perf.py` and helpers for on-device acoustic benchmarks |
 | `tests/` | JS harnesses (integration, bench, reconnect, shutdown, lab, voice eval), the ARM64 E2E and soak harness (`pip-e2e/`), the systemd deployment rehearsal (`pip-deploy-qa/`) |
 | `docs/` | Architecture, testing, performance, security, research and plans. Start at [docs/README.md](docs/README.md) |
