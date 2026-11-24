@@ -1,12 +1,27 @@
 {
   "label": "robot-buddy-optimize",
-  "commit": "49daa35-dirty",
-  "date": "2026-11-24T06:00:55.603Z",
+  "commit": "ea2082a",
+  "git": {
+    "sha": "ea2082af7976749a5d6ddd13bff4b359006b6648",
+    "describe": "ea2082a",
+    "dirty": false
+  },
+  "date": "2026-11-24T09:59:15.261Z",
   "platform": "darwin arm64 Apple M4 Pro",
+  "machine": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "release": "25.6.0",
+    "cpu": "Apple M4 Pro",
+    "cpus": 14,
+    "memory_gb": 64,
+    "bun": "1.4.4",
+    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)"
+  },
   "load_average": [
-    28,
-    33.2,
-    35.5
+    3.1,
+    5.6,
+    5.7
   ],
   "rivetkit": "3.1.1",
   "turns": 20,
@@ -15,85 +30,81 @@
   "note": null,
   "failed_turns": 0,
   "cold_turn_ms": {
-    "speech_ready": 746.72119140625,
-    "speech_request": 749.044677734375,
-    "player_start": 167.614013671875,
-    "first_pcm": 1050.614501953125,
-    "completed": 903.107421875
+    "speech_ready": 540.75927734375,
+    "speech_request": 543.077880859375,
+    "player_start": 71.163818359375,
+    "first_pcm": 844.646484375,
+    "completed": 697.8388671875
   },
   "metrics_ms": {
     "submit_to_turn_started": {
       "n": 20,
-      "p50": 51.5,
-      "p95": 144.4,
-      "p99": 155.2,
-      "max": 155.2
+      "p50": 25,
+      "p95": 29.2,
+      "p99": 31.3,
+      "max": 31.3
     },
     "submit_to_first_text_delta": {
       "n": 20,
-      "p50": 339.7,
-      "p95": 483.1,
-      "p99": 581.6,
-      "max": 581.6
+      "p50": 298.4,
+      "p95": 307.7,
+      "p99": 309.5,
+      "max": 309.5
     },
     "submit_to_first_speech_ready": {
       "n": 20,
-      "p50": 438.5,
-      "p95": 530.4,
-      "p99": 590.6,
-      "max": 590.6
+      "p50": 382.9,
+      "p95": 407.1,
+      "p99": 407.2,
+      "max": 407.2
     },
     "submit_to_first_pcm_byte": {
       "n": 20,
-      "p50": 755.1,
-      "p95": 872.1,
-      "p99": 924.9,
-      "max": 924.9
+      "p50": 685.7,
+      "p95": 708.3,
+      "p99": 710.2,
+      "max": 710.2
     },
     "submit_to_turn_completed": {
       "n": 20,
-      "p50": 623.6,
-      "p95": 790.1,
-      "p99": 927.5,
-      "max": 927.5
+      "p50": 562.8,
+      "p95": 603.8,
+      "p99": 604.9,
+      "max": 604.9
     },
     "silence_gap_within_reply": {
-      "n": 14,
-      "p50": 37.7,
-      "p95": 104.7,
-      "p99": 104.7,
-      "max": 104.7,
+      "n": 0,
       "floor_ms": 20,
-      "turns_with_gap": 14,
-      "total_ms": 607
+      "turns_with_gap": 0,
+      "total_ms": 0
     },
     "max_silence_per_turn": {
       "n": 20,
-      "p50": 28.6,
-      "p95": 70.6,
-      "p99": 104.7,
-      "max": 104.7
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "max": 0
     },
     "barge_in_to_audio_closed": {
       "n": 5,
-      "p50": 3,
-      "p95": 12.3,
-      "p99": 12.3,
-      "max": 12.3
+      "p50": 1.3,
+      "p95": 1.7,
+      "p99": 1.7,
+      "max": 1.7
     },
     "barge_in_to_turn_terminal_event": {
       "n": 5,
-      "p50": 30.8,
-      "p95": 41.1,
-      "p99": 41.1,
-      "max": 41.1
+      "p50": 11.8,
+      "p95": 12,
+      "p99": 12,
+      "max": 12
     },
     "barge_in_to_provider_stream_closed": {
       "n": 5,
-      "p50": 19.5,
-      "p95": 24.1,
-      "p99": 24.1,
-      "max": 24.1
+      "p50": 11.7,
+      "p95": 11.9,
+      "p99": 11.9,
+      "max": 11.9
     }
   },
   "audio": {
@@ -104,32 +115,33 @@
   },
   "rss_kb": {
     "server": {
-      "after_warmup": 42672,
-      "max": 43280,
-      "end": 43264
+      "after_warmup": 41552,
+      "max": 42240,
+      "end": 42240
     },
     "engine": {
-      "after_warmup": 72144,
-      "max": 92544,
-      "end": 92544
+      "after_warmup": 69968,
+      "max": 89712,
+      "end": 89712
     }
   },
   "fake_speech_fell_behind_ms": {
-    "n": 121,
-    "p50": 29.6,
-    "p95": 56.1,
-    "p99": 69.3,
-    "max": 83
+    "n": 3,
+    "p50": 24.5,
+    "p95": 24.9,
+    "p99": 24.9,
+    "max": 24.9
+  },
+  "fake_model_fell_behind_ms": {
+    "n": 0
   },
   "per_turn": [
     {
       "kind": "turn.completed",
-      "ready": 491,
-      "pcm": 805,
-      "done": 713,
-      "gaps": [
-        41
-      ],
+      "ready": 376,
+      "pcm": 679,
+      "done": 593,
+      "gaps": [],
       "samples": [
         110880,
         110880
@@ -137,9 +149,9 @@
     },
     {
       "kind": "turn.completed",
-      "ready": 387,
-      "pcm": 690,
-      "done": 602,
+      "ready": 383,
+      "pcm": 686,
+      "done": 598,
       "gaps": [],
       "samples": [
         115200,
@@ -148,9 +160,141 @@
     },
     {
       "kind": "turn.completed",
-      "ready": 351,
-      "pcm": 654,
-      "done": 557,
+      "ready": 325,
+      "pcm": 628,
+      "done": 525,
+      "gaps": [],
+      "samples": [
+        82080,
+        82080
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 401,
+      "pcm": 703,
+      "done": 555,
+      "gaps": [],
+      "samples": [
+        93600,
+        93600
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 407,
+      "pcm": 708,
+      "done": 605,
+      "gaps": [],
+      "samples": [
+        110880,
+        110880
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 390,
+      "pcm": 691,
+      "done": 601,
+      "gaps": [],
+      "samples": [
+        115200,
+        115200
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 319,
+      "pcm": 620,
+      "done": 519,
+      "gaps": [],
+      "samples": [
+        82080,
+        82080
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 396,
+      "pcm": 699,
+      "done": 552,
+      "gaps": [],
+      "samples": [
+        93600,
+        93600
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 384,
+      "pcm": 685,
+      "done": 601,
+      "gaps": [],
+      "samples": [
+        110880,
+        110880
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 384,
+      "pcm": 687,
+      "done": 601,
+      "gaps": [],
+      "samples": [
+        115200,
+        115200
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 325,
+      "pcm": 627,
+      "done": 525,
+      "gaps": [],
+      "samples": [
+        82080,
+        82080
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 401,
+      "pcm": 701,
+      "done": 554,
+      "gaps": [],
+      "samples": [
+        93600,
+        93600
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 383,
+      "pcm": 686,
+      "done": 599,
+      "gaps": [],
+      "samples": [
+        110880,
+        110880
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 384,
+      "pcm": 686,
+      "done": 599,
+      "gaps": [],
+      "samples": [
+        115200,
+        115200
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 324,
+      "pcm": 626,
+      "done": 526,
       "gaps": [],
       "samples": [
         82080,
@@ -160,8 +304,8 @@
     {
       "kind": "turn.completed",
       "ready": 407,
-      "pcm": 711,
-      "done": 561,
+      "pcm": 710,
+      "done": 563,
       "gaps": [],
       "samples": [
         93600,
@@ -170,9 +314,9 @@
     },
     {
       "kind": "turn.completed",
-      "ready": 444,
-      "pcm": 755,
-      "done": 660,
+      "ready": 382,
+      "pcm": 684,
+      "done": 604,
       "gaps": [],
       "samples": [
         110880,
@@ -181,12 +325,10 @@
     },
     {
       "kind": "turn.completed",
-      "ready": 434,
-      "pcm": 741,
-      "done": 651,
-      "gaps": [
-        34
-      ],
+      "ready": 378,
+      "pcm": 680,
+      "done": 591,
+      "gaps": [],
       "samples": [
         115200,
         115200
@@ -194,61 +336,9 @@
     },
     {
       "kind": "turn.completed",
-      "ready": 477,
-      "pcm": 779,
-      "done": 790,
-      "gaps": [
-        34
-      ],
-      "samples": [
-        82080,
-        82080
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 530,
-      "pcm": 837,
-      "done": 684,
-      "gaps": [
-        29
-      ],
-      "samples": [
-        93600,
-        93600
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 591,
-      "pcm": 925,
-      "done": 750,
-      "gaps": [
-        38
-      ],
-      "samples": [
-        110880,
-        110880
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 400,
-      "pcm": 706,
-      "done": 622,
-      "gaps": [
-        27
-      ],
-      "samples": [
-        115200,
-        115200
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 353,
-      "pcm": 660,
-      "done": 566,
+      "ready": 320,
+      "pcm": 623,
+      "done": 521,
       "gaps": [],
       "samples": [
         82080,
@@ -257,114 +347,10 @@
     },
     {
       "kind": "turn.completed",
-      "ready": 518,
-      "pcm": 872,
-      "done": 751,
+      "ready": 399,
+      "pcm": 699,
+      "done": 555,
       "gaps": [],
-      "samples": [
-        93600,
-        93600
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 464,
-      "pcm": 769,
-      "done": 722,
-      "gaps": [
-        38
-      ],
-      "samples": [
-        110880,
-        110880
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 425,
-      "pcm": 744,
-      "done": 691,
-      "gaps": [
-        26
-      ],
-      "samples": [
-        115200,
-        115200
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 483,
-      "pcm": 784,
-      "done": 571,
-      "gaps": [
-        71
-      ],
-      "samples": [
-        82080,
-        82080
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 438,
-      "pcm": 761,
-      "done": 595,
-      "gaps": [
-        53
-      ],
-      "samples": [
-        93600,
-        93600
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 529,
-      "pcm": 869,
-      "done": 927,
-      "gaps": [
-        41
-      ],
-      "samples": [
-        110880,
-        110880
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 412,
-      "pcm": 723,
-      "done": 624,
-      "gaps": [
-        23
-      ],
-      "samples": [
-        115200,
-        115200
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 349,
-      "pcm": 653,
-      "done": 562,
-      "gaps": [
-        105
-      ],
-      "samples": [
-        82080,
-        82080
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 504,
-      "pcm": 814,
-      "done": 597,
-      "gaps": [
-        48
-      ],
       "samples": [
         93600,
         93600
@@ -374,37 +360,37 @@
   "per_barge": [
     {
       "end_kind": "turn.cancelled",
-      "audio_closed": 2.8,
-      "terminal_event": 28,
-      "provider_closed": 19,
+      "audio_closed": 1.3,
+      "terminal_event": 12,
+      "provider_closed": 12,
       "player_stopped": true
     },
     {
       "end_kind": "turn.cancelled",
-      "audio_closed": 2.3,
-      "terminal_event": 31,
-      "provider_closed": 16,
+      "audio_closed": 1.7,
+      "terminal_event": 10,
+      "provider_closed": 10,
       "player_stopped": true
     },
     {
       "end_kind": "turn.cancelled",
-      "audio_closed": 12.3,
-      "terminal_event": 41,
-      "provider_closed": 24,
+      "audio_closed": 1,
+      "terminal_event": 12,
+      "provider_closed": 12,
       "player_stopped": true
     },
     {
       "end_kind": "turn.cancelled",
-      "audio_closed": 4.9,
-      "terminal_event": 20,
-      "provider_closed": 20,
+      "audio_closed": 1.6,
+      "terminal_event": 12,
+      "provider_closed": 12,
       "player_stopped": true
     },
     {
       "end_kind": "turn.cancelled",
-      "audio_closed": 3,
-      "terminal_event": 37,
-      "provider_closed": 23,
+      "audio_closed": 1,
+      "terminal_event": 10,
+      "provider_closed": 10,
       "player_stopped": true
     }
   ],
@@ -416,6 +402,23 @@
   "failures": [],
   "leaks": [],
   "findings": {
-    "robot_sigterm_exit_ms": 105
+    "robot_sigterm_exit_ms": 51
+  },
+  "load_average_end": [
+    6.2,
+    5.4,
+    5.5
+  ],
+  "noise": {
+    "ok": true,
+    "reasons": [],
+    "load_per_cpu": 0.44,
+    "fake_late_frames": 3,
+    "fake_late_max_ms": 25,
+    "limits": {
+      "load_per_cpu": 0.5,
+      "fake_late_frames": 5,
+      "fake_late_max_ms": 50
+    }
   }
 }
