@@ -83,11 +83,11 @@ impl Gate {
 
     /// Waits for room in the pool, so the kernel backlog holds what is not yet accepted.
     async fn room(&self) -> OwnedSemaphorePermit {
-        self.total
-            .clone()
-            .acquire_owned()
-            .await
-            .expect("the connection semaphore is never closed")
+        match self.total.clone().acquire_owned().await {
+            Ok(permit) => permit,
+            // The semaphore is owned by `Gate` and never closed; park rather than panic.
+            Err(_) => std::future::pending().await,
+        }
     }
 
     /// The guarded connection, or `None` (and the stream closed) when its client already

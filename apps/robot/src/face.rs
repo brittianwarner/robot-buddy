@@ -147,7 +147,10 @@ impl Mood {
 
 /// Conversation facts the face is derived from.
 // Independent facts from separate sources; `mood` ranks them, so an enum would lose data.
-#[allow(clippy::struct_excessive_bools)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent facts from separate sources; mood ranks them"
+)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Signals {
     pub connected: bool,
@@ -722,7 +725,7 @@ mod tests {
         termios::tcsetattr(fd, SetArg::TCSANOW, &t).unwrap();
     }
 
-    #[allow(
+    #[expect(
         clippy::useless_conversion,
         reason = "cfgetospeed is a u32 on Apple targets and a BaudRate on Linux"
     )]

@@ -6,7 +6,7 @@
 //! `cargo test -p robot-buddy --test core_logs -- --ignored --nocapture`.
 #![cfg(feature = "server")]
 // The harness is shared with `actors.rs`; this binary uses only part of it.
-#[allow(dead_code)]
+#[expect(dead_code, reason = "shared integration harness module")]
 mod support;
 
 use anyhow::{Result, ensure};

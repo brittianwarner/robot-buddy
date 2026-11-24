@@ -63,12 +63,11 @@ impl axum::serve::Listener for Guarded {
     async fn accept(&mut self) -> (Connection, SocketAddr) {
         // Taken before `accept`, so a full house leaves new clients in the backlog
         // instead of accepting and dropping them.
-        let slot = self
-            .slots
-            .clone()
-            .acquire_owned()
-            .await
-            .expect("the slot semaphore is never closed");
+        let slot = match self.slots.clone().acquire_owned().await {
+            Ok(slot) => slot,
+            // The semaphore is owned by `Guarded` and never closed; park rather than panic.
+            Err(_) => std::future::pending().await,
+        };
         loop {
             match self.listener.accept().await {
                 Ok((stream, address)) => {

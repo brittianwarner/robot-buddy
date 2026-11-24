@@ -311,7 +311,7 @@ mod tests {
         let previous: VoiceConfig = serde_json::from_value(stored).unwrap();
         assert_eq!(previous.voice, Voice::Will);
         assert!(previous.is_factory_v1());
-        let mut changed = previous.clone();
+        let mut changed = previous;
         changed.synthesis.speed = 0.9;
         assert!(!changed.is_factory_v1());
         assert_eq!(catalog().as_array().unwrap().len(), 21);

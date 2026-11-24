@@ -930,7 +930,7 @@ mod tests {
         // that pipe means the player has exited.
         let (mut player_out, player_in) = std::io::pipe().unwrap();
         let player_in = Arc::new(std::sync::Mutex::new(Some(player_in)));
-        let take = player_in.clone();
+        let take = player_in;
         let factory: PlayerFactory = Arc::new(move |_| {
             let mut command = tokio::process::Command::new("sleep");
             let writer = take.lock().unwrap().take().expect("one player");

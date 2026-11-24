@@ -125,7 +125,7 @@ impl Bot {
     }
 }
 impl Handler<Call> for Bot {
-    #[allow(clippy::too_many_lines, reason = "one match arm per command")]
+    #[expect(clippy::too_many_lines, reason = "one match arm per command")]
     async fn handle(self: Arc<Self>, ctx: Ctx<Self>, call: Call) -> Result<Value> {
         let session = self.authorize(&ctx, &call.session, None).await?;
         match call.command {

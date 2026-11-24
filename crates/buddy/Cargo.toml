@@ -83,3 +83,4 @@ harness = false
 [[bench]]
 name = "history_sql"
 harness = false
+required-features = ["server"]
