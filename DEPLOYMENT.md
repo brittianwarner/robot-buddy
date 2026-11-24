@@ -370,9 +370,46 @@ The base unit has a 256 MiB budget and 128 tasks. The drop-in adds `video` and s
 
   On the Pi, **stop the service first** (`systemctl stop robot-buddy`) so it does not hold the CDC-ACM port open. Use the port labelled **USB** (native USB), not UART. If upload does not enter download mode, enter the ROM bootloader by hand (**hold `BOOT`, tap `RST`, release `BOOT`**), run `pio run -t upload` again, and tap `RST` afterwards if needed. If the eyes stay dark, butty's `firmware/README.md` lists the diagnostic envs (`pin-check`, `bitbang-test`, `screen-test`, `wire-check`, each flashed with `pio run -e <name> -t upload`). Ear centre and direction are compile-time values (`EAR_CENTER_US_L/R`, `EAR_DIR_L/R` in `include/pins.h`), calibrated with `{"e":"neutral","i":1}` and `{"e":"surprised","i":1}` from the monitor.
 * **Face on the Pi:** pick the board's path from `ls -l /dev/serial/by-id/` (Espressif USB vendor `303a`; butty's docs call it `/dev/ttyACM0`, "Confirm on your Pip" item 5) and set `BUDDY_FACE_SERIAL` to it. The client sets raw 115200 on every open. Check both eyes, the ring, ear movement and the heartbeat. Then unplug and replug the face and confirm it recovers.
-* **Neck:** the CH343/STS3215 adapter has a **different** serial path. If an adapter lacks a unique ID, use a stable USB topology path under `/dev/serial/by-path/`. With the service stopped and the head supported, give each servo a distinct ID in position mode, one servo on the bus at a time with 12 V on the adapter. STS3215s ship with ID 1. butty's convention is yaw 1, pitch 2, roll 3 (`brain/config.yaml`; "Confirm on your Pip" item 4). `robot-buddy-robot servo` has no ID-assignment command, so use the Feetech vendor tool or butty's `brain` servo tool (`servo_tool set-id`, see butty `brain/README.md`). Record its straight-ahead raw position, inversion and conservative cable-safe range on the assembled robot. Do not copy calibration between robots.
+* **Neck:** the CH343/STS3215 adapter has a **different** serial path from the face board. If an adapter lacks a unique ID, use a stable USB topology path under `/dev/serial/by-path/`. Every `robot-buddy-robot servo` command, even `ping` and `read`, loads a valid `neck.json` first (`apps/robot/src/motion/mod.rs`), and factory STS3215s all answer on ID 1. So bring the neck up in the order below. Do not copy calibration between robots.
 
-Create a root-owned `0640 root:robot-buddy` JSON file `/etc/robot-buddy/neck.json`. It has three required objects: `yaw`, `pitch`, `roll`; each contains `id`, `center`, `min_steps`, `max_steps`, `invert`, `max_speed_deg_s` and `accel`. Example **shape of one joint only**, not a calibration for your robot: `"yaw":{"id":1,"center":2048,"min_steps":2000,"max_steps":2100,"invert":false,"max_speed_deg_s":10,"accel":5}`. All counts are in 0–4095; min < center < max. Confirm all IDs and ranges before writing EEPROM. Never widen limits to make a failed verification pass.
+**Neck envelope.** `neck.json` is refused unless every joint fits these ceilings (`apps/robot/src/motion/calibration.rs`). One step is 360/4096 degrees.
+
+| Joint | Max travel from `center`, each side | Max `max_speed_deg_s` | `accel` | butty `brain/config.yaml` |
+| --- | --- | --- | --- | --- |
+| `yaw` | 1024 steps (90°) | 120 | 1–254 | ±90°, 120 °/s |
+| `pitch` | 228 steps (about 20°) | 90 | 1–254 | ±20°, 90 °/s |
+| `roll` | 285 steps (about 25°) | 90 | 1–254 | ±25°, 90 °/s |
+
+Also: `max_speed_deg_s` at least 1; IDs 1–253 and all different; `min_steps < center < max_steps <= 4095`; no unknown fields; file at most 8 KiB. A wider range fails with `travel exceeds neck envelope for ID <n>`.
+
+**Neck bootstrap, in order.** Stop the service first (`systemctl stop robot-buddy`) so nothing else holds the adapter, keep 12 V on the adapter, and support the head.
+
+1. **Set IDs, one servo on the bus at a time.** robot-buddy has no ID command. Use butty's servo tool, as in butty `brain/README.md` §6 ("Servos (once, before assembly)"). It runs from butty's `brain/` directory in the virtualenv that butty `brain/README.md` §3 installs, talks 1 Mbaud, and takes the adapter with `--port`:
+
+   ```sh
+   PORT=/dev/serial/by-id/YOUR_SERVO_ADAPTER
+   cd <butty checkout>/brain
+   .venv/bin/python -m pipbrain.tools.servo_tool --port "$PORT" scan
+   .venv/bin/python -m pipbrain.tools.servo_tool --port "$PORT" set-id 1 2   # pitch servo alone on the bus
+   .venv/bin/python -m pipbrain.tools.servo_tool --port "$PORT" set-id 1 3   # roll servo alone on the bus
+   ```
+
+   Yaw keeps ID 1. This is butty's convention, yaw 1, pitch 2, roll 3 ("Confirm on your Pip" item 4). The Feetech vendor tool also sets IDs.
+2. **Write a provisional, narrow `neck.json`** as a root-owned `0640 root:robot-buddy` file at `/etc/robot-buddy/neck.json`. It only lets `ping` and `read` run; `read` prints raw positions even outside these limits. Example shape, inside the envelope, **not** a calibration:
+
+   ```json
+   {
+     "yaw":   {"id": 1, "center": 2048, "min_steps": 2000, "max_steps": 2096, "invert": false, "max_speed_deg_s": 10, "accel": 5},
+     "pitch": {"id": 2, "center": 2048, "min_steps": 2000, "max_steps": 2096, "invert": false, "max_speed_deg_s": 10, "accel": 5},
+     "roll":  {"id": 3, "center": 2048, "min_steps": 2000, "max_steps": 2096, "invert": false, "max_speed_deg_s": 10, "accel": 5}
+   }
+   ```
+
+3. **Ping, then read raw centres.** With all three servos on the bus, run `servo ping`, which prints `id <n>: ok` for each. Pose the head straight ahead by hand and run `servo read`, which prints `id <n>: <steps> steps`. Those are your centres. If a joint holds torque and resists, run `servo verify` once: it turns torque off on all three before it checks anything (and fails at this stage, which is expected). Then move each joint by hand to its cable-safe limits and `read` again.
+4. **Write the real limits** in `neck.json`: measured `center`, `min_steps` and `max_steps` inside the cable-safe range and the envelope above, `invert` where a joint turns the wrong way (butty inverts yaw and pitch), and a conservative `max_speed_deg_s` and `accel`.
+5. **Provision EEPROM:** `servo provision … --write-eeprom`. It needs every servo already in position mode and each joint physically inside its new range. It writes the limits, relocks EEPROM, then verifies.
+6. **Verify:** `servo verify` checks position mode, the EEPROM lock and limits against `neck.json`, and each joint's position, and leaves torque off.
+7. **Centre, under supervision:** `servo center` arms the neck, moves it to `center` at your speed limit, and turns torque off when it finishes or fails.
 
 ```sh
 systemctl stop robot-buddy
@@ -380,13 +417,13 @@ PORT=/dev/serial/by-id/YOUR_SERVO_ADAPTER
 CAL=/etc/robot-buddy/neck.json
 runuser -u robot-buddy -- robot-buddy-robot servo ping "$PORT" "$CAL"
 runuser -u robot-buddy -- robot-buddy-robot servo read "$PORT" "$CAL"
-# Checks position mode, EEPROM limits/lock and joint position; leaves torque off.
+# After writing the measured limits (step 4):
+runuser -u robot-buddy -- robot-buddy-robot servo provision "$PORT" "$CAL" --write-eeprom
 runuser -u robot-buddy -- robot-buddy-robot servo verify "$PORT" "$CAL"
-# ONLY for deliberate commissioning after measuring physical limits:
-# runuser -u robot-buddy -- robot-buddy-robot servo provision "$PORT" "$CAL" --write-eeprom
-# Verify again afterwards. Only then exercise center under supervision:
-# runuser -u robot-buddy -- robot-buddy-robot servo center "$PORT" "$CAL"
+runuser -u robot-buddy -- robot-buddy-robot servo center "$PORT" "$CAL"
 ```
+
+Never widen limits to make a failed verification pass.
 
 After verification set `BUDDY_SERVO_PORT` and `BUDDY_SERVO_CALIBRATION` to those paths. Start the service, test a small pose from the operator panel (needs a claim; the claim-free alternative is in [What needs a claim](#what-needs-a-claim)), then `systemctl stop robot-buddy` and confirm the head can relax. Remove both settings to run without the neck. Consult the firmware's own assembly documentation for wiring and ear calibration.
 
@@ -521,6 +558,8 @@ Start with `journalctl -u robot-buddy -b`, `systemctl show robot-buddy -p NResta
 | Never wakes / never transcribes | Capture test as `robot-buddy` (§4). Channels and beam (`BUDDY_LISTEN_CHANNELS`, `BUDDY_LISTEN_CHANNEL`). `whisper-cli` and model paths readable by the service. For neural wake: `ORT_DYLIB_PATH` names the `.so` file, and all three ONNX files are present |
 | Face dark or not responding | Native USB port, not UART. The service is stopped while flashing, and `pio device monitor` is closed afterwards. `BUDDY_FACE_SERIAL` is the by-id path. Heartbeats appear in the monitor. Use the firmware diagnostic envs (§4) |
 | Neck refuses to arm | `servo verify` must pass: position mode, locked EEPROM limits matching `neck.json`, `min_steps < center < max_steps`. Never widen limits to make it pass |
+| `travel exceeds neck envelope for ID <n>` | A joint in `neck.json` reaches further from `center` than the [neck envelope](#face-and-neck) allows (yaw 1024, pitch 228, roll 285 steps each side). Bring `min_steps` and `max_steps` inside it; the ceilings are fixed in code. `invalid speed or acceleration for ID <n>` is the same check for speed and `accel` |
+| `servo <n> at <pos>, outside calibrated range` | The joint sits outside `min_steps`..`max_steps`. With torque off, move it inside by hand, then run `provision`, `verify` or `center` again |
 | Camera absent | `rpicam-hello --list-cameras` as `robot-buddy`. `video` group on both the user and `20-pip.conf`. `camera_auto_detect=0` + `dtoverlay=ov5647,cam0` if needed |
 | Operator panel `401` / `403` | `401`: missing or wrong credentials. `403` after valid credentials: the bot must be connected and claimed, and the request must come from the expected origin. The panel only binds loopback, so use an SSH tunnel |
 | Restarts or OOM | `MemoryPeak` against the 1 GiB drop-in, `vcgencmd get_throttled` (under-voltage means buck A is not holding 5 A at about 5.1 V) |
