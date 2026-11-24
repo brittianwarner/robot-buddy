@@ -170,6 +170,15 @@
                 application instructions are supplied separately.
               </p>
               <pre id="active-prompt">No robot connected.</pre>
+              <div id="prompt-editor" hidden>
+                <label for="prompt-edit">Edit the robot prompt</label>
+                <textarea id="prompt-edit" rows="16" spellcheck="false"></textarea>
+                <div class="prompt-actions">
+                  <button id="save-prompt">Save prompt</button>
+                  <button id="cancel-prompt" class="quiet">Cancel</button>
+                </div>
+              </div>
+              <button id="edit-prompt" class="quiet">Edit prompt</button>
               <details>
                 <summary>Current date, time and location settings</summary>
                 <pre id="active-context"></pre>

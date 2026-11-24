@@ -311,6 +311,7 @@ async fn action(
                 | Command::GetContextConfig
                 | Command::GetSystemPrompt
                 | Command::SystemPromptHistory
+                | Command::SetSystemPrompt { .. }
         ) | (
             "memory",
             Command::Snapshot | Command::SearchMemory { .. } | Command::Forget { .. }

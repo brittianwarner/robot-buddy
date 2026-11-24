@@ -55,6 +55,16 @@ pub(super) fn refused_after_web(effects: &[(String, String)], name: &str) -> Opt
     })
 }
 
+/// The result a failed tool returns to the model. The message is bounded and comes from
+/// this crate's own validation and actor errors, never from user text.
+fn tool_error(message: &str) -> Value {
+    let mut end = message.len().min(300);
+    while !message.is_char_boundary(end) {
+        end -= 1;
+    }
+    json!({ "error": &message[..end], "ok": false })
+}
+
 /// A required string argument.
 fn text<'a>(args: &'a Value, key: &str, missing: &'static str) -> Result<&'a str> {
     args[key].as_str().context(missing)
@@ -74,7 +84,13 @@ impl Conversation {
                 && call.name.len() <= MAX_NAME_BYTES,
             "tool call exceeds budget"
         );
-        let args: Value = serde_json::from_str(&call.arguments)?;
+        // Malformed arguments ran nothing: tell the model so it can retry, like a refusal.
+        let Ok(args) = serde_json::from_str::<Value>(&call.arguments) else {
+            tracing::warn!(tool = %call.name, "tool arguments were not valid JSON");
+            return Ok(tool_error(
+                "arguments must be a JSON object matching the schema",
+            ));
+        };
         if let Some(result) = self.prior_result(ctx, turn, call).await? {
             return Ok(result);
         }
@@ -91,9 +107,27 @@ impl Conversation {
             arguments: &call.arguments,
         };
         // A test seam stands in for the effect exactly as `run_tool` runs: not interruptible.
-        let result = match super::seam::at(&point) {
-            Some(held) => held.await?,
-            None => self.run_tool(ctx, &call.name, &args, receipt).await?,
+        let outcome = match super::seam::at(&point) {
+            Some(held) => held.await,
+            None => self.run_tool(ctx, &call.name, &args, receipt).await,
+        };
+        let result = match outcome {
+            Ok(result) => result,
+            // A stopped turn stays stopped; its intent is left unresolved on purpose.
+            Err(error) if self.ensure_not_stopped(turn).is_err() => return Err(error),
+            // An expected refusal (bad arguments, stale revision, full memory, unknown
+            // tool) is the model's to handle: it gets the reason and the turn goes on.
+            // A settings write that failed wrote no receipt, so the error is the receipt.
+            Err(error) => {
+                tracing::warn!(tool = %call.name, "tool returned an error to the model");
+                let failed = tool_error(&error.to_string());
+                ctx.db()
+                    .execute(RECEIPT_SQL, params(&[&failed.to_string(), turn, &call.id]))
+                    .await?;
+                self.event(ctx, turn, "tool.completed", json!({ "name": call.name }))
+                    .await?;
+                return Ok(failed);
+            }
         };
         let encoded = result.to_string();
         ensure!(

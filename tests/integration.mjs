@@ -11,6 +11,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { cleanEnv } from "./lib/clean-env.mjs";
 
 const enginePort = Number(process.env.BUDDY_TEST_ENGINE_PORT ?? 16420);
 const modelPort = Number(process.env.BUDDY_TEST_MODEL_PORT ?? 19091);
@@ -20,7 +21,7 @@ const stateDir = process.env.BUDDY_TEST_STATE_DIR ?? join(tmpdir(), "robot-buddy
 const ports = [enginePort, enginePort + 1, enginePort + 10, modelPort];
 
 const env = {
-  ...process.env,
+  ...cleanEnv(),
   BUDDY_TEST_ENGINE_PORT: String(enginePort),
   BUDDY_TEST_MODEL_PORT: String(modelPort),
   BUDDY_TEST_STATE_DIR: stateDir,

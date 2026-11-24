@@ -492,6 +492,7 @@ async function settings() {
     call("conversation", { type: "get_system_prompt" }),
   ]);
   $("active-prompt").textContent = prompt.prompt;
+  promptRevision = prompt.revision;
   $("active-prompt-revision").textContent =
     "Prompt revision " +
     prompt.revision +
@@ -563,6 +564,42 @@ async function personaVersions() {
 }
 $("persona-choice").onchange = () =>
   personaVersions().catch((e) => notice(e.message));
+
+let promptRevision = null;
+const closeEditor = () => {
+  $("prompt-editor").hidden = true;
+  $("active-prompt").hidden = false;
+  $("edit-prompt").hidden = false;
+};
+$("edit-prompt").onclick = () => {
+  if (!bot || promptRevision === null) return notice("Connect a robot first.");
+  $("prompt-edit").value = $("active-prompt").textContent;
+  $("prompt-editor").hidden = false;
+  $("active-prompt").hidden = true;
+  $("edit-prompt").hidden = true;
+  $("prompt-edit").focus();
+};
+$("cancel-prompt").onclick = closeEditor;
+$("save-prompt").onclick = async () => {
+  const prompt = $("prompt-edit").value.trim();
+  if (!prompt) return notice("The prompt cannot be empty.");
+  $("save-prompt").disabled = true;
+  try {
+    await call("conversation", {
+      type: "set_system_prompt",
+      expected_revision: promptRevision,
+      prompt,
+      reason: "Edited in the lab",
+    });
+    closeEditor();
+    await settings();
+    notice("Prompt saved. It applies from the next message.");
+  } catch (e) {
+    notice(e.message);
+  } finally {
+    $("save-prompt").disabled = false;
+  }
+};
 
 $("refresh-settings").onclick = () =>
   settings().catch((e) => notice(e.message));

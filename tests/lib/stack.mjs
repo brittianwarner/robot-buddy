@@ -24,6 +24,7 @@ import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { startFaultProxy } from './fault-proxy.mjs';
+import { cleanEnv as withoutLocalConfig } from './clean-env.mjs';
 
 export const now = () => performance.timeOrigin + performance.now();
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -362,7 +363,7 @@ export async function startStack(options = {}) {
   let proxy = null;
 
   const cleanEnv = (extra) => {
-    const env = { ...process.env, ...extra };
+    const env = { ...withoutLocalConfig(), ...extra };
     for (const k of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']) delete env[k];
     for (const k of ['TTS_MODEL', 'TTS_BASE_URL', 'TTS_API_KEY', 'AI_API_KEY', 'OIDC_ISSUER', 'BUDDY_LAB_TOKEN']) {
       if (!(k in extra)) delete env[k];

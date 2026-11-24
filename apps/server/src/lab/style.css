@@ -613,6 +613,19 @@ dialog select {
     monospace;
 }
 
+#prompt-edit {
+  width: 100%;
+  box-sizing: border-box;
+  font:
+    13px/1.65 ui-monospace,
+    monospace;
+}
+.prompt-actions {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0 16px;
+}
+
 .conversation-column {
   min-width: 0;
   width: 100%;

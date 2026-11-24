@@ -307,6 +307,30 @@ fn start_history_backfill(ctx: &Ctx<Conversation>) {
     });
 }
 
+/// Maps a generation error to a static, privacy-safe category for logs.
+fn failure_reason(error: &anyhow::Error) -> &'static str {
+    let text = error.to_string();
+    if text.contains("tool call after spoken admission") {
+        "tool_after_speech"
+    } else if text.contains("empty spoken answer") {
+        "empty_spoken_answer"
+    } else if text.contains("model ended without completion") {
+        "stream_incomplete"
+    } else if text.contains("model output exceeds") || text.contains("model stream exceeds") {
+        "stream_budget"
+    } else if text.contains("inference capacity") {
+        "capacity"
+    } else if text.contains("deadline") {
+        "deadline"
+    } else if text.contains("turn cancelled") {
+        "cancelled"
+    } else if error.is::<reqwest::Error>() {
+        "transport"
+    } else {
+        "provider_or_runtime"
+    }
+}
+
 /// Why a turn was stopped by the runtime rather than by a user.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Halt {
@@ -647,6 +671,7 @@ impl Conversation {
                 (Err(_), None) if stop.is_cancelled() => {}
                 (Err(error), halt) => {
                     tracing::warn!(
+                        reason = failure_reason(&error),
                         transport_error = error.is::<reqwest::Error>(),
                         deadline = halt.is_some(),
                         "generation failed"

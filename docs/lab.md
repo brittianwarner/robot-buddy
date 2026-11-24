@@ -47,7 +47,7 @@ The voice panel displays first audio from the speech request, buffer duration an
 
 ## Persona, voice and local time
 
-The Current robot prompt panel shows the saved editable persona and its revision. Refresh settings reads actor state again; completed agent tools also refresh it. Inspect persona opens the last 16 prompt revisions. The voice panel shows the saved speaker, delivery direction and expandable synthesis controls. Named persona and version selectors prepare a chat request, so switching exercises the agent tools instead of bypassing them.
+The Current robot prompt panel shows the saved editable persona and its revision. **Edit prompt** opens it in an editor; **Save prompt** stores it directly (`set_system_prompt` with the current revision, no model involved) and it applies from the next message. Refresh settings reads actor state again; completed agent tools also refresh it. Inspect persona opens the last 16 prompt revisions. The voice panel shows the saved speaker, delivery direction and expandable synthesis controls. Named persona and version selectors prepare a chat request, so switching exercises the agent tools instead of bypassing them.
 
 Try:
 

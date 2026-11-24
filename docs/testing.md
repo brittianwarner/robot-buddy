@@ -105,7 +105,7 @@ Extra arguments go to every suite.
 Scenarios: enrollment idempotency and session binding; single-use challenges and one-time
 claim confirmation; revocation across bot, conversation and memory; one provider call per
 chat turn with private text hidden; tool turns that write memory then speak; direct-mode
-tool call after spoken text fails the turn; one numbered speech chunk per sentence;
+tool call after spoken text still runs the tool and the spoken phase continues; one numbered speech chunk per sentence;
 barge-in closes the provider stream and commits nothing after; cancel by request ID
 (`CancelRequest`, including before the submit arrives); spoken-phase cancel; web-result
 taint refusing subsequent write and history tools; short-lifetime retention; a running turn

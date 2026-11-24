@@ -351,38 +351,56 @@ async fn tool_turn_writes_memory_then_speaks_without_tools() -> Result<()> {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "needs the isolated engine; run bun run test:integration"]
-async fn direct_mode_tool_call_after_spoken_text_fails_the_turn() -> Result<()> {
-    const TAG: &str = "Talk first, then look it up";
+async fn direct_mode_tool_call_after_spoken_text_runs_the_tool_and_continues() -> Result<()> {
+    const TAG: &str = "Talk first, then save it";
     let (h, _shared) = start().await;
     h.mock.script(TAG, |r| {
-        if !r.direct {
-            return sse::text("should not be called");
+        if r.direct {
+            let args = json!({"key":"after_text","value":"saved"});
+            return sse::body(format!(
+                "{}{}",
+                sse::content("Got it. "),
+                sse::tool_call("late_call", "memory_remember", &args)
+            ));
         }
-        let args = json!({"key":"after_text","value":"leaked"});
-        sse::body(format!(
-            "{}{}",
-            sse::content("Let me check that for you. "),
-            sse::tool_call("late_call", "memory_remember", &args)
-        ))
+        if r.tool_results == 0 {
+            return sse::text("READY");
+        }
+        sse::text("It is saved now.")
     });
     let b = TestBot::enroll(h).await?;
     let (turn, done) = b.turn("late-tool", TAG).await?;
-    assert_eq!(end_kind(&done), Some("turn.failed"), "{:?}", kinds(&done));
-    assert!(
-        !kinds(&done).iter().any(|k| k.starts_with("tool.")),
-        "no tool may run after spoken admission: {:?}",
+    assert_eq!(
+        end_kind(&done),
+        Some("turn.completed"),
+        "{:?}",
         kinds(&done)
     );
-    assert_eq!(h.mock.requests(TAG).len(), 1, "the turn is not retried");
-    let memory = b.mem(Command::Snapshot).await?;
-    assert!(!memory.to_string().contains("after_text"), "tool ran");
-    assert_eq!(status(&b.turn_record(&turn).await?), "failed");
     assert!(
-        b.conv(Command::SpokenAnswer { turn_id: turn })
-            .await
-            .is_err(),
-        "a failed turn is not spoken"
+        kinds(&done).contains(&"tool.completed"),
+        "the tool runs after spoken dialogue: {:?}",
+        kinds(&done)
     );
+    let memory = b.mem(Command::Snapshot).await?;
+    assert!(
+        memory.to_string().contains("after_text"),
+        "tool did not run: {memory}"
+    );
+    let record = b.turn_record(&turn).await?;
+    assert_eq!(status(&record), "completed");
+    let answer = record["answer"].as_str().unwrap_or_default();
+    assert!(
+        answer.starts_with("Got it."),
+        "the spoken prefix is kept: {answer}"
+    );
+    // Chunk numbers continue across the direct call and the spoken phase.
+    let readies: Vec<i64> = done
+        .iter()
+        .filter(|e| e.event.kind == "speech.ready")
+        .filter_map(|e| e.event.payload["index"].as_i64())
+        .collect();
+    let expected: Vec<i64> = (0..i64::try_from(readies.len())?).collect();
+    assert_eq!(readies, expected, "chunk indices are dense and ordered");
     Ok(())
 }
 
