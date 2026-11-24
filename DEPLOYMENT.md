@@ -241,6 +241,8 @@ Open `http://127.0.0.1:8091/` locally; Basic auth username `operator`, password 
 
 Before leaving a robot unattended, record the binary revision/checksum, OS and model versions, calibration file revision and outcomes on **that robot**:
 
+**What was verified before bench commissioning:** both the Bookworm private-prefix OpenCV 4.10 build and the Trixie packaged OpenCV build linked the full `aarch64-unknown-linux-gnu` release (`pi-vision,onnx-wake`) inside ARM64 Debian containers. The Trixie binary ran `setup-card` unprivileged, and its full-feature robot test suite passed (189 passed; the two tests requiring private recordings or labeled images were skipped). These checks do not establish motor direction, camera accuracy, wake behavior, timing, or memory headroom on a physical Pi.
+
 | Exercise | Observable result |
 |---|---|
 | Cold boot, reboot with known Wi-Fi, then loss and return of the uplink | Same bot and ownership; setup remains available with no network, no stale speech after reconnect. |
