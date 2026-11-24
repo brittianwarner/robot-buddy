@@ -611,7 +611,12 @@ async fn drive<S: LineSink>(
             result = device.read_status(&mut buf) => {
                 let n=result?;
                 if n==0{return Err(io::ErrorKind::UnexpectedEof.into());}
-                status.push(&buf[..n]);
+                if status.push(&buf[..n]) {
+                    // A reset can leave USB CDC open while clearing the ESP's RAM.
+                    // Repaint the current desired state; never replay consumed impulses.
+                    shown = None;
+                    shown_qr = None;
+                }
             },
         }
     }
@@ -631,7 +636,9 @@ struct StatusLines {
     overflow: bool,
 }
 impl StatusLines {
-    fn push(&mut self, bytes: &[u8]) {
+    /// Returns true if this chunk completed a board boot announcement.
+    fn push(&mut self, bytes: &[u8]) -> bool {
+        let mut rebooted = false;
         for &b in bytes {
             match b {
                 b'\n' => {
@@ -640,7 +647,8 @@ impl StatusLines {
                     {
                         if v["hb"].is_u64() {
                             tracing::debug!(fps = v["fps"].as_u64(), "face heartbeat");
-                        } else if v["hello"].is_string() {
+                        } else if v["hello"] == "pip-face" {
+                            rebooted = true;
                             tracing::info!(version = v["v"].as_u64(), "face hello");
                         } else if v["err"].is_string() {
                             tracing::warn!("face board rejected command");
@@ -653,6 +661,7 @@ impl StatusLines {
                 _ => self.overflow = true,
             }
         }
+        rebooted
     }
 }
 
@@ -826,6 +835,67 @@ mod tests {
         assert!(wire.contains("\"e\":\"love\",\"i\":1.0"));
         assert!(wire.rfind("happy") > wire.rfind("love"));
         assert!(wire.ends_with(std::str::from_utf8(Mood::Offline.frame()).unwrap()));
+    }
+
+    #[tokio::test]
+    async fn second_hello_repaints_qr_mood_and_gaze_without_replaying_gesture() {
+        struct Board {
+            frames: mpsc::UnboundedSender<Vec<u8>>,
+            status: mpsc::Receiver<Vec<u8>>,
+        }
+        impl LineSink for Board {
+            fn has_board(&self) -> bool {
+                true
+            }
+            async fn write_frame(&mut self, b: &[u8]) -> io::Result<()> {
+                self.frames.send(b.to_vec()).unwrap();
+                Ok(())
+            }
+            async fn read_status(&mut self, b: &mut [u8]) -> io::Result<usize> {
+                let data = self.status.recv().await.unwrap();
+                b[..data.len()].copy_from_slice(&data);
+                Ok(data.len())
+            }
+        }
+        let (tx, mut frames) = mpsc::unbounded_channel();
+        let (serial, status) = mpsc::channel(4);
+        let (face, mut rx) = Face::new();
+        face.set(Mood::Listening);
+        face.gaze(0.5, -0.2);
+        face.qr("join", "setup", 132).unwrap();
+        let task = tokio::spawn(async move {
+            drive(
+                &mut Board { frames: tx, status },
+                &mut rx.state,
+                &mut rx.impulses,
+            )
+            .await
+        });
+        let first = frames.recv().await.unwrap();
+        let wire = std::str::from_utf8(&first).unwrap();
+        for field in [
+            "curious",
+            "\"look\":[0.5,-0.2]",
+            "\"qr\":[\"join\",\"setup\"]",
+        ] {
+            assert!(wire.contains(field));
+        }
+        for _ in 0..2 {
+            face.gesture(FaceGesture::Blink);
+            assert_eq!(frames.recv().await.unwrap(), b"{\"g\":\"blink\"}\n");
+            serial.send(b"{\"hello\":\"pip-".to_vec()).await.unwrap();
+            serial
+                .send(b"face\",\"v\":1}\n{\"hb\":17}\n".to_vec())
+                .await
+                .unwrap();
+            let repainted = tokio::time::timeout(Duration::from_millis(500), frames.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(repainted, first);
+        }
+        face.stop();
+        task.await.unwrap().unwrap();
     }
 
     #[tokio::test]
