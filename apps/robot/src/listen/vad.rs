@@ -22,7 +22,7 @@ pub(super) struct Vad {
 }
 
 impl Vad {
-    pub fn feed(&mut self, frame: [i16; FRAME], now: Instant, busy: bool) -> Option<Clip> {
+    pub fn feed(&mut self, frame: &[i16; FRAME], now: Instant, busy: bool) -> Option<Clip> {
         let power = frame
             .iter()
             .map(|&s| u64::from(s.unsigned_abs()).pow(2))
@@ -46,7 +46,7 @@ impl Vad {
                 if self.lead.len() == 8 {
                     self.lead.pop_front();
                 }
-                self.lead.push_back(frame);
+                self.lead.push_back(*frame);
                 return None;
             }
             self.recording = Some(Clip {
@@ -56,7 +56,7 @@ impl Vad {
             self.voiced = 0;
         }
         let clip = self.recording.as_mut()?;
-        clip.pcm.extend_from_slice(&frame);
+        clip.pcm.extend_from_slice(frame);
         self.voiced += usize::from(speech);
         self.saturated = clip.pcm.len() >= MAX_FRAMES * FRAME && self.quiet < END_FRAMES;
         if !self.saturated && self.quiet < END_FRAMES {
@@ -81,9 +81,9 @@ mod tests {
             .chain([750; 8])
             .chain([0; 39])
         {
-            assert!(vad.feed([volume; FRAME], now, false).is_none());
+            assert!(vad.feed(&[volume; FRAME], now, false).is_none());
         }
-        let clip = vad.feed([0; FRAME], now, false).unwrap();
+        let clip = vad.feed(&[0; FRAME], now, false).unwrap();
         assert_eq!(clip.pcm.len(), (4 + 8 + 35 + 8 + 40) * FRAME);
         assert_eq!(clip.pcm[4 * FRAME], 750);
     }
@@ -93,10 +93,10 @@ mod tests {
         let mut vad = Vad::default();
         let now = Instant::now();
         for v in [450; 100].into_iter().chain([32_000; 1]).chain([0; 40]) {
-            assert!(vad.feed([v; FRAME], now, false).is_none());
+            assert!(vad.feed(&[v; FRAME], now, false).is_none());
         }
         let lengths: Vec<_> = (0..2000)
-            .filter_map(|_| vad.feed([i16::MIN; FRAME], now, false))
+            .filter_map(|_| vad.feed(&[i16::MIN; FRAME], now, false))
             .map(|c| c.pcm.len())
             .collect();
         assert_eq!(lengths, [MAX_FRAMES * FRAME]);

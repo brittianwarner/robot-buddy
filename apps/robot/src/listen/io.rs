@@ -145,6 +145,24 @@ impl Recognizer for Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn cli_drains_long_wav_stdin_and_returns_normalized_segments() {
+        let config = Config {
+            whisper: concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/listen/tests/whisper-fixture.sh"
+            )
+            .into(),
+            model: "test-model".into(),
+            device: "default".into(),
+            channel: 0,
+            channels: 1,
+            barge_in: true,
+            wake: None,
+        };
+        let result = config.transcript(&vec![1200; 32_000]).await.unwrap();
+        assert_eq!(result, "Hey Pip, what time is it?");
+    }
     #[test]
     fn wav_has_exact_lengths_rate_and_little_endian_pcm() {
         let clip = wav(&[-1, 256, i16::MIN]).unwrap();

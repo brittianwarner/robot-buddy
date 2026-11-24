@@ -57,7 +57,32 @@ fn code(text: &str) -> Option<String> {
 }
 
 impl Policy {
+    pub fn acoustic_wake(&mut self, at: Instant) {
+        self.stopped = false;
+        // The utterance containing the name usually started before the score peaked.
+        self.window = Some((
+            at.checked_sub(Duration::from_secs(2)).unwrap_or(at),
+            at + FOLLOW,
+        ));
+        self.face_deadline = Some(at + FOLLOW);
+    }
+
+    pub fn acoustic_clip(&self, onset: Instant) -> bool {
+        self.window.is_some_and(|(a, b)| (a..=b).contains(&onset))
+    }
     pub fn changed(&mut self, old: State, state: State, now: Instant) {
+        if old.busy
+            && !state.busy
+            && !old.muted
+            && !state.muted
+            && !old.confirming
+            && !state.confirming
+            && self.face_deadline.is_some_and(|until| until >= now)
+        {
+            // Our own Wake stopped playback. A new capture generation fences out its
+            // echo; keep the listener open for the person already starting to speak.
+            return;
+        }
         self.window = None;
         if state.busy || state.muted || state.confirming || old.confirming || old.muted {
             self.face_deadline = None;
@@ -104,12 +129,16 @@ impl Policy {
             return vec![];
         }
         let mut commands = Vec::new();
+        let intent = words.trim_end_matches(['.', '!', '?']).to_ascii_lowercase();
+        if intent == "go to sleep" {
+            self.stopped = true;
+            self.window = None;
+            self.face_deadline = None;
+            return vec![Control::Sleep];
+        }
         let stop = matches!(
-            words
-                .trim_end_matches(['.', '!', '?'])
-                .to_ascii_lowercase()
-                .as_str(),
-            "stop" | "stop talking" | "go to sleep" | "never mind" | "nevermind"
+            intent.as_str(),
+            "stop" | "stop talking" | "never mind" | "nevermind"
         );
         if body.is_some() || stop {
             commands.push(Control::Wake);
@@ -133,6 +162,20 @@ impl Policy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sleep_clears_the_window_without_a_wake_or_chat_turn() {
+        let now = Instant::now();
+        let idle = State::default();
+        let mut p = Policy::default();
+        assert_eq!(p.heard("Hey Pip", idle, now, now), [Control::Wake]);
+        assert_eq!(
+            p.heard("Pip, go to sleep.", idle, now, now),
+            [Control::Sleep]
+        );
+        assert!(p.heard("go to sleep", idle, now, now).is_empty());
+        assert!(p.face_deadline.is_none());
+    }
 
     #[test]
     fn barge_requires_address_and_stop_never_starts_a_turn() {
