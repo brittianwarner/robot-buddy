@@ -1,0 +1,16 @@
+**
+!Cargo.toml
+!Cargo.lock
+!.cargo/config.toml
+!apps/server/Cargo.toml
+!apps/robot/Cargo.toml
+!apps/robot/src/**
+!crates/buddy/Cargo.toml
+!crates/buddy/src/**
+!crates/buddy/tests/actors.rs
+!crates/buddy/tests/history_sql.rs
+!crates/buddy/benches/**
+**/*.onnx
+**/*.bin
+**/*.key
+**/*.identity.json
