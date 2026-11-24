@@ -1,7 +1,7 @@
 //! Bounded persona library; selecting a profile updates prompt and voice atomically.
 use super::{
-    Context, Conversation, Ctx, P, Receipt, Result, SqliteDbExt, SqliteTransaction, V, Value, auth,
-    ensure, ensure_receipt_running, integer, json, named, params,
+    Context, Conversation, Ctx, Db, P, Receipt, Result, Tx, V, Value, auth, ensure,
+    ensure_receipt_running, integer, json, named, params,
     persona::{INSERT_PROMPT_VERSION_SQL, TRIM_PROMPT_VERSIONS_SQL, UPDATE_PROMPT_SQL},
     string, trim_versions,
     voice::{INSERT_VOICE_VERSION_SQL, TRIM_VOICE_VERSIONS_SQL, UPDATE_VOICE_SQL},
@@ -34,6 +34,10 @@ const INSERT_VERSION_SQL: &str = r"
 const TRIM_VERSIONS_SQL: &str = "DELETE FROM persona_versions WHERE name = ? AND version < ?";
 const PROFILE_SQL: &str =
     "SELECT prompt, voice FROM persona_versions WHERE name = ? AND version = ?";
+/// The current prompt and voice revisions, for a tool activation that read none.
+const REVISIONS_SQL: &str = r"
+    SELECT p.revision, v.revision FROM system_prompt p CROSS JOIN voice_settings v
+    WHERE p.singleton = 1 AND v.singleton = 1";
 
 /// The settings revision a write moved to.
 fn revision(rows: &[Vec<V>], conflict: &'static str) -> Result<i64> {
@@ -42,7 +46,7 @@ fn revision(rows: &[Vec<V>], conflict: &'static str) -> Result<i64> {
 
 impl Conversation {
     pub(super) async fn list_personas(&self, ctx: &Ctx<Self>) -> Result<Value> {
-        let rows = ctx.sql().query(LIST_SQL, None).await?.rows;
+        let rows = ctx.db().query(LIST_SQL, None).await?.rows;
         let personas = rows
             .iter()
             .map(|r| {
@@ -68,7 +72,7 @@ impl Conversation {
             version >= 0,
             "version must be nonnegative; 0 selects latest"
         );
-        let read = |tx: SqliteTransaction| async move {
+        let read = |tx: Tx| async move {
             let selector = vec![
                 P::Text(name.into()),
                 P::Integer(version),
@@ -97,7 +101,7 @@ impl Conversation {
                 "versions": versions,
             }))
         };
-        ctx.sql()
+        ctx.db()
             .transaction(read, named("conversation.get_persona"))
             .await
     }
@@ -110,7 +114,7 @@ impl Conversation {
     ) -> Result<Value> {
         draft.validate()?;
         let voice = serde_json::to_string(&draft.voice)?;
-        let write = |tx: SqliteTransaction| async move {
+        let write = |tx: Tx| async move {
             ensure_receipt_running(&tx, receipt).await?;
             if draft.expected_version == 0 {
                 let count = tx.execute(COUNT_SQL, None).await?.rows;
@@ -152,7 +156,7 @@ impl Conversation {
             write_receipt(&tx, receipt, &result).await?;
             Ok(result)
         };
-        ctx.sql()
+        ctx.db()
             .transaction(write, named("conversation.save_persona"))
             .await
     }
@@ -162,16 +166,25 @@ impl Conversation {
         ctx: &Ctx<Self>,
         name: &str,
         version: i64,
-        expected: (i64, i64),
+        expected: Option<(i64, i64)>,
         receipt: Receipt<'_>,
     ) -> Result<Value> {
         crate::persona::validate_name(name)?;
         ensure!(
-            version > 0 && expected.0 > 0 && expected.1 > 0,
+            version > 0 && expected.is_none_or(|(prompt, voice)| prompt > 0 && voice > 0),
             "activation requires explicit profile version and current prompt/voice revisions"
         );
-        let write = |tx: SqliteTransaction| async move {
+        let write = |tx: Tx| async move {
             ensure_receipt_running(&tx, receipt).await?;
+            // A tool activation reads the revisions here, so no write lands between the
+            // read and the compare-and-set.
+            let expected = if let Some(expected) = expected {
+                expected
+            } else {
+                let rows = tx.execute(REVISIONS_SQL, None).await?.rows;
+                let row = rows.first().context("settings missing")?;
+                (integer(row, 0)?, integer(row, 1)?)
+            };
             let selector = vec![P::Text(name.into()), P::Integer(version)];
             let rows = tx.execute(PROFILE_SQL, Some(selector)).await?.rows;
             let row = rows.first().context("persona version not found")?;
@@ -225,7 +238,7 @@ impl Conversation {
             write_receipt(&tx, receipt, &result).await?;
             Ok(result)
         };
-        ctx.sql()
+        ctx.db()
             .transaction(write, named("conversation.activate_persona"))
             .await
     }

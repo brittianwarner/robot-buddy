@@ -1,7 +1,7 @@
 //! Versioned voice settings: the curated voice and delivery every speech request uses.
 use super::{
-    Context, Conversation, Ctx, P, Receipt, Result, SqliteDbExt, SqliteTransaction, Value, auth,
-    ensure, ensure_receipt_running, integer, json, named, string, trim_versions, write_receipt,
+    Context, Conversation, Ctx, Db, P, Receipt, Result, Tx, Value, auth, ensure,
+    ensure_receipt_running, integer, json, named, string, trim_versions, write_receipt,
 };
 use crate::voice::VoiceConfig;
 
@@ -16,7 +16,7 @@ pub(super) const TRIM_VOICE_VERSIONS_SQL: &str = "DELETE FROM voice_versions WHE
 
 impl Conversation {
     pub(super) async fn voice_config(&self, ctx: &Ctx<Self>) -> Result<Value> {
-        let rows = ctx.sql().query(VOICE_SQL, None).await?.rows;
+        let rows = ctx.db().query(VOICE_SQL, None).await?.rows;
         let row = rows.first().context("voice configuration missing")?;
         let config: VoiceConfig = serde_json::from_str(&string(row, 1)?)?;
         Ok(json!({
@@ -43,7 +43,7 @@ impl Conversation {
             "invalid voice update"
         );
         let encoded = serde_json::to_string(config)?;
-        let write = |tx: SqliteTransaction| async move {
+        let write = |tx: Tx| async move {
             ensure_receipt_running(&tx, receipt).await?;
             let now = auth::now();
             let update = vec![
@@ -74,7 +74,7 @@ impl Conversation {
             write_receipt(&tx, receipt, &result).await?;
             Ok(result)
         };
-        ctx.sql()
+        ctx.db()
             .transaction(write, named("conversation.set_voice"))
             .await
     }

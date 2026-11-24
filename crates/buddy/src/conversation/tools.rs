@@ -1,7 +1,7 @@
 //! Model tool calls. Each call commits its intent, runs one effect and records a receipt,
 //! so a resumed turn replays the receipt instead of repeating the effect.
 use super::{
-    Command, Context, Conversation, Ctx, RECEIPT_SQL, Receipt, Result, ToolCall, Value, bail,
+    Command, Context, Conversation, Ctx, Db, RECEIPT_SQL, Receipt, Result, ToolCall, Value, bail,
     ensure, json, params, string,
 };
 
@@ -15,6 +15,14 @@ const INTENT_SQL: &str = r"
     INSERT INTO tool_calls(turn_id, call_id, name, args) SELECT ?, ?, ?, ?
     WHERE EXISTS(SELECT 1 FROM turns WHERE id = ? AND status = 'running')
     RETURNING call_id";
+/// Settings writes record their receipt in their own transaction.
+const SELF_RECEIPTED: [&str; 5] = [
+    "save_persona",
+    "activate_persona",
+    "update_context_config",
+    "update_voice_config",
+    "update_system_prompt",
+];
 
 /// A required string argument.
 fn text<'a>(args: &'a Value, key: &str, missing: &'static str) -> Result<&'a str> {
@@ -41,7 +49,7 @@ impl Conversation {
         }
         // The intent commits before the effect. A cancelled turn admits no new effect.
         let intent = params(&[turn, &call.id, &call.name, &call.arguments, turn]);
-        let admitted = ctx.sql().execute(INTENT_SQL, intent).await?;
+        let admitted = ctx.db().execute(INTENT_SQL, intent).await?;
         ensure!(!admitted.rows.is_empty(), "turn cancelled");
         self.event(ctx, turn, "tool.started", json!({ "name": call.name }))
             .await?;
@@ -53,9 +61,11 @@ impl Conversation {
             encoded.len() <= MAX_RESULT_BYTES,
             "tool result exceeds budget"
         );
-        ctx.sql()
-            .execute(RECEIPT_SQL, params(&[&encoded, turn, &call.id]))
-            .await?;
+        if !SELF_RECEIPTED.contains(&call.name.as_str()) {
+            ctx.db()
+                .execute(RECEIPT_SQL, params(&[&encoded, turn, &call.id]))
+                .await?;
+        }
         self.event(ctx, turn, "tool.completed", json!({ "name": call.name }))
             .await?;
         Ok(result)
@@ -70,7 +80,7 @@ impl Conversation {
         call: &ToolCall,
     ) -> Result<Option<Value>> {
         let prior = ctx
-            .sql()
+            .db()
             .query(PRIOR_CALL_SQL, params(&[turn, &call.id]))
             .await?
             .rows;
@@ -87,6 +97,7 @@ impl Conversation {
     }
 
     /// Runs one tool. Writes record their result under `receipt` in their own transaction.
+    /// Network calls stop with the turn; their intent then stays unresolved.
     async fn run_tool(
         &self,
         ctx: &Ctx<Self>,
@@ -94,6 +105,7 @@ impl Conversation {
         args: &Value,
         receipt: Receipt<'_>,
     ) -> Result<Value> {
+        let turn = receipt.map_or("", |(turn, _)| turn);
         match name {
             "list_personas" => self.list_personas(ctx).await,
             "get_persona" => {
@@ -122,16 +134,21 @@ impl Conversation {
                 let query = text(args, "query", "query required")?;
                 self.search_history(ctx, query).await
             }
-            "web_search" => crate::model::search(text(args, "query", "query required")?).await,
+            "web_search" => {
+                let query = text(args, "query", "query required")?;
+                self.interruptible(turn, crate::model::search(query)).await
+            }
             "memory_remember" => {
                 let key = text(args, "key", "key required")?.into();
                 let value = text(args, "value", "value required")?.into();
-                self.memory(ctx, Command::Remember { key, value }).await?;
+                let remember = self.memory(ctx, Command::Remember { key, value });
+                self.interruptible(turn, remember).await?;
                 Ok(json!({ "saved": true }))
             }
             "memory_forget" => {
                 let key = text(args, "key", "key required")?.into();
-                self.memory(ctx, Command::Forget { key }).await?;
+                let forget = self.memory(ctx, Command::Forget { key });
+                self.interruptible(turn, forget).await?;
                 Ok(json!({ "forgotten": true }))
             }
             _ => bail!("unknown tool"),
@@ -144,20 +161,11 @@ impl Conversation {
         args: &Value,
         receipt: Receipt<'_>,
     ) -> Result<Value> {
-        // Revisions are concurrency tokens, not facts the model should invent.
-        let prompt = self.persona(ctx).await?;
-        let voice = self.voice_config(ctx).await?;
+        // Revisions are concurrency tokens, not facts the model should invent. They are
+        // read in the activation's own transaction.
         let name = text(args, "name", "name required")?;
         let version = number(args, "version", "version required")?;
-        let expected = (
-            prompt["revision"]
-                .as_i64()
-                .context("prompt revision missing")?,
-            voice["revision"]
-                .as_i64()
-                .context("voice revision missing")?,
-        );
-        self.activate_profile(ctx, name, version, expected, receipt)
+        self.activate_profile(ctx, name, version, None, receipt)
             .await
     }
 

@@ -1,13 +1,13 @@
 //! Bot identity, ownership and configuration. Conversation and memory have separate actors.
 use crate::{
     auth,
-    db::{bot_key, params, string},
+    db::{Db, Tx, bot_key, named, params, string},
     protocol::{Call, Command, Connection, OutputEvent},
 };
 use anyhow::{Context, Result, bail, ensure};
 use async_trait::async_trait;
 use rivetkit::TypedClientExt;
-use rivetkit::{BindParam as P, ColumnValue as V, action, prelude::*};
+use rivetkit::{ActorConfig, BindParam as P, ColumnValue as V, action, prelude::*};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -61,7 +61,7 @@ fn bounded(value: &str, max: usize) -> bool {
 async fn migrate(ctx: &Ctx<Bot>) -> Result<()> {
     let present = || async {
         Ok::<_, anyhow::Error>(
-            !ctx.sql()
+            !ctx.db()
                 .query(HAS_CLAIM_FAILURES, None)
                 .await?
                 .rows
@@ -69,7 +69,7 @@ async fn migrate(ctx: &Ctx<Bot>) -> Result<()> {
         )
     };
     if !present().await?
-        && let Err(error) = ctx.sql().execute(ADD_CLAIM_FAILURES, None).await
+        && let Err(error) = ctx.db().execute(ADD_CLAIM_FAILURES, None).await
     {
         ensure!(present().await?, "identity migration failed: {error}");
     }
@@ -84,7 +84,7 @@ impl Actor for Bot {
     type Action = action::Raw;
     async fn create(ctx: &Ctx<Self>) -> Result<Self> {
         let signing_key = crate::config::signing_key()?;
-        ctx.sql().exec(include_str!("schema.sql")).await?;
+        ctx.db().exec(include_str!("schema.sql")).await?;
         migrate(ctx).await?;
         Ok(Self { signing_key })
     }
@@ -112,7 +112,7 @@ impl Bot {
         let session: auth::Session = auth::verify(self.signing_key.expose(), "session", token)?;
         session.validate(&bot_key(ctx)?, role)?;
         let rows = ctx
-            .sql()
+            .db()
             .query("SELECT revoked FROM identity WHERE singleton=1", None)
             .await?
             .rows;
@@ -138,9 +138,9 @@ impl Handler<Call> for Bot {
                     bounded(&device_id, DEVICE_ID_MAX) && bounded(&public_key, PUBLIC_KEY_MAX),
                     "invalid device identity"
                 );
-                ctx.sql().execute("INSERT OR IGNORE INTO identity(singleton,device_id,public_key) VALUES(1,?,?)",params(&[&device_id,&public_key])).await?;
+                ctx.db().execute("INSERT OR IGNORE INTO identity(singleton,device_id,public_key) VALUES(1,?,?)",params(&[&device_id,&public_key])).await?;
                 let row = ctx
-                    .sql()
+                    .db()
                     .query(
                         "SELECT device_id,public_key FROM identity WHERE singleton=1",
                         None,
@@ -160,13 +160,13 @@ impl Handler<Call> for Bot {
                     nonce.len() <= 128 && expires > auth::now() && expires <= auth::now() + 120,
                     "invalid challenge"
                 );
-                ctx.sql()
+                ctx.db()
                     .execute(
                         "DELETE FROM challenges WHERE expires<=?",
                         Some(vec![P::Integer(auth::now())]),
                     )
                     .await?;
-                ctx.sql()
+                ctx.db()
                     .execute(
                         "INSERT INTO challenges(nonce,expires) VALUES(?,?)",
                         Some(vec![P::Text(nonce), P::Integer(expires)]),
@@ -177,7 +177,7 @@ impl Handler<Call> for Bot {
             Command::CheckAccess => Ok(json!({"authorized":true})),
             Command::Snapshot => {
                 let rows = ctx
-                    .sql()
+                    .db()
                     .query(
                         "SELECT owner,pending_owner,confirm_code,claim_expires FROM identity WHERE singleton=1",
                         None,
@@ -194,7 +194,7 @@ impl Handler<Call> for Bot {
                 let token = auth::random();
                 let expires = auth::now() + 600;
                 let rows = ctx
-                    .sql()
+                    .db()
                     .query(
                         BEGIN_CLAIM,
                         Some(vec![
@@ -214,7 +214,7 @@ impl Handler<Call> for Bot {
                 ensure!(bounded(&token, CLAIM_TOKEN_MAX), "invalid claim");
                 let code = confirmation_code();
                 let rows = ctx
-                    .sql()
+                    .db()
                     .query(
                         PROPOSE_CLAIM,
                         Some(vec![
@@ -236,22 +236,26 @@ impl Handler<Call> for Bot {
                 );
                 ensure!(valid_code(&code), "invalid confirmation code");
                 let now = auth::now();
-                let rows = ctx
-                    .sql()
-                    .query(CONFIRM_CLAIM, Some(vec![P::Text(code), P::Integer(now)]))
-                    .await?
-                    .rows;
-                if rows.is_empty() {
-                    ctx.sql()
-                        .query(FAIL_CLAIM, Some(vec![P::Integer(now)]))
-                        .await?;
-                    bail!("confirmation expired or invalid");
-                }
+                // The confirm and the failure count commit together, so no claim action
+                // lands between them.
+                let confirm = |tx: Tx| async move {
+                    let code = Some(vec![P::Text(code), P::Integer(now)]);
+                    if tx.execute(CONFIRM_CLAIM, code).await?.rows.is_empty() {
+                        tx.execute(FAIL_CLAIM, Some(vec![P::Integer(now)])).await?;
+                        return Ok(false);
+                    }
+                    Ok(true)
+                };
+                let claimed = ctx
+                    .db()
+                    .transaction(confirm, named("bot.confirm_claim"))
+                    .await?;
+                ensure!(claimed, "confirmation expired or invalid");
                 Ok(json!({"claimed":true}))
             }
             Command::Revoke => {
                 session.validate(&bot_key(&ctx)?, Some("admin"))?;
-                ctx.sql()
+                ctx.db()
                     .execute("UPDATE identity SET revoked=1 WHERE singleton=1", None)
                     .await?;
                 for conn in ctx.conns_vec() {
@@ -283,11 +287,20 @@ pub async fn check_access(
         .await?;
     Ok(())
 }
+/// Idle time before the bot and memory actors sleep.
+const IDLE_SLEEP: std::time::Duration = std::time::Duration::from_mins(5);
+
 pub fn registry() -> Registry {
     let mut r = Registry::new();
-    r.register_actor::<Bot>("bot");
+    // Every turn checks access with the bot and searches memory, so both stay awake
+    // between questions instead of waking cold after rivetkit's 30 s default.
+    let awake = || ActorConfig {
+        sleep_timeout: IDLE_SLEEP,
+        ..ActorConfig::default()
+    };
+    r.register_actor_with::<Bot>("bot", awake());
     r.register_actor::<crate::conversation::Conversation>("conversation");
-    r.register_actor::<crate::memory::Memory>("memory");
+    r.register_actor_with::<crate::memory::Memory>("memory", awake());
     r
 }
 

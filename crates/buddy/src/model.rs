@@ -12,6 +12,8 @@ use rig::{
 use serde_json::{Value, json};
 use std::time::Duration;
 use tokio::sync::mpsc;
+/// Longest silence between two reads of a model response.
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 #[derive(Clone)]
 pub struct Model {
     inner: rig::Model<Chat>,
@@ -53,6 +55,12 @@ impl Model {
                 && url.password().is_none(),
             "invalid model URL"
         );
+        let plaintext = std::env::var("AI_ALLOW_PLAINTEXT_MODEL").is_ok_and(|v| v == "1");
+        ensure!(
+            url.scheme() == "https" || plaintext || is_loopback(&url),
+            "AI_BASE_URL needs https for a non-loopback host; set AI_ALLOW_PLAINTEXT_MODEL=1 \
+             only for a model on a trusted private network"
+        );
         let key = crate::auth::Secret::new(std::env::var("AI_API_KEY").unwrap_or_default());
         if provider == "openrouter" {
             ensure!(
@@ -93,6 +101,9 @@ impl Model {
         } else {
             let client = rig::rig_reqwest::reqwest::Client::builder()
                 .connect_timeout(Duration::from_secs(10))
+                // A stream that goes quiet this long between chunks is dead, well before
+                // the whole-request timeout.
+                .read_timeout(STREAM_IDLE_TIMEOUT)
                 .timeout(Duration::from_secs(90))
                 .redirect(rig::rig_reqwest::reqwest::redirect::Policy::none())
                 .build()?;
@@ -187,14 +198,37 @@ impl StreamBudget {
 const TOOL_CATALOG: &str = include_str!("model/tools.json");
 const VOICE_SCHEMA_SLOT: &str = "$voice_config";
 
-/// The tools offered to the model. Web search is offered only when it is configured.
-pub fn tools() -> Result<Vec<ToolDefinition>> {
-    let web_search = std::env::var("BRAVE_SEARCH_API_KEY").is_ok_and(|key| !key.is_empty());
+/// The tool definitions offered to the model, parsed once per process. `web_search` is
+/// offered only when `BRAVE_SEARCH_API_KEY` is set at first use.
+pub fn tools() -> Result<&'static [ToolDefinition]> {
+    static TOOLS: std::sync::OnceLock<std::result::Result<Vec<ToolDefinition>, String>> =
+        std::sync::OnceLock::new();
+    let tools = TOOLS.get_or_init(|| {
+        let web_search = std::env::var("BRAVE_SEARCH_API_KEY").is_ok_and(|key| !key.is_empty());
+        parse_tools(web_search).map_err(|error| format!("{error:#}"))
+    });
+    match tools {
+        Ok(tools) => Ok(tools),
+        Err(error) => Err(anyhow::anyhow!("{error}")),
+    }
+}
+
+fn parse_tools(web_search: bool) -> Result<Vec<ToolDefinition>> {
     catalog()?
         .into_iter()
         .filter(|v| web_search || v["function"]["name"] != "web_search")
         .map(|v| serde_json::from_value(v["function"].clone()).map_err(Into::into))
         .collect()
+}
+
+/// Whether the URL names this machine: `localhost` or a loopback address.
+fn is_loopback(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    }
 }
 
 fn catalog() -> Result<Vec<Value>> {
@@ -266,6 +300,25 @@ pub async fn search(query: &str) -> Result<Value> {
 mod tests {
     use super::*;
     use rig::streaming::{Part, UnknownPayload};
+    #[test]
+    fn only_loopback_hosts_may_skip_tls() {
+        let loopback = |url: &str| is_loopback(&url::Url::parse(url).unwrap());
+        assert!(loopback("http://127.0.0.1:11434/v1"));
+        assert!(loopback("http://127.8.0.1/v1"));
+        assert!(loopback("http://[::1]:8080/v1"));
+        assert!(loopback("http://LOCALHOST:11434/v1"));
+        assert!(!loopback("http://host.docker.internal:11434/v1"));
+        assert!(!loopback("http://192.168.1.20:11434/v1"));
+        assert!(!loopback("http://localhost.example.com/v1"));
+        assert!(!loopback("http://[::ffff:10.0.0.1]/v1"));
+    }
+    #[test]
+    fn tools_are_parsed_once() {
+        let first = tools().unwrap();
+        let second = tools().unwrap();
+        assert!(std::ptr::eq(first, second));
+        assert!(!first.is_empty());
+    }
     #[test]
     fn catalog_holds_every_tool_with_the_voice_schema() {
         let tools = catalog().unwrap();

@@ -65,9 +65,19 @@ Terminal status and terminal event commit in one transaction. Failed, interrupte
 
 Normal prompts load the latest 12 completed turns (bounded text, read through the `turns_completed` index), up to six matching facts plus two recent facts, and the current request. Full transcript data stays in SQLite and is accessible via history pages and an FTS5 history-search tool. This provides bounded normal context cost; lexical retrieval is not semantic search or a promise that every relevant fact is automatically retrieved. Tool receipts retain tool arguments/results separately from the final spoken answer.
 
-Rig uses a shared pooled HTTP transport with redirects disabled and connect/total deadlines; the web-search client is reused. Streaming uses a bounded channel and batches persisted deltas at 100 ms between sentence boundaries. Actor lookup is not performed per token. Device action authorization is checked fresh; active generation and event delivery share a one-second revocation-check cache, bounding revocation propagation while reducing cross-actor reads. Output events go only to connections subscribed to `output`. Each connection's session is verified once and its expiry cached. A connection whose session has expired is disconnected before the event is sent. A failed revocation check disconnects every connection. A process-wide inference semaphore defaults to 16 concurrent model calls and rejects overflow; no global actor is involved. No actor is kept awake after its registered work finishes. Robot status polling currently wakes the Bot actor every three seconds while connected.
+Rig uses a shared pooled HTTP transport with redirects disabled and connect/total deadlines; the web-search client is reused. A model stream that sends nothing for 30 s fails its turn. Streaming uses a bounded channel. Text between sentence boundaries commits at most 200 ms after the previous commit, and only while text is waiting; an idle stream wakes once a second for the stop and access check and runs no SQL. Actor lookup is not performed per token.
 
-Do not claim throughput improvements without measurement. Establish release-build baselines for first-token latency, SQLite operations per turn, checkpoint bytes, event bytes, memory per active run, and idle wakeups before changing batching or context limits. Semantic memory, summarization, multi-conversation indexing and event-retention policies are future extensions.
+Model endpoints. An `openai_compatible` `AI_BASE_URL` must use `https` unless its host is `localhost` or a loopback address. `AI_ALLOW_PLAINTEXT_MODEL=1` allows plain HTTP to another host, for a model on a trusted private network only. Startup fails otherwise.
+
+Revocation. Every device action except `SpeechChunk`, and every connect, asks the Bot actor fresh, so a revoke fails them at once. Four checks may reuse a check that passed in the last second: speech chunk polling, a subscription right after its connect, and the generation and delivery checks of a running turn. A revoke therefore stops a running turn and its speech within about one second. The cache dates from when the passing check began and is cleared by any failed check. The memory actor checks every call fresh: its agent calls in one turn are seconds apart, so a one-second cache would not save a check.
+
+Delivery. Output events go only to connections subscribed to `output`. Each connection's session is verified once and its expiry cached. A connection whose session has expired is disconnected before the event is sent. If that disconnect fails and the connection is still open, the event is not broadcast: it goes one by one to the valid connections this process saw subscribe, and the others catch up through `Replay`. A failed revocation check disconnects every connection.
+
+A process-wide inference semaphore defaults to 16 concurrent model calls and rejects overflow; no global actor is involved. Every turn checks access with the Bot actor and searches the Memory actor, so both sleep after 5 minutes idle instead of rivetkit's 30 s default; Conversation keeps the default. Robot status polling currently wakes the Bot actor every three seconds while connected.
+
+Retention. The newest 50 turns keep their event log, speech chunks, pinned voice and tool receipts. Older turns keep their record, answer and history search row. After every 8 finished turns a background pass deletes older rows in bounded batches (2,048 events and 512 rows of each other table per transaction). It never touches a queued or running turn or anything newer. A `Replay` cursor older than the window continues from the oldest kept event. A pruned turn has no chunks, so a speech poll for it reads `done` and nothing old is spoken again; `SpokenAnswer` still returns its answer, in the current voice.
+
+Do not claim throughput improvements without measurement. SQLite statements and transactions per turn are measured by `tests/core_sql_counts.rs` (see `docs/research/benchmarks.md`). First-token latency, checkpoint bytes, event bytes, memory per active run and idle wakeups still need release-build baselines before batching or context limits change. Semantic memory, summarization and multi-conversation indexing are future extensions.
 
 ## Enrollment and storage
 
@@ -87,9 +97,13 @@ The provider runs on its own task. It feeds a bounded channel of 16 deltas. Stor
 
 At each sentence boundary, one transaction commits the pending `text.delta`, the speech chunk and its `speech.ready`. Every insert is guarded on the running turn. Events are delivered after the commit. Replay order is unchanged: text first, then each chunk and its ready event.
 
-Each running turn has an in-process stop signal. A terminal cancel or failure fires it after its transaction commits. The stream consumer then returns at once and the provider task is aborted, which closes the provider connection. The consumer handles each wake-up after `select!` returns, so no SQLite transaction is dropped mid-flight. Durable turn status stays the source of truth. Checkpoints, tool intents and chunk writes use `RETURNING` and fail with "turn cancelled" on zero rows.
+Each running turn has an in-process stop signal. A terminal cancel or failure fires it after its transaction commits; so do the 180 s turn deadline and actor shutdown. The stream consumer then returns at once and the provider task is aborted, which closes the provider connection. Memory and web search calls of a tool stop with it too, leaving their intent without a result. The consumer handles each wake-up after `select!` returns, so no SQLite transaction is dropped mid-flight. A turn gets 2 s to reach its next stop check after the deadline or shutdown; only a turn stuck past that is dropped. Durable turn status stays the source of truth. Checkpoints, tool intents and chunk writes use `RETURNING` and fail with "turn cancelled" on zero rows.
 
-Before the first model call, memory search, persona and recent history load concurrently. The `model_pending` checkpoint commits before the request is sent. The spoken phase pins the voice while context and facts load. The pinned voice holds the chosen voice only, not the voice catalog.
+If marking a turn failed fails, it is retried three times. If all fail, the next drain marks every running turn failed before it claims. A failed drain is retried after 100 ms, doubling, five times; a later submit starts a new drain even while the bot is busy.
+
+The claim is one transaction: it marks the turn running, commits `turn.started`, and reads the saved run, the system prompt and recent turns (a fresh run) or the completed tool calls and spoken bytes (a resumed run), and the runtime context. Rows are parsed after the commit, so a bad row fails the turn instead of leaving it queued. The memory search follows, then the `model_pending` checkpoint commits before the request is sent. Later rounds keep the completed tool calls and spoken bytes in memory. If the provider fails mid-stream, text not yet committed is committed first, so the failed turn keeps what was said. The spoken phase pins the voice while context and facts load. The pinned voice holds the chosen voice only, not the voice catalog.
+
+`Replay` pages hold at most 128 events and 512 KiB of payload, counting 64 bytes per event, half of rivetkit's 1 MiB message limit. A page always holds at least one event, even one larger than the budget, and clients page until a page is empty.
 
 One model call may stream 128 KiB of text and 256 KiB in total. The total counts reasoning, tool arguments and unknown provider payloads. Reasoning is counted and dropped, never forwarded.
 
@@ -129,11 +143,26 @@ At 5,000 turns, `tests/history_sql.rs` measured 42 batches. The largest wrote 84
 
 Rivet references: [SQLite](https://rivet.dev/actors/docs/sqlite/), [Limits](https://rivet.dev/actors/docs/limits/), [SQLite profiling](https://rivet.dev/actors/docs/sqlite-profiling/).
 
+- Every statement goes through `db::Db::db`, which counts statements, auto-commit statements and transactions per process. `tests/core_sql_counts.rs` reads those counts around real turns.
 - Every transaction has a static name, such as `conversation.finish_turn` or `conversation.history_backfill`. Names appear in Rivet errors and profiles.
+- Ordinary transactions time out after 10 s (`db::named`); history rebuild and retention batches after 30 s (`db::named_for`). Each holds a few local statements, so a longer hold means something is wrong.
 - Transaction callbacks await only the transaction handle. Actor calls, provider requests and event delivery happen before or after the commit.
-- A read followed by a write either runs in one transaction or is one guarded statement. Examples are the claim failure counter, the facts cap, settings revisions and the factory persona adoption.
-- Work that grows with history runs in bounded batches, never in one transaction. Limits: 32,768 pages (128 MiB) per transaction, a 60 s default timeout, and a queue of 128 transactions.
+- A read followed by a write either runs in one transaction or is one guarded statement. Examples are the turn claim, the claim confirmation and its failure counter, the facts cap, settings revisions, a tool's persona activation and the factory persona adoption.
+- Work that grows with history runs in bounded batches, never in one transaction: the history search rebuild and retention. Limits: 32,768 pages (128 MiB) per transaction, a 60 s default timeout, and a queue of 128 transactions.
 - Schema changes run in `create`, before any action. The claim failures column is added only after a check that it is missing, and the check runs again if the add fails.
+- A Conversation wake skips `conversation.sql`, the settings seeds and factory adoption when `PRAGMA user_version` is at least 1 and no older history trigger exists. Code before this version never sets it and always runs the full, idempotent path, so a rolling deploy works in both directions. A unit test pins the schema file's hash to the version: a schema change must raise both.
+
+Building `turns_completed` on a history that predates it is one statement in one transaction. `tests/core_index_cost.rs` measured the pages it writes:
+
+| Turns | Pages written | Share of the 32,768-page limit | Seconds (in-memory) |
+|---|---|---|---|
+| 5,000 | 79 | 0.2% | 0.001 |
+| 50,000 | 776 | 2.4% | 0.071 |
+| 100,000 | 1,557 | 4.8% | 0.062 |
+| 500,000 | 7,815 | 23.8% | 1.6 |
+| 1,000,000 | 15,635 | 47.7% | 1.5 |
+
+The cost is about 15.6 pages per 1,000 turns, so one transaction holds the build up to about 2.1 million turns. The supported size is 1 million turns, which the test asserts. Retention keeps every turn record, so history still grows with use: at 200 turns a day, 1 million turns is about 13 years. Only a database created before the index needs the build, once.
 
 Profiling needs rivetkit's `sqlite-local` feature. This build uses the default `sqlite` feature (`sqlite-remote`), so `RIVETKIT_SQLITE_PROFILING` and the `rivet_rivetkit_sqlite_*` metrics do nothing here. To profile locally:
 
@@ -141,4 +170,4 @@ Profiling needs rivetkit's `sqlite-local` feature. This build uses the default `
 2. Set `RIVETKIT_SQLITE_PROFILING='{}'`. An empty object profiles every query. `filterQueries` and `filterQueryFingerprints` narrow it.
 3. Read the "sampled SQLite operation profile" and "sqlite fingerprint catalog" log lines, and the `rivet_rivetkit_sqlite_*` Prometheus series.
 
-The fingerprint catalog keeps 512 statements but only 8 transactions per process. Profile one actor type at a time, through `ActorConfig.sqlite_profiling`. Until then, `docs/research/benchmarks.md` counts statements per turn from the code.
+The fingerprint catalog keeps 512 statements but only 8 transactions per process. Profile one actor type at a time, through `ActorConfig.sqlite_profiling`. The wrapper counts work in every build.
