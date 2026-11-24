@@ -1,12 +1,12 @@
 {
-  "label": "robot-buddy",
-  "commit": "06fb153",
+  "label": "qa-bench-candidate",
+  "commit": "5351762",
   "git": {
-    "sha": "06fb153bdae6fb4bb6175f070095c1a73e9d4e66",
-    "describe": "06fb153",
+    "sha": "5351762bf285e8a3ece7c5ca8980458349ac7624",
+    "describe": "5351762",
     "dirty": false
   },
-  "date": "2026-11-24T17:14:53.999Z",
+  "date": "2026-11-24T18:22:31.266Z",
   "platform": "darwin arm64 Apple M4 Pro",
   "machine": {
     "platform": "darwin",
@@ -16,12 +16,12 @@
     "cpus": 14,
     "memory_gb": 64,
     "bun": "1.4.4",
-    "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)"
+    "rustc": "rustc 1.100.0 (0ef1bc386 2026-11-09)"
   },
   "load_average": [
-    5.5,
-    9.3,
-    8
+    4.9,
+    5.9,
+    7.5
   ],
   "rivetkit": "3.1.1",
   "turns": 20,
@@ -30,47 +30,47 @@
   "note": null,
   "failed_turns": 0,
   "cold_turn_ms": {
-    "speech_ready": 565.2392578125,
-    "speech_request": 566.292724609375,
-    "player_start": 91.423583984375,
-    "first_pcm": 867.91748046875,
-    "completed": 720.7890625
+    "speech_ready": 596.207763671875,
+    "speech_request": 597.146728515625,
+    "player_start": 125.11572265625,
+    "first_pcm": 898.743896484375,
+    "completed": 752.388671875
   },
   "metrics_ms": {
     "submit_to_turn_started": {
       "n": 20,
-      "p50": 28.9,
-      "p95": 31.1,
-      "p99": 32.2,
-      "max": 32.2
+      "p50": 26.2,
+      "p95": 39.9,
+      "p99": 42.5,
+      "max": 42.5
     },
     "submit_to_first_text_delta": {
       "n": 20,
-      "p50": 300.5,
-      "p95": 306.1,
-      "p99": 310.3,
-      "max": 310.3
+      "p50": 299.9,
+      "p95": 313,
+      "p99": 323.5,
+      "max": 323.5
     },
     "submit_to_first_speech_ready": {
       "n": 20,
-      "p50": 385.7,
-      "p95": 405.3,
-      "p99": 407.2,
-      "max": 407.2
+      "p50": 384.4,
+      "p95": 416,
+      "p99": 417.9,
+      "max": 417.9
     },
     "submit_to_first_pcm_byte": {
       "n": 20,
-      "p50": 687.7,
-      "p95": 707.3,
-      "p99": 709.2,
-      "max": 709.2
+      "p50": 684.9,
+      "p95": 716.8,
+      "p99": 721.7,
+      "max": 721.7
     },
     "submit_to_turn_completed": {
       "n": 20,
-      "p50": 565.6,
-      "p95": 605.9,
-      "p99": 607.1,
-      "max": 607.1
+      "p50": 575.2,
+      "p95": 602.2,
+      "p99": 608.6,
+      "max": 608.6
     },
     "silence_gap_within_reply": {
       "n": 0,
@@ -87,24 +87,24 @@
     },
     "barge_in_to_audio_closed": {
       "n": 5,
-      "p50": 1.4,
-      "p95": 1.6,
-      "p99": 1.6,
-      "max": 1.6
+      "p50": 1.3,
+      "p95": 1.8,
+      "p99": 1.8,
+      "max": 1.8
     },
     "barge_in_to_turn_terminal_event": {
       "n": 5,
-      "p50": 11.3,
-      "p95": 14.9,
-      "p99": 14.9,
-      "max": 14.9
+      "p50": 13,
+      "p95": 16.5,
+      "p99": 16.5,
+      "max": 16.5
     },
     "barge_in_to_provider_stream_closed": {
       "n": 5,
-      "p50": 11.3,
-      "p95": 14.9,
-      "p99": 14.9,
-      "max": 14.9
+      "p50": 13,
+      "p95": 16.3,
+      "p99": 16.3,
+      "max": 16.3
     }
   },
   "audio": {
@@ -115,14 +115,14 @@
   },
   "rss_kb": {
     "server": {
-      "after_warmup": 41680,
-      "max": 42304,
-      "end": 42304
+      "after_warmup": 41744,
+      "max": 42432,
+      "end": 42432
     },
     "engine": {
-      "after_warmup": 71440,
-      "max": 91904,
-      "end": 91904
+      "after_warmup": 71936,
+      "max": 92992,
+      "end": 92992
     }
   },
   "fake_speech_fell_behind_ms": {
@@ -134,90 +134,13 @@
   "per_turn": [
     {
       "kind": "turn.completed",
-      "ready": 387,
-      "pcm": 689,
-      "done": 604,
+      "ready": 383,
+      "pcm": 684,
+      "done": 598,
       "gaps": [],
       "samples": [
         110880,
         110880
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 385,
-      "pcm": 686,
-      "done": 601,
-      "gaps": [],
-      "samples": [
-        115200,
-        115200
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 330,
-      "pcm": 632,
-      "done": 529,
-      "gaps": [],
-      "samples": [
-        82080,
-        82080
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 399,
-      "pcm": 699,
-      "done": 556,
-      "gaps": [],
-      "samples": [
-        93600,
-        93600
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 385,
-      "pcm": 686,
-      "done": 600,
-      "gaps": [],
-      "samples": [
-        110880,
-        110880
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 381,
-      "pcm": 683,
-      "done": 596,
-      "gaps": [],
-      "samples": [
-        115200,
-        115200
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 328,
-      "pcm": 631,
-      "done": 530,
-      "gaps": [],
-      "samples": [
-        82080,
-        82080
-      ]
-    },
-    {
-      "kind": "turn.completed",
-      "ready": 400,
-      "pcm": 703,
-      "done": 555,
-      "gaps": [],
-      "samples": [
-        93600,
-        93600
       ]
     },
     {
@@ -227,15 +150,48 @@
       "done": 602,
       "gaps": [],
       "samples": [
+        115200,
+        115200
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 331,
+      "pcm": 632,
+      "done": 532,
+      "gaps": [],
+      "samples": [
+        82080,
+        82080
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 418,
+      "pcm": 722,
+      "done": 575,
+      "gaps": [],
+      "samples": [
+        93600,
+        93600
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 386,
+      "pcm": 687,
+      "done": 602,
+      "gaps": [],
+      "samples": [
         110880,
         110880
       ]
     },
     {
       "kind": "turn.completed",
-      "ready": 390,
-      "pcm": 691,
-      "done": 606,
+      "ready": 384,
+      "pcm": 684,
+      "done": 599,
       "gaps": [],
       "samples": [
         115200,
@@ -245,8 +201,8 @@
     {
       "kind": "turn.completed",
       "ready": 328,
-      "pcm": 630,
-      "done": 531,
+      "pcm": 629,
+      "done": 532,
       "gaps": [],
       "samples": [
         82080,
@@ -255,9 +211,9 @@
     },
     {
       "kind": "turn.completed",
-      "ready": 405,
-      "pcm": 707,
-      "done": 561,
+      "ready": 416,
+      "pcm": 717,
+      "done": 572,
       "gaps": [],
       "samples": [
         93600,
@@ -268,7 +224,7 @@
       "kind": "turn.completed",
       "ready": 388,
       "pcm": 689,
-      "done": 604,
+      "done": 602,
       "gaps": [],
       "samples": [
         110880,
@@ -277,9 +233,9 @@
     },
     {
       "kind": "turn.completed",
-      "ready": 382,
-      "pcm": 684,
-      "done": 596,
+      "ready": 384,
+      "pcm": 685,
+      "done": 599,
       "gaps": [],
       "samples": [
         115200,
@@ -288,9 +244,9 @@
     },
     {
       "kind": "turn.completed",
-      "ready": 329,
-      "pcm": 631,
-      "done": 530,
+      "ready": 320,
+      "pcm": 622,
+      "done": 531,
       "gaps": [],
       "samples": [
         82080,
@@ -301,7 +257,7 @@
       "kind": "turn.completed",
       "ready": 405,
       "pcm": 706,
-      "done": 560,
+      "done": 562,
       "gaps": [],
       "samples": [
         93600,
@@ -310,9 +266,9 @@
     },
     {
       "kind": "turn.completed",
-      "ready": 391,
-      "pcm": 692,
-      "done": 607,
+      "ready": 386,
+      "pcm": 685,
+      "done": 600,
       "gaps": [],
       "samples": [
         110880,
@@ -321,9 +277,9 @@
     },
     {
       "kind": "turn.completed",
-      "ready": 386,
-      "pcm": 688,
-      "done": 602,
+      "ready": 394,
+      "pcm": 694,
+      "done": 609,
       "gaps": [],
       "samples": [
         115200,
@@ -332,9 +288,9 @@
     },
     {
       "kind": "turn.completed",
-      "ready": 321,
-      "pcm": 622,
-      "done": 521,
+      "ready": 318,
+      "pcm": 617,
+      "done": 519,
       "gaps": [],
       "samples": [
         82080,
@@ -343,9 +299,53 @@
     },
     {
       "kind": "turn.completed",
-      "ready": 407,
-      "pcm": 709,
-      "done": 566,
+      "ready": 410,
+      "pcm": 710,
+      "done": 562,
+      "gaps": [],
+      "samples": [
+        93600,
+        93600
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 380,
+      "pcm": 681,
+      "done": 595,
+      "gaps": [],
+      "samples": [
+        110880,
+        110880
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 376,
+      "pcm": 677,
+      "done": 590,
+      "gaps": [],
+      "samples": [
+        115200,
+        115200
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 336,
+      "pcm": 636,
+      "done": 536,
+      "gaps": [],
+      "samples": [
+        82080,
+        82080
+      ]
+    },
+    {
+      "kind": "turn.completed",
+      "ready": 400,
+      "pcm": 699,
+      "done": 555,
       "gaps": [],
       "samples": [
         93600,
@@ -356,37 +356,37 @@
   "per_barge": [
     {
       "end_kind": "turn.cancelled",
-      "audio_closed": 1,
+      "audio_closed": 1.4,
+      "terminal_event": 13,
+      "provider_closed": 13,
+      "player_stopped": true
+    },
+    {
+      "end_kind": "turn.cancelled",
+      "audio_closed": 1.1,
       "terminal_event": 11,
       "provider_closed": 11,
       "player_stopped": true
     },
     {
       "end_kind": "turn.cancelled",
-      "audio_closed": 1.6,
-      "terminal_event": 15,
-      "provider_closed": 15,
+      "audio_closed": 1.3,
+      "terminal_event": 17,
+      "provider_closed": 16,
       "player_stopped": true
     },
     {
       "end_kind": "turn.cancelled",
-      "audio_closed": 1.6,
-      "terminal_event": 10,
-      "provider_closed": 10,
-      "player_stopped": true
-    },
-    {
-      "end_kind": "turn.cancelled",
-      "audio_closed": 1.4,
+      "audio_closed": 1.8,
       "terminal_event": 12,
-      "provider_closed": 11,
+      "provider_closed": 12,
       "player_stopped": true
     },
     {
       "end_kind": "turn.cancelled",
-      "audio_closed": 1.1,
-      "terminal_event": 10,
-      "provider_closed": 10,
+      "audio_closed": 1.2,
+      "terminal_event": 14,
+      "provider_closed": 14,
       "player_stopped": true
     }
   ],
@@ -398,17 +398,17 @@
   "failures": [],
   "leaks": [],
   "findings": {
-    "robot_sigterm_exit_ms": 51
+    "robot_sigterm_exit_ms": 50
   },
   "load_average_end": [
-    4.6,
-    7.5,
-    7.5
+    5.9,
+    6.6,
+    7.6
   ],
   "noise": {
     "ok": true,
     "reasons": [],
-    "load_per_cpu": 0.39,
+    "load_per_cpu": 0.42,
     "fake_late_frames": 0,
     "fake_late_max_ms": 0,
     "limits": {
