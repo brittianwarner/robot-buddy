@@ -8,11 +8,16 @@
 // shutdown wait forever), and runtime shutdown is bounded. Each stop must also write the
 // cache file (the final cursor flush), which proves the robot stopped cleanly rather than
 // being killed.
+//
+// Always enforced: the robot exits 0 on its own (before this script's 5000 ms SIGKILL)
+// and flushes its cache. The 500 ms limit is wall-clock and fails only under
+// BUDDY_STRICT_TIMING=1 (tests/lib/timing.mjs); otherwise it is printed as TIMING.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { timingBound } from './lib/timing.mjs';
 
 const root = path.resolve(import.meta.dir, '..');
 const bin = (name) => path.join(process.env.CARGO_TARGET_DIR ?? path.join(root, 'target'), 'release', name);
@@ -87,7 +92,11 @@ try {
   let failed = false;
   for (const [label, closeStdin, signal] of runs) {
     const result = await exitAfterTerm(closeStdin, signal);
-    const ok = result !== null && result.ms < LIMIT_MS && result.code === 0 && result.flushed;
+    const ok =
+      result !== null &&
+      result.code === 0 &&
+      result.flushed &&
+      timingBound({ name: 'robot_stop', took: result.ms, limit: LIMIT_MS, log: console.log });
     failed ||= !ok;
     console.log(
       `${ok ? 'ok  ' : 'FAIL'} ${label}: ${

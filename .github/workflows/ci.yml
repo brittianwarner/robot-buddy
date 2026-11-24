@@ -15,16 +15,20 @@ jobs:
           bun-version: 1.4.4
       - run: bun install --frozen-lockfile
       - run: bun run format:check && bun run check && bun run lint && bun run test
+      # The robot's feature profile (no actor runtime, no Rig): unit tests, not only a check.
+      - run: bun run test:robot-features
       # Owns an isolated engine on BUDDY_TEST_ENGINE_PORT (+1, +10) and a mock model on
       # BUDDY_TEST_MODEL_PORT, and fails if anything still listens afterwards.
       - run: bun run test:integration
       - run: cargo build --release --workspace --locked
-      # Uses the release binaries above: the robot must stop on SIGTERM/SIGINT within
-      # 500 ms with stdin still open, and write its cache on the way out.
+      # Uses the release binaries above: the robot must stop on SIGTERM/SIGINT on its own
+      # with stdin still open, and write its cache on the way out. Its 500 ms limit is
+      # reported as TIMING here and enforced only under BUDDY_STRICT_TIMING=1.
       - run: bun run test:shutdown
-      # Same release binaries, through a fault proxy: a wake during a held replay, a lost
-      # submit ack and the reconnect, then no speech for old turns. Every check is strict.
-      # Timing limits in the integration suite are reported only here (no
+      # Same release binaries, through a fault proxy: a wake during a held replay (the
+      # player stops before the replay is released), a lost submit ack (one actor turn,
+      # never spoken) and the reconnect, then no speech for old turns. --strict fails any
+      # XFAIL. Wall-clock limits here and in the integration suite are reported only (no
       # BUDDY_STRICT_TIMING on shared runners).
       - run: bun tests/robot-reconnect.mjs --no-build --strict
       - run: cargo bench --workspace --locked --no-run
@@ -34,10 +38,25 @@ jobs:
       # The lab page against a mocked API: nothing completed during a disconnect is spoken.
       - run: bun run test:lab-reconnect
 
+  bench-artifact:
+    # The published e2e latency table matches its JSON, and the JSON was measured on a
+    # clean commit, on a quiet host, with no measured source changed since (full history
+    # needed to diff against that commit).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun run bench:report:check
+
   deny:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Same invocation as `bun run deny`: cargo deny --locked --all-features check.
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check

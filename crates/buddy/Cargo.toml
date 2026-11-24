@@ -3,6 +3,10 @@ name = "robot-buddy"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
+# Only the [[bench]] targets below are benches; benches/legacy_sentences.rs is a module
+# of the sentences bench, not a bench of its own.
+autobenches = false
 
 [features]
 default = ["server"]

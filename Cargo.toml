@@ -5,12 +5,16 @@ resolver = "3"
 edition = "2024"
 version = "0.1.0"
 license = "MIT"
+# Nothing here goes to crates.io; cargo-deny's allow-wildcard-paths relies on this.
+publish = false
 [workspace.dependencies]
 anyhow = "1"
 async-trait = "0.1"
 axum = { version = "0.8", features = ["form"] }
 base64 = "0.22"
-ed25519-dalek = { version = "2", features = ["rand_core"] }
+# zeroize: SigningKey clears its secret scalar on drop. It is a default feature today;
+# naming it keeps it on if default features are ever turned off.
+ed25519-dalek = { version = "2", features = ["rand_core", "zeroize"] }
 futures-util = "0.3"
 hmac = "0.12"
 rand = "0.8"

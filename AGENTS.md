@@ -1,6 +1,6 @@
 # Robot Buddy
 
-Independent Rust project. Backend and device application code stays Rust. Bun/Turborepo runs Cargo tasks; use `bun install`, `bun run check`, `bun run lint`, `bun run test`, `bun run format:check`, and `bun run test:integration`.
+Independent Rust project. Backend and device application code stays Rust. Bun/Turborepo runs Cargo tasks; use `bun install`, `bun run check`, `bun run lint`, `bun run test`, `bun run format:check`, and `bun run test:integration`. `bun run check:all` runs the whole local gate in CI order and stops at the first failure ([testing](docs/testing.md)). Wall-clock limits in tests fail only under `BUDDY_STRICT_TIMING=1`; otherwise assert ordering and functional facts.
 
 Read [architecture](docs/architecture/backend.md), [acceptance status](docs/plans/implementation.md), and [Rig source findings](docs/research/rig-integration.md) before changing the agent runtime. Pin Rig checkpoint format with its crate version and handle migrations explicitly.
 

@@ -9,6 +9,7 @@
     "build": "turbo run build",
     "check": "turbo run check",
     "test": "turbo run test",
+    "test:robot-features": "cargo test -p robot-buddy --no-default-features --locked",
     "lint": "turbo run lint",
     "lint:pedantic": "turbo run lint:pedantic",
     "deny": "cargo deny --locked --all-features check",
@@ -19,12 +20,14 @@
     "test:reconnect": "bun tests/robot-reconnect.mjs",
     "bench:e2e": "bun tests/bench-e2e.mjs",
     "bench:report": "bun tests/e2e-report.mjs --write",
+    "bench:report:check": "bun tests/e2e-report.mjs --check",
     "eval:voice": "bun tests/eval-voice.mjs",
     "test:container": "cargo test -p robot-buddy-server --test container -- --ignored",
     "test:lab": "bun tests/lab.mjs",
     "test:lab-reconnect": "bun apps/server/tests/lab-reconnect.mjs",
     "dev:lab": "docker compose -f compose.local.yaml up --build -d",
-    "dev:lab:stop": "docker compose -f compose.local.yaml down"
+    "dev:lab:stop": "docker compose -f compose.local.yaml down",
+    "check:all": "bun scripts/check-all.mjs"
   },
   "devDependencies": {
     "playwright": "1.64.0",

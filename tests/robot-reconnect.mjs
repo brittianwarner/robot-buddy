@@ -13,20 +13,26 @@
 //   1. Turn A plays to the end.
 //   2. Long turn B plays. Everything the engine sends on the robot's WebSocket is held (a
 //      silent socket), so the robot's 2 s live catch-up replay fires and its response is
-//      held too. A wake arrives. Checks: B ends turn.cancelled, and its player stops within
-//      WAKE_STOP_MS while the replay is still held.
+//      held too. A wake arrives. Checks: B ends turn.cancelled, and its player stops while
+//      the replay is still held (ordering, always enforced) within WAKE_STOP_MS (a
+//      wall-clock limit, enforced only under BUDDY_STRICT_TIMING=1; tests/lib/timing.mjs).
 //   3. Turn C's submit runs on the actor but its ack is lost: the connection is cut. The
-//      robot reconnects.
-//   4. Turn D plays.
-//   Then: no speech request for A or B after the reconnect. C's are reported, not checked.
+//      robot reconnects. Checks: C ran as exactly one actor turn (one turn ID, one model
+//      call), and C is never spoken: zero speech requests and zero player samples. Only
+//      newly acknowledged turns are spoken, and C's ack never arrived.
+//   4. Turn D plays: the positive control that speech still works after the reconnect.
+//   Then: no speech request for A or B after the reconnect.
 //
 // Same port rules as the bench (BENCH_PORT_BASE); refuses busy ports. A check may carry an
 // `xfail` (a known bug): reported as XFAIL, and failed only under --strict.
 import fs from 'node:fs';
 import { gitDescribe, now, sleep, startStack, TERMINAL } from './lib/stack.mjs';
+import { timingBound } from './lib/timing.mjs';
 
-/** Longest acceptable wake → player stop while a replay is outstanding. */
+/** Longest acceptable wake → player stop while a replay is outstanding (strict timing). */
 export const WAKE_STOP_MS = 1000;
+/** How long the pushes and the replay stay held after the wake, at most. */
+const HOLD_MS = 3000;
 
 const MARKERS = { a: 'amber', b: 'birch', c: 'cedar', d: 'dune' };
 export const reconnectReply = (text) => {
@@ -82,9 +88,11 @@ export async function reconnectScenario(stack, { log = () => {} } = {}) {
     await sleep(200);
     const streaming = stack.model.open.size > 0;
     const tw = control({ wake: true });
-    const stoppedWhileHeld = await until('player stop while the replay is held', async () => player.closed, WAKE_STOP_MS).catch(() => null);
-    // Hold a little longer, then let everything through.
-    await sleep(2000);
+    await until('player stop while the replay is held', async () => player.closed, HOLD_MS).catch(() => null);
+    // Keep holding at least 2 s past the wake and 0.5 s past the stop, so a stop cannot be
+    // credited to the release, then let everything through.
+    await sleep(Math.max(500, tw + 2000 - now()));
+    const released = now();
     proxy.release();
     const end = await endOf(started.turn_id, 30000).catch(() => null);
     await until('birch player stop', async () => player.closed, 20000).catch(() => {});
@@ -95,10 +103,16 @@ export async function reconnectScenario(stack, { log = () => {} } = {}) {
     check('wake during a held replay: B player stops', Boolean(player.closed && !player.end), {
       wake_to_player_stop_ms: metrics.wake_to_player_stop_ms,
     });
+    const stoppedWhileHeld = Boolean(player.closed && player.closed < released);
+    check('wake during a held replay: B player stops before the replay is released', stoppedWhileHeld, {
+      wake_to_player_stop_ms: metrics.wake_to_player_stop_ms,
+      wake_to_release_ms: Math.round(released - tw),
+    });
     check(
       `wake during a held replay: B player stops within ${WAKE_STOP_MS} ms`,
-      Boolean(stoppedWhileHeld),
-      { wake_to_player_stop_ms: metrics.wake_to_player_stop_ms, replay_held_ms: Math.round(now() - held) },
+      stoppedWhileHeld &&
+        timingBound({ name: 'reconnect_wake_to_player_stop', took: player.closed - tw, limit: WAKE_STOP_MS, log }),
+      { wake_to_player_stop_ms: metrics.wake_to_player_stop_ms, replay_held_ms: Math.round(released - held) },
     );
     await sleep(500);
   }
@@ -118,7 +132,7 @@ export async function reconnectScenario(stack, { log = () => {} } = {}) {
     const started = await turnFor(MARKERS.c, t0, 30000).catch(() => null);
     const end = started ? await endOf(started.turn_id).catch(() => null) : null;
     metrics.cedar_turn_end = end?.kind ?? null;
-    check('lost submit ack: the turn ran once on the actor', Boolean(started), { end: end?.kind ?? null });
+    check('lost submit ack: the turn ends on the actor', Boolean(end), { started: Boolean(started), end: end?.kind ?? null });
     await sleep(1000);
   }
 
@@ -136,9 +150,34 @@ export async function reconnectScenario(stack, { log = () => {} } = {}) {
     });
   }
 
+  // Counted after D, so a late duplicate of C (a second submit, its events or its speech)
+  // has had a whole turn's time to show up.
+  {
+    const ids = new Set(
+      stack.events.filter((e) => e.kind === 'turn.started' && e.payload?.text?.includes(`check ${MARKERS.c}`)).map((e) => e.turn_id),
+    );
+    const calls = stack.model.streams.filter((m) => m.reply.includes(`The ${MARKERS.c} answer`)).length;
+    metrics.cedar_actor_turns = ids.size;
+    metrics.cedar_model_calls = calls;
+    check('lost submit ack: exactly one actor turn for C', ids.size === 1 && calls === 1, {
+      turn_ids: ids.size,
+      model_calls: calls,
+      expected: 1,
+    });
+    const requests = requestsFor(MARKERS.c);
+    const samples = playersFor(MARKERS.c).reduce((n, p) => n + p.total / (2 * p.channels), 0);
+    metrics.cedar_speech_requests = requests.length;
+    metrics.cedar_player_samples = samples;
+    check('lost submit ack: C is never spoken', requests.length === 0 && samples === 0, {
+      speech_requests: requests.length,
+      player_samples: samples,
+      expected: 0,
+      inputs: requests.map((q) => q.input),
+    });
+  }
+
   const old = [MARKERS.a, MARKERS.b].flatMap((m) => requestsFor(m, reconnected));
   metrics.old_speech_requests_after_reconnect = old.length;
-  metrics.cedar_speech_requests = requestsFor(MARKERS.c).length;
   check('after the reconnect: no speech request for an old turn', old.length === 0, {
     observed: old.length,
     expected: 0,

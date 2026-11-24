@@ -3,6 +3,7 @@ name = "robot-buddy-robot"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 [dependencies]
 # Contracts and device credentials only; the robot never links the actor runtime.
 robot-buddy = { path = "../../crates/buddy", default-features = false }

@@ -4,6 +4,14 @@ What each suite proves, how to run it, and what none of them prove. Run everythi
 the repository root with Bun (`bun install` first). Results from a dated run are in
 [validation](research/validation.md); latency numbers are in [e2e latency](research/e2e-latency.md).
 
+`bun run check:all` (`scripts/check-all.mjs`) runs the whole local gate in CI order and
+stops at the first failure: fmt, Clippy `-D warnings`, `lint:pedantic`, `cargo test`, the
+robot feature profile, `deny`, `test:integration`, a release build, `test:shutdown`,
+`tests/robot-reconnect.mjs --no-build --strict`, `test:lab-reconnect`, `eval:voice` and
+`bench:report:check`. It passes its environment to every step, so set the port variables
+(see [ports](#ports)) and `BUDDY_STRICT_TIMING` once in front of it, and it ends with a
+table of every step's result and wall time. `-- --from <step>` resumes at a step.
+
 ## Suites
 
 | Command | Runs in CI | Needs | Proves |
@@ -11,19 +19,21 @@ the repository root with Bun (`bun install` first). Results from a dated run are
 | `bun run format:check`, `bun run check`, `bun run lint` | yes | Rust toolchain | Formatting, type check of every target, Clippy with `-D warnings`. |
 | `bun run lint:pedantic` | via `lint` | Rust toolchain | Clippy pedantic with the four noisy lints allowed. `[workspace.lints.clippy]` already enables the same set, so `bun run lint` (`-D warnings`) gates it; this script only spells it out. |
 | `bun run test` | yes | Rust toolchain | Unit tests plus the offline integration-test crates below. Tests that need an engine are `#[ignore]`d here. |
-| `bun run test:integration` | yes | Network once (engine download), free ports | Four engine-backed test binaries, one after another: the actor scenarios (`actors`), plus `core_sql_counts`, `core_retention` and `core_logs`, against a real Rivet engine, including output-event fixtures captured from the actor and the version 1 history upgrade. Timing limits are reported, not enforced (see [timing limits](#timing-limits)). |
-| `cargo build --release`, `cargo bench --no-run` | yes | Rust toolchain | Release builds link; benches compile. |
+| `bun run test:robot-features` | yes | Rust toolchain | `cargo test -p robot-buddy --no-default-features --locked`: the shared crate's tests in the feature profile the robot links (no actor runtime, no Rig). |
+| `bun run test:integration` | yes | Network once (engine download), free ports | Four engine-backed test binaries, one after another: the actor scenarios (`actors`), plus `core_sql_counts`, `core_retention` and `core_logs`, against a real Rivet engine, including output-event fixtures captured from the actor and the version 1 history upgrade. Ends with each suite's wall time. Timing limits are reported, not enforced (see [timing limits](#timing-limits)). |
+| `cargo build --release`, `cargo bench --no-run` | yes | Rust toolchain | Release builds link; the three benches in `crates/buddy/Cargo.toml` compile (`autobenches = false`, so `benches/legacy_sentences.rs` is only a module of `sentences`). |
 | `bun tests/early-player.mjs` | yes | Chromium (`bunx playwright install chromium`) | The lab voice player plays streamed PCM and stops on demand. Offline and deterministic. |
-| `bun run deny` | yes (`cargo-deny-action`) | `cargo install cargo-deny` | Advisories, licenses, crate sources and bans per `deny.toml` (`cargo deny --locked --all-features check`). |
+| `bun run deny` | yes (`cargo-deny-action`) | `cargo install cargo-deny` | Advisories, licenses, crate sources and bans per `deny.toml` (`cargo deny --locked --all-features check`, the same arguments locally and in CI). Wildcard versions fail: every workspace crate is `publish = false`, so only its path dependencies are exempt. Duplicate major versions warn; `deny.toml` names the crate forcing each one. |
 | robot-aarch64 job | yes | `gcc-aarch64-linux-gnu` | The robot client type-checks for the Raspberry Pi 5 target. |
 | `bun run bench:e2e` | no (opt-in) | Release build, free ports | End-to-end latency with the real server, engine and robot client, and the audio checks below. See below. |
-| `bun run bench:report` | no | `docs/research/e2e-latency.json` | `bun tests/e2e-report.mjs --write`: rewrites the results table in [e2e latency](research/e2e-latency.md) from the published raw JSON. `bun tests/e2e-report.mjs --check` fails when the doc is stale. |
+| `bun run bench:report` | no | `docs/research/e2e-latency.json` | `bun tests/e2e-report.mjs --write`: rewrites the results table in [e2e latency](research/e2e-latency.md) from the published raw JSON. |
+| `bun run bench:report:check` | yes (`bench-artifact` job, full history) | git history back to the measured commit | `bun tests/e2e-report.mjs --check`: fails when the doc's table differs from the JSON, or the JSON does not describe HEAD (see [published artifact](#published-artifact)). |
 | `bun run test:reconnect` | yes, after the release build (`--no-build --strict`) | Release build, free ports | The real robot binary through a fault proxy: interruption during a held replay, reconnect after a lost submit ack, no old speech after it. See below. |
 | `bun run test:lab-reconnect` | yes | Chromium (`bunx playwright install chromium`) | `apps/server/tests/lab-reconnect.mjs`: the real lab page against a mocked lab API. A reply that completes while the lab is disconnected is not spoken on reconnect; Replay still speaks it. Offline and deterministic. |
-| `bun run eval:voice` | no (opt-in) | Release build, free ports | A JSON scorecard of six voice-turn metrics against `tests/eval/voice-thresholds.json`. See below. |
+| `bun run eval:voice` | no (opt-in) | Release build, free ports | A JSON scorecard of six voice-turn metrics against `tests/eval/voice-thresholds.json`; time limits enforced only under strict timing. See below. |
 | `bun run test:container` | no | Docker | Enrollment and stored memory across a container replacement. |
 | `bun run test:lab`, `tests/early-live.mjs`, `tests/latency-live.mjs` | no | A running lab, `BUDDY_LAB_TOKEN`, a device identity; the live scripts also need a provider key | Browser acceptance of the lab. See [lab](lab.md). |
-| `bun run test:shutdown` | yes, after the release build | Release build of server and robot | The robot exits 0 within 500 ms of SIGTERM or SIGINT with stdin open or closed, and writes its cache file on the way out (3 SIGTERM, 1 SIGINT, 1 closed-stdin run). Each signal is sent after the robot's first connection to its server URL. The stop handlers are registered first thing in startup, so an earlier signal is a clean stop too. The robot runs with its panel off (`BUDDY_SCREEN_ADDR=off`). |
+| `bun run test:shutdown` | yes, after the release build | Release build of server and robot | The robot exits 0 on its own after SIGTERM or SIGINT with stdin open or closed (before the script's 5 s SIGKILL), and writes its cache file on the way out; the 500 ms limit is printed as `TIMING robot_stop_ms` and enforced under `BUDDY_STRICT_TIMING=1` (3 SIGTERM, 1 SIGINT, 1 closed-stdin run). Each signal is sent after the robot's first connection to its server URL. The stop handlers are registered first thing in startup, so an earlier signal is a clean stop too. The robot runs with its panel off (`BUDDY_SCREEN_ADDR=off`). |
 
 ### Offline test crates (`crates/buddy/tests`)
 
@@ -68,7 +78,10 @@ and fails (stopping there) if anything still listens or a run directory is left 
 Extra arguments go to every suite.
 
 - One engine per test binary, spawned and owned by the harness, with storage in
-  `$TMPDIR/robot-buddy-it/run-<pid>-<millis>`. rivetkit never spawns or reuses an engine
+  `$TMPDIR/robot-buddy-it/engine-<port>/run-<pid>-<millis>` through `test:integration`
+  (`BUDDY_TEST_STATE_DIR` overrides it). One directory per engine port keeps checkouts
+  running side by side on different ports from reporting each other's run directories
+  as leaks; a bare `cargo test --test actors -- --ignored` uses `$TMPDIR/robot-buddy-it`. rivetkit never spawns or reuses an engine
   (`EngineSpawnMode::Never`).
 - Ready means: engine `/health` reports the engine runtime, the registry readiness probe passes, and a
   real `Bot` enroll action round-trips.
@@ -114,6 +127,17 @@ when `BUDDY_STRICT_TIMING=1`. Set that on a controlled runner (idle, dedicated h
 CI runners are shared, so CI reports the timings and enforces only the functional
 assertions, which always run: speech chunks numbered in order, zero events committed after
 `turn.cancelled`, the provider connection dropped within 5 s, and so on.
+
+The JS harnesses follow the same rule through `tests/lib/timing.mjs` (`timingBound`, same
+`TIMING` line):
+
+| Harness | Always enforced | Only under `BUDDY_STRICT_TIMING=1` |
+| --- | --- | --- |
+| `tests/robot-shutdown.mjs` | exit 0 on its own, cache flushed | stop within 500 ms |
+| `tests/robot-reconnect.mjs` | B's player stops before the held replay is released | wake → player stop within 1000 ms |
+| `tests/eval-voice.mjs` | functional checks, old speech after a reconnect = 0 | every `_ms` metric in `tests/eval/voice-thresholds.json` (also enforced when `--thresholds` names a file) |
+| `tests/bench-e2e.mjs` | functional checks only; it measures, never asserts a time | (none; `--publish` has its own [noise check](#published-artifact)) |
+| `tests/early-player.mjs`, `test:lab-reconnect` | ordering (audio before the response completes, Stop aborts it); their waits are timeouts, not limits | (none) |
 
 ## Ports
 
@@ -169,8 +193,27 @@ observed values, and the bench exits 1:
   playing out what it was sent);
 - every turn completes, and nothing outlives shutdown.
 
-`--publish` writes the raw JSON to `docs/research/e2e-latency.json` with the commit from
-`git describe --always --dirty`; `bun run bench:report` regenerates the doc's table from it.
+Every run's JSON records `git` (full SHA, `git describe --always --dirty`, dirty flag; untracked
+files count as dirty), `machine` (OS, CPU model and count, memory, Bun and rustc
+versions), the load average at start and end, and `noise` (`tests/lib/provenance.mjs`).
+
+#### Published artifact
+
+`--publish` writes the raw JSON to `docs/research/e2e-latency.json`; `bun run bench:report`
+regenerates the doc's table from it. It refuses (exit 3) before starting when the tree is
+dirty or `--repo` names another checkout, and after the run it does not write the file when
+a check failed or the noise check failed. The noise check passes when the 1-minute load
+average per CPU stays at or under 0.5 at start and end, the fake model and speech servers
+sent at most 5 frames 20 ms or more behind their own schedule, and none more than 50 ms
+late. The fakes' lateness is host noise by construction: on a quiet machine it is zero.
+
+`bun run bench:report:check` fails when the doc's table differs from the JSON, the JSON
+was measured on a dirty tree or did not pass its noise check, or any measured path changed
+between the JSON's commit and HEAD: `apps`, `crates`, `tests/lib`, `tests/bench-e2e.mjs`,
+`Cargo.toml`, `Cargo.lock` and `rust-toolchain.toml`, without Markdown and the Rust test and
+bench targets. So publishing, then committing the JSON and the table (a docs-only commit),
+keeps it valid, and the next source change makes it stale until it is republished. The
+check needs the measured commit in the clone (CI checks out full history).
 
 Options: `--turns N` (20), `--barge N` (5), `--out file.json`, `--no-build`, `--no-speech`,
 `--keep` (keep the work directory, including `server.log`; `BENCH_SERVER_LOG` sets its
@@ -193,15 +236,19 @@ every player is attributed to a turn.
 2. Long turn B plays. The proxy holds everything the engine sends on the robot's WebSocket
    (a silent socket), so the robot's 2 s live catch-up replay fires and its response is held
    too. A wake (`{"wake":true}`) arrives. B must end in `turn.cancelled`, and its player must
-   stop within 1000 ms while the replay is still held: the device loop serves input first and
-   never waits on a call.
+   stop while the replay is still held (the proxy holds it until the stop, at most 3 s
+   after the wake, and then until at least 2 s after the wake and 0.5 s after the stop): the device loop serves input first and never waits on a
+   call. The 1000 ms wake-to-stop limit is enforced only under `BUDDY_STRICT_TIMING=1`.
 3. Turn C's submit reaches the actor, but the proxy discards the ack and cuts the
-   connection. The robot reconnects.
-4. Turn D plays.
+   connection. The robot reconnects and resubmits with the same request ID.
+4. Turn D plays: the positive control that speech still works after the reconnect.
 
-Then no speech request for A or B may follow the reconnect. C's speech count is reported, not
-checked. A check may carry a known bug (`xfail`), reported as XFAIL and failed only under
-`--strict`; none does today. Options: `--no-build`, `--strict`, `--out file.json`, `--keep`.
+Then, counted after D: C ran as exactly one actor turn (one turn ID in the robot's events
+and one model call), C was never spoken (zero speech requests and zero player samples; its
+ack never arrived, and only newly acknowledged turns are spoken), and no speech request for
+A or B followed the reconnect. A check may carry a known bug (`xfail`), reported as XFAIL
+and failed only under `--strict`; none does today. Options: `--no-build`, `--strict`,
+`--out file.json`, `--keep`.
 
 ## Voice eval
 
@@ -219,9 +266,13 @@ thresholds and the turn and barge-in counts live only in `tests/eval/voice-thres
 | barge-in → model stream closed | p95 |
 | speech requests for old turns after a reconnect | value, must be 0 |
 
-A functional failure from the bench checks or the reconnect test fails the eval whatever the
-scores; a check marked as a known bug goes to `known_bugs` instead (none today). Exit 0 on pass, 1 on fail, 2 when a
-port is busy. Options: `--no-build`, `--out`, `--thresholds`, `--keep`.
+The five time metrics are wall-clock limits: each score is reported with `enforced`, and an
+over-limit one fails the eval only under `BUDDY_STRICT_TIMING=1` or when `--thresholds`
+names a file. The old-speech count is always enforced. A functional failure from the bench
+checks or the reconnect test fails the eval whatever the scores; a check marked as a known
+bug goes to `known_bugs` instead (none today). The scorecard records the same `git`,
+`machine` and `noise` as the bench. Exit 0 on pass, 1 on fail, 2 when a port is busy.
+Options: `--no-build`, `--out`, `--thresholds`, `--keep`.
 
 ## Fixed bugs pinned by tests
 

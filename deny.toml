@@ -1,4 +1,5 @@
-# cargo-deny policy: `cargo deny --locked check` (CI runs it on every push).
+# cargo-deny policy: `cargo deny --locked --all-features check` (`bun run deny`; CI runs
+# the same arguments on every push).
 # https://embarkstudios.github.io/cargo-deny/
 
 [graph]
@@ -59,11 +60,22 @@ ignore = true
 
 [bans]
 # Two major versions of one crate are worth knowing about, not worth failing CI over.
+# The duplicates in the lockfile today, and why each stays (checked with
+# `cargo tree --locked --all-features -i <crate>`):
+#   - reqwest 0.12 and 0.13: rivetkit 3.1.1 (rivetkit-core, rivetkit-client,
+#     opentelemetry-otlp) needs 0.12, rig 0.46 (rig-reqwest) needs 0.13. Our own
+#     reqwest is 0.12, so moving it would not remove either.
+#   - axum 0.7 and 0.8: 0.7 comes from tonic 0.12 under opentelemetry-otlp's grpc-tonic
+#     feature, which rivetkit-core's default native-runtime turns on with no opt-out.
+#   - ring and aws-lc-rs: ring through rustls in reqwest 0.12 and tokio-tungstenite
+#     (rivetkit); aws-lc-rs through rig's reqwest 0.13 `rustls` default provider and
+#     jsonwebtoken's `aws_lc_rs` backend (its `rust_crypto` backend pulls the `rsa` crate,
+#     RUSTSEC-2023-0071). The robot binary links ring only; aws-lc-rs is server-side.
 multiple-versions = "warn"
-# The workspace crates use path dependencies without versions. allow-wildcard-paths
-# only covers crates marked `publish = false`, which ours are not yet, so a wildcard
-# warns instead of failing. Set `publish = false` and switch this back to "deny".
-wildcards = "warn"
+# Workspace crates use path dependencies without versions. They are all
+# `publish = false` (workspace.package), which is what allow-wildcard-paths needs, so any
+# other wildcard fails.
+wildcards = "deny"
 allow-wildcard-paths = true
 highlight = "all"
 

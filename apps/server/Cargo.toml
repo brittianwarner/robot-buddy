@@ -3,6 +3,7 @@ name = "robot-buddy-server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish.workspace = true
 [dependencies]
 robot-buddy = { path = "../../crates/buddy" }
 anyhow.workspace = true
