@@ -62,6 +62,7 @@ fn main() -> Result<()> {
 }
 
 async fn robot() -> Result<()> {
+    let stop = shutdown_signal()?;
     let settings = Settings::from_env()?;
     let identity: Identity = serde_json::from_slice(&std::fs::read(&settings.identity_file)?)?;
     let store = CacheStore::spawn(settings.cache_file.clone(), CHECKPOINT_INTERVAL);
@@ -110,7 +111,7 @@ async fn robot() -> Result<()> {
         &store,
         &mut state,
         options,
-        shutdown_signal(),
+        stop,
     )
     .await;
     // The loop silenced the speaker and closed the connection. Persist the
@@ -125,13 +126,17 @@ async fn robot() -> Result<()> {
     result
 }
 
-async fn shutdown_signal() {
+/// Register SIGTERM and SIGINT handlers now, so a stop during startup is
+/// still a clean stop (flushed cache) rather than the default kill. The
+/// returned future resolves on the first signal.
+fn shutdown_signal() -> Result<impl std::future::Future<Output = ()>> {
     use tokio::signal::unix::{SignalKind, signal};
-    let Ok(mut terminate) = signal(SignalKind::terminate()) else {
-        return std::future::pending().await;
-    };
-    tokio::select! {
-        _ = terminate.recv() => {},
-        _ = tokio::signal::ctrl_c() => {},
-    }
+    let mut terminate = signal(SignalKind::terminate())?;
+    let mut interrupt = signal(SignalKind::interrupt())?;
+    Ok(async move {
+        tokio::select! {
+            _ = terminate.recv() => {},
+            _ = interrupt.recv() => {},
+        }
+    })
 }
