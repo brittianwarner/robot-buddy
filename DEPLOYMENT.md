@@ -53,7 +53,7 @@ robot-buddy's code fixes what it expects; your butty build fixes what is fitted.
 1. **Pi model and RAM.** The spec part is a Raspberry Pi 5, **8 GB** (butty `SPEC.md`). The robot service peaked at 185.9 MiB (process) and 207.6 MiB (with sampled children) over the 30-minute soak, and its systemd budget is 1 GiB. butty's own docs also mention a 4 GB Pi 5; that fits the same budget. Check: `free -h`.
 2. **Microphone.** The spec part is a Seeed **reSpeaker Flex (XVF3800)**, USB (butty `SPEC.md`, `cad/params.py`). butty `brain/config.yaml` gives its layout: channel 0 is the processed beam, channel 1 the ASR beam. robot-buddy captures 16 kHz S16_LE through `arecord` with 1 to 8 channels and keeps the one you pick (`apps/robot/src/listen`). Check with the service stopped: `arecord -L`, then the capture command in §4. Set `BUDDY_LISTEN_DEVICE`, `BUDDY_LISTEN_CHANNELS=2` and `BUDDY_LISTEN_CHANNEL=0`. butty's docs also mention a reSpeaker Lite (`brain/README.md`); it works with robot-buddy if it captures at 16 kHz S16_LE, with `BUDDY_LISTEN_CHANNELS` and `BUDDY_LISTEN_CHANNEL` set to its own layout.
 3. **Operating system.** **Default:** Raspberry Pi OS (64-bit) **Bookworm**, as in Brittian's spec sheet and butty `brain/README.md`, with the native full build on the Pi (§2). That binary passed the ARM64 matrix but not the soak. **Alternative:** Trixie and the soaked ELF (§2), which is the exact binary that passed the soak but moves off the spec's OS. The soaked ELF does not run on Bookworm. Check: `cat /etc/os-release`.
-4. **Neck servo IDs and limits.** robot-buddy has no default calibration: you write a per-robot `neck.json` in raw steps (§4). butty `brain/config.yaml` uses IDs yaw `1`, pitch `2`, roll `3` at 1 Mbaud (yaw and pitch inverted, roll centre `2107`); butty's yaw centre shift (about 228 steps) lives in an untracked `config.local.yaml`. Check: `robot-buddy-robot servo ping`, `read` and `verify` in §4 (it has no ID-assignment command; §4 says how to set IDs); measure your own limits, never copy another robot's.
+4. **Neck servo voltage, IDs and limits.** The STS3215 is sold in a 7.4 V and a 12 V variant, and Pip's neck runs at 12 V. Before you put 12 V on the adapter, read each servo's label or model number and confirm it is the 12 V variant. Once powered, butty's servo tool `info <id>` prints the supply voltage the servo sees (neck bootstrap step 0 in §4); that confirms the supply, not the variant, so it does not replace the label check. robot-buddy has no default calibration: you write a per-robot `neck.json` in raw steps (§4). butty `brain/config.yaml` uses IDs yaw `1`, pitch `2`, roll `3` at 1 Mbaud (yaw and pitch inverted, roll centre `2107`); butty's yaw centre shift (about 228 steps) lives in an untracked `config.local.yaml`. Check: `robot-buddy-robot servo ping`, `read` and `verify` in §4 (it has no ID-assignment command; §4 says how to set IDs); measure your own limits, never copy another robot's.
 5. **Serial paths.** robot-buddy does not auto-detect. Use the two distinct names under `/dev/serial/by-id/` (face board vendor `303a`, servo adapter `1a86`), or butty's udev names `/dev/pip-face` and `/dev/pip-servos` if that rule is installed. Check: `ls -l /dev/serial/by-id/`.
 6. **Audio card names.** Use what your Pi reports, not an example. Check: `aplay -L` (the MAX98357A appears after the overlay in §3) and `arecord -L`. Put the exact names in `BUDDY_ALSA_DEVICE` and `BUDDY_LISTEN_DEVICE`.
 7. **Camera orientation and tuning.** robot-buddy captures 384 × 288 at 15 fps. butty uses the `ov5647_noir.json` tuning file with `mirror_x`. Check: `rpicam-hello --list-cameras`, then the face panel preview in §4; set `BUDDY_VISION_TUNING_FILE` (optional) and `BUDDY_VISION_ROTATE_180=1` if the image is upside down.
@@ -75,7 +75,7 @@ This table is a wiring and verification reference. Sources: Brittian's spec shee
 | Main computer | Raspberry Pi 5, 8 GB in the spec [1], official Active Cooler, 64 GB microSD | Raspberry Pi OS 64-bit [3]. Runs `robot-buddy-robot` |
 | Face board | ESP32-S3-DevKitC-1 **N16R8** (16 MB QIO flash, 8 MB octal PSRAM) | Pi USB to the board's native **USB** port (GPIO 19 D−, GPIO 20 D+), not UART. USB vendor `303a`. 115200 [8]. `BUDDY_FACE_SERIAL` [5] |
 | Eyes | 2 × GC9A01 1.28 in round LCD, 240 × 240, under 30 mm glass domes | One SPI controller (SPI3), with separate clock and data wires per eye [9]. About 21 fps measured at 40 MHz (butty `firmware/README.md`); the spec says ~22 fps |
-| Neck | 3 × Feetech **STS3215** 12 V serial bus servos (yaw turns the whole body on a lazy-susan bearing, then pitch and roll) and a USB serial bus servo driver (WCH CH343, vendor `1a86`) | Pi USB, 1 Mbaud, 12 V on the adapter. IDs [4]. `BUDDY_SERVO_PORT` [5], `BUDDY_SERVO_CALIBRATION` |
+| Neck | 3 × Feetech **STS3215** 12 V serial bus servos (yaw turns the whole body on a lazy-susan bearing, then pitch and roll) and a USB serial bus servo driver (WCH CH343, vendor `1a86`) | Pi USB, 1 Mbaud, 12 V on the adapter, only after you confirm the 12 V variant (the STS3215 also comes as 7.4 V) [4]. IDs [4]. `BUDDY_SERVO_PORT` [5], `BUDDY_SERVO_CALIBRATION` |
 | Ears | 2 × MG90S micro servos | Signal from ESP32 GPIO 4 (left) and 5 (right), 50 Hz. Power from buck B 5 V, never the ESP32 5 V pin |
 | Chest light | WS2812B 12-LED ring | Data from ESP32 GPIO 6 through 330 Ω, 5 V from buck B, 470–1000 µF across 5 V/GND. Modes `idle`, `listening` (orange), `thinking`, `speaking`, `muted`; robot-buddy drives the same five |
 | Camera | **OV5647** 160° wide-angle CSI, in the visor between the eyes, with a 22→15-pin Pi 5 camera cable | Pi CSI port. `rpicam-vid`, `BUDDY_VISION` [7] |
@@ -410,19 +410,33 @@ The base unit has a 256 MiB budget and 128 tasks. The drop-in adds `video` and s
 
 Also: `max_speed_deg_s` at least 1; IDs 1–253 and all different; `min_steps < center < max_steps <= 4095`; no unknown fields; file at most 8 KiB. A wider range fails with `travel exceeds neck envelope for ID <n>`.
 
-**Neck bootstrap, in order.** Stop the service first (`systemctl stop robot-buddy`) so nothing else holds the adapter, keep 12 V on the adapter, and support the head.
+**Neck bootstrap, in order.** Stop the service first (`systemctl stop robot-buddy`) so nothing else holds the adapter, and support the head. robot-buddy has no ID or voltage command, so steps 0 and 1 use butty's servo tool (`brain/pipbrain/tools/servo_tool.py`). It talks 1 Mbaud, takes the adapter with `--port` **before** the subcommand, and reads butty's `brain/config.yaml` at start, so run it from butty's `brain/` directory. A base butty virtualenv is enough: the base dependencies in butty `brain/pyproject.toml` include `pyserial` and `pyyaml`, and the tool needs none of the `voice`, `vision` or `sim` extras. Run it as an account in the `dialout` group:
 
-1. **Set IDs, one servo on the bus at a time.** robot-buddy has no ID command. Use butty's servo tool, as in butty `brain/README.md` §6 ("Servos (once, before assembly)"). It runs from butty's `brain/` directory in the virtualenv that butty `brain/README.md` §3 installs, talks 1 Mbaud, and takes the adapter with `--port`:
+```sh
+sudo apt install python3-venv        # butty brain/README.md installs it too; skip if python3 -m venv already works
+cd <butty checkout>/brain
+python3 -m venv .venv && .venv/bin/pip install -e .
+PORT=/dev/serial/by-id/YOUR_SERVO_ADAPTER
+.venv/bin/python -m pipbrain.tools.servo_tool --port "$PORT" scan      # pings IDs 1 to 20
+.venv/bin/python -m pipbrain.tools.servo_tool --port "$PORT" info 2    # one ID: supply voltage, temperature, position, EEPROM limits
+```
+
+0. **Check the voltage, then scan with everything connected.** Before 12 V goes on the adapter, confirm from each servo's label or model number that it is the 12 V STS3215, not the 7.4 V one ("Confirm on your Pip" item 4). Then power the adapter, leave all three servos connected as assembled, and run `scan`. It prints `servo IDs found: [...]`.
+   - **`[1, 2, 3]`:** the IDs are already set, as they usually are on an assembled Pip. **Skip step 1.** Run `info 1`, `info 2` and `info 3`; each prints `supply <n> V`, which should read close to your 12 V supply. If it does not, cut 12 V and check the wiring. This confirms the supply the servo sees, not its variant, so it does not replace the label check.
+   - **Only `[1]`, `none`, or IDs you do not expect:** some servos are unknown or still on the factory ID 1. Several servos on one ID answer over each other, so the scan cannot tell how many there are. Go to step 1 for those servos only.
+   - Without butty's tool, write the provisional `neck.json` from step 2 first and run `robot-buddy-robot servo ping` (block below). It prints `id <n>: ok` per ID and stops with an error at the first ID that does not answer. That is enough when the IDs are already 1, 2 and 3, but it cannot read the voltage or set an ID.
+
+1. **Only for unknown or factory (all ID 1) servos: set IDs one servo on the bus at a time.** Disconnect every other servo from the bus, so the one you are setting is the only one connected, then:
 
    ```sh
-   PORT=/dev/serial/by-id/YOUR_SERVO_ADAPTER
-   cd <butty checkout>/brain
-   .venv/bin/python -m pipbrain.tools.servo_tool --port "$PORT" scan
+   .venv/bin/python -m pipbrain.tools.servo_tool --port "$PORT" scan       # expect [1] for a factory servo
    .venv/bin/python -m pipbrain.tools.servo_tool --port "$PORT" set-id 1 2   # pitch servo alone on the bus
    .venv/bin/python -m pipbrain.tools.servo_tool --port "$PORT" set-id 1 3   # roll servo alone on the bus
    ```
 
-   Yaw keeps ID 1. This is butty's convention, yaw 1, pitch 2, roll 3 ("Confirm on your Pip" item 4). The Feetech vendor tool also sets IDs.
+   > **Never run `set-id` with more than one servo on the bus.** It writes the new ID to whatever answers on the old one, with no check (butty `servo_tool.py`). On an assembled Pip with IDs 1, 2 and 3, `set-id 1 2` renames yaw to 2, and yaw then collides with pitch.
+
+   Yaw keeps ID 1. This is butty's convention, yaw 1, pitch 2, roll 3 ("Confirm on your Pip" item 4); butty `brain/README.md` §6 does it "once, before assembly". Reconnect all three and `scan` again: expect `[1, 2, 3]`. The Feetech vendor tool also sets IDs.
 2. **Write a provisional, narrow `neck.json`** as a root-owned `0640 root:robot-buddy` file at `/etc/robot-buddy/neck.json`. It only lets `ping` and `read` run; `read` prints raw positions even outside these limits. Example shape, inside the envelope, **not** a calibration:
 
    ```json
