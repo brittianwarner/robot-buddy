@@ -51,6 +51,14 @@ build_docker_run_args() {
   DATA_VOL="pip-e2e-data-$$-$(date +%s)"
   docker volume create "$DATA_VOL" >/dev/null
 
+  # Host checkout identity for report provenance: the image has no usable git for
+  # the read-only /workspace mount. Paths only; never file contents.
+  local git_head git_branch git_describe git_dirty_paths
+  git_head="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
+  git_branch="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  git_describe="$(git -C "$REPO_ROOT" describe --always --dirty 2>/dev/null || true)"
+  git_dirty_paths="$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | awk '{print $NF}' | paste -sd, - || true)"
+
   RUN_ARGS=(
     --rm
     --platform linux/arm64
@@ -63,7 +71,15 @@ build_docker_run_args() {
     -e "PIP_E2E_SPEECH_DIR=/opt/pip-e2e/speech"
     -e "PIP_E2E_ARTIFACTS_DIR=/opt/pip-e2e/artifacts"
     -e "PIP_E2E_VISION_CACHE=/opt/pip-e2e/cache/vision"
+    -e "PIP_E2E_HOST_GIT_HEAD=$git_head"
+    -e "PIP_E2E_HOST_GIT_BRANCH=$git_branch"
+    -e "PIP_E2E_HOST_GIT_DESCRIBE=$git_describe"
+    -e "PIP_E2E_HOST_GIT_DIRTY=$([[ -n "$git_dirty_paths" ]] && echo 1 || echo 0)"
+    -e "PIP_E2E_HOST_GIT_DIRTY_PATHS=$git_dirty_paths"
   )
+  if [[ -n "${PIP_E2E_EXPECT_ROBOT_SHA256:-}" ]]; then
+    RUN_ARGS+=(-e "PIP_E2E_EXPECT_ROBOT_SHA256=$PIP_E2E_EXPECT_ROBOT_SHA256")
+  fi
   if [[ -n "$HEY_PIP_HOST" && -f "$HEY_PIP_HOST" ]]; then
     RUN_ARGS+=(-v "$HEY_PIP_HOST:/opt/pip-e2e/private/hey_pip.onnx:ro")
     RUN_ARGS+=(-e "PIP_E2E_HEY_PIP_ONNX=/opt/pip-e2e/private/hey_pip.onnx")
