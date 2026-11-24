@@ -1,0 +1,1871 @@
+Repository:          /Users/brittianwarner/goods/robot-buddy
+Branch:              feat/pip-hardware
+HEAD SHA:            5351762bf285e8a3ece7c5ca8980458349ac7624
+Workspace tree hash: dcbcb88569e1ec1655b3b9d88a9c8d2a8107fcf393695c1d6baa6e12d2465189
+Workspace sources:   CLEAN (matches 5351762bf285e8a3ece7c5ca8980458349ac7624)
+Non-workspace status (excluded from build context):
+?? infra/arm64-matrix-check.sh
+?? infra/arm64-matrix.Dockerfile
+?? infra/arm64-matrix.Dockerfile.dockerignore
+?? infra/run-arm64-matrix.sh
+?? tests/pip-e2e/.gitignore
+?? tests/pip-e2e/Dockerfile
+?? tests/pip-e2e/README.md
+?? tests/pip-e2e/run-in-docker.sh
+?? tests/pip-e2e/runner-fakes.mjs
+?? tests/pip-e2e/runner-stack.mjs
+?? tests/pip-e2e/runner.mjs
+Mode:                bookworm (gate), SOURCE_SHA=5351762bf285e8a3ece7c5ca8980458349ac7624, CARGO_JOBS=2, OPENCV_BUILD_JOBS=2
+
+>>> Running docker buildx target=bookworm-gate (linux/arm64, SOURCE_SHA=5351762bf285e8a3ece7c5ca8980458349ac7624, TREE_HASH=dcbcb88569e1ec1655b3b9d88a9c8d2a8107fcf393695c1d6baa6e12d2465189)
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from arm64-matrix.Dockerfile
+#1 transferring dockerfile: 4.92kB done
+#1 DONE 0.0s
+
+#2 resolve image config for docker-image://docker.io/docker/dockerfile:1
+#2 DONE 0.5s
+
+#3 docker-image://docker.io/docker/dockerfile:1@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183
+#3 resolve docker.io/docker/dockerfile:1@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183 done
+#3 CACHED
+
+#4 [internal] load metadata for docker.io/library/rust:1.100.0-slim-bookworm@sha256:bb875b0f8ce726053e259034848c471840e96bfe591fd52556178ae9a05e6126
+#4 DONE 0.0s
+
+#5 [bookworm-toolchain 1/4] FROM docker.io/library/rust:1.100.0-slim-bookworm@sha256:bb875b0f8ce726053e259034848c471840e96bfe591fd52556178ae9a05e6126
+#5 resolve docker.io/library/rust:1.100.0-slim-bookworm@sha256:bb875b0f8ce726053e259034848c471840e96bfe591fd52556178ae9a05e6126 done
+#5 DONE 0.0s
+
+#6 [internal] load build context
+#6 transferring context: 84.24kB done
+#6 DONE 0.0s
+
+#7 [bookworm-toolchain 2/4] RUN test "arm64" = arm64     && apt-get update && apt-get install -y --no-install-recommends       build-essential git cmake ninja-build clang libclang-dev pkg-config       libjpeg-dev zlib1g-dev ca-certificates file     && rm -rf /var/lib/apt/lists/*     && rustup component add rustfmt clippy     && git clone --depth 1 --branch 4.10.0 https://github.com/opencv/opencv.git /tmp/opencv-4.10.0     && test "$(git -C /tmp/opencv-4.10.0 rev-parse HEAD)" = 71d3237a093b60a27601c20e9ee6c3e52154e8b1     && cmake -S /tmp/opencv-4.10.0 -B /tmp/opencv-pi-build -G Ninja       -DCMAKE_BUILD_TYPE=Release       -DCMAKE_INSTALL_PREFIX=/opt/robot-buddy/opencv-4.10       -DOPENCV_LIB_INSTALL_PATH=lib       -DBUILD_LIST=core,imgproc,imgcodecs,dnn,objdetect       -DBUILD_SHARED_LIBS=ON       -DOPENCV_GENERATE_PKGCONFIG=ON       -DWITH_JPEG=ON       -DWITH_OPENCL=OFF       -DBUILD_TESTS=OFF       -DBUILD_PERF_TESTS=OFF       -DBUILD_EXAMPLES=OFF     && cmake --build /tmp/opencv-pi-build -j "2"     && cmake --install /tmp/opencv-pi-build     && printf '%s\n' '/opt/robot-buddy/opencv-4.10/lib' > /etc/ld.so.conf.d/robot-buddy-opencv.conf     && ldconfig     && rm -rf /tmp/opencv-4.10.0 /tmp/opencv-pi-build
+#7 CACHED
+
+#8 [bookworm-toolchain 3/4] RUN test "$(pkg-config --modversion opencv4)" = 4.10.0     && test "$(pkg-config --variable=prefix opencv4)" = /opt/robot-buddy/opencv-4.10
+#8 CACHED
+
+#9 [bookworm-toolchain 4/4] WORKDIR /src
+#9 CACHED
+
+#10 [bookworm-source 1/6] COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+#10 CACHED
+
+#11 [bookworm-source 2/6] COPY .cargo/config.toml .cargo/config.toml
+#11 CACHED
+
+#12 [bookworm-source 3/6] COPY crates ./crates
+#12 CACHED
+
+#13 [bookworm-source 4/6] COPY apps ./apps
+#13 DONE 0.0s
+
+#14 [bookworm-source 5/6] COPY infra/arm64-matrix-check.sh /usr/local/bin/arm64-matrix-check
+#14 DONE 0.0s
+
+#15 [bookworm-source 6/6] RUN chmod +x /usr/local/bin/arm64-matrix-check
+#15 DONE 0.2s
+
+#16 [bookworm-gate 1/1] RUN --mount=type=cache,id=arm64-matrix-cargo-registry,target=/usr/local/cargo/registry,sharing=locked     --mount=type=cache,id=arm64-matrix-bookworm-target,target=/src/target,sharing=locked     /usr/local/bin/arm64-matrix-check bookworm "2" "5351762bf285e8a3ece7c5ca8980458349ac7624" "dcbcb88569e1ec1655b3b9d88a9c8d2a8107fcf393695c1d6baa6e12d2465189"
+#16 0.100 === ARM64 Matrix Gate: bookworm ===
+#16 0.100 SOURCE_SHA:         5351762bf285e8a3ece7c5ca8980458349ac7624
+#16 0.100 EXPECTED_TREE_HASH: dcbcb88569e1ec1655b3b9d88a9c8d2a8107fcf393695c1d6baa6e12d2465189
+#16 0.100 ACTUAL_TREE_HASH:   dcbcb88569e1ec1655b3b9d88a9c8d2a8107fcf393695c1d6baa6e12d2465189
+#16 0.101 PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"
+#16 0.101 VERSION_CODENAME=bookworm
+#16 0.102 Linux buildkitsandbox 7.0.12-linuxkit #1 SMP PREEMPT Thu Aug 27 14:02:21 UTC 2026 aarch64 GNU/Linux
+#16 0.128 rustc 1.100.0 (0ef1bc386 2026-11-09)
+#16 0.145 cargo 1.100.0 (3acc79c0c 2026-11-05)
+#16 0.171 clippy 0.1.100 (0ef1bc3860 2026-11-09)
+#16 0.190 rustfmt 1.11.0-stable (0ef1bc3860 2026-11-09)
+#16 0.194 opencv4 modversion: 4.10.0
+#16 0.195 opencv4 prefix: /opt/robot-buddy/opencv-4.10
+#16 0.195 CARGO_JOBS: 2
+#16 0.195 
+#16 0.195 >>> [bookworm][FMT] cargo fmt --all -- --check
+#16 0.466 
+#16 0.466 >>> [bookworm][DEFAULT] cargo clippy --workspace --all-targets --locked -j 2 -- -D warnings
+#16 0.528     Updating crates.io index
+#16 4.216  Downloading crates ...
+#16 4.383   Downloaded adler2 v2.0.1
+#16 4.405   Downloaded loop9 v0.1.5
+#16 4.406   Downloaded lru-slab v0.1.3
+#16 4.415   Downloaded lz4 v1.28.1
+#16 4.461   Downloaded aligned-vec v0.6.4
+#16 4.463   Downloaded monostate-impl v0.1.18
+#16 4.464   Downloaded arrayref v0.3.9
+#16 4.465   Downloaded cedarwood v0.4.6
+#16 4.470   Downloaded aligned v0.4.3
+#16 4.472   Downloaded as-slice v0.2.1
+#16 4.476   Downloaded cfg_aliases v0.2.2
+#16 4.477   Downloaded async-stream v0.3.6
+#16 4.479   Downloaded pest_stack_guard v1.0.1
+#16 4.480   Downloaded alloc-no-stdlib v3.0.0
+#16 4.482   Downloaded block-buffer v0.10.4
+#16 4.483   Downloaded atomic-waker v1.1.2
+#16 4.484   Downloaded bytecheck v0.8.3
+#16 4.484   Downloaded munge_macro v0.4.7
+#16 4.485   Downloaded arg_enum_proc_macro v0.3.4
+#16 4.486   Downloaded bit_field v0.10.4
+#16 4.488   Downloaded async-stream-impl v0.3.6
+#16 4.489   Downloaded page_size v0.6.0
+#16 4.492   Downloaded cast v0.3.0
+#16 4.495   Downloaded alloca v0.4.0
+#16 4.497   Downloaded option-ext v0.2.0
+#16 4.498   Downloaded bytecheck_derive v0.8.3
+#16 4.499   Downloaded castaway v0.2.4
+#16 4.501   Downloaded ciborium-ll v0.2.2
+#16 4.502   Downloaded cfg-if v1.0.5
+#16 4.504   Downloaded color_quant v1.1.0
+#16 4.505   Downloaded ciborium-io v0.2.2
+#16 4.506   Downloaded clap_lex v1.1.2
+#16 4.507   Downloaded monostate v0.1.18
+#16 4.509   Downloaded byteorder-lite v0.1.0
+#16 4.510   Downloaded matchers v0.2.0
+#16 4.511   Downloaded phf_generator v0.13.1
+#16 4.512   Downloaded atoi v2.0.0
+#16 4.514   Downloaded multiversion_no_op v1.0.0
+#16 4.516   Downloaded anes v0.1.6
+#16 4.519   Downloaded async-recursion v1.2.0
+#16 4.521   Downloaded autocfg v1.5.1
+#16 4.523   Downloaded async_cell v0.2.3
+#16 4.524   Downloaded bs58 v0.5.1
+#16 4.526   Downloaded alloc-stdlib v0.3.0
+#16 4.527   Downloaded async-channel v2.5.0
+#16 4.528   Downloaded pkg-config v0.3.34
+#16 4.529   Downloaded rustls-native-certs v0.8.5
+#16 4.530   Downloaded avif-serialize v0.8.9
+#16 4.531   Downloaded anstyle v1.0.14
+#16 4.532   Downloaded new_debug_unreachable v1.0.6
+#16 4.533   Downloaded async-trait v0.1.92
+#16 4.536   Downloaded byteorder v1.5.0
+#16 4.539   Downloaded bitflags v1.3.2
+#16 4.543   Downloaded base64ct v1.8.3
+#16 4.545   Downloaded cmake v0.1.58
+#16 4.546   Downloaded phf_codegen v0.13.1
+#16 4.547   Downloaded axum-core v0.5.6
+#16 4.549   Downloaded macro_rules_attribute v0.2.3
+#16 4.551   Downloaded bitpacking v0.9.3
+#16 4.553   Downloaded ahash v0.8.12
+#16 4.555   Downloaded ciborium v0.2.2
+#16 4.557   Downloaded openssl-probe v0.2.2
+#16 4.559   Downloaded arrow-string v58.4.1
+#16 4.560   Downloaded av1-grain v0.2.5
+#16 4.562   Downloaded anyhow v1.0.104
+#16 4.565   Downloaded heck v0.5.0
+#16 4.566   Downloaded ident_case v1.0.1
+#16 4.566   Downloaded axum-core v0.4.5
+#16 4.568   Downloaded arrow-csv v58.4.1
+#16 4.569   Downloaded compression-codecs v0.4.47
+#16 4.574   Downloaded rustls-pki-types v1.16.0
+#16 4.576   Downloaded munge v0.4.7
+#16 4.578   Downloaded axum-macros v0.5.1
+#16 4.585   Downloaded async-lock v3.5.0
+#16 4.587   Downloaded itoa v1.0.19
+#16 4.590   Downloaded arrayvec v0.7.8
+#16 4.592   Downloaded permutation v0.4.1
+#16 4.593   Downloaded allocator-api2 v0.2.21
+#16 4.596   Downloaded ar_archive_writer v0.5.5
+#16 4.597   Downloaded pastey v0.1.1
+#16 4.599   Downloaded chacha20 v0.10.2
+#16 4.601   Downloaded same-file v1.0.6
+#16 4.602   Downloaded half v1.8.3
+#16 4.605   Downloaded seq-macro v0.3.6
+#16 4.607   Downloaded serde_urlencoded v0.7.1
+#16 4.609   Downloaded num_cpus v1.17.0
+#16 4.615   Downloaded imgref v1.12.3
+#16 4.616   Downloaded arrow-row v58.4.1
+#16 4.617   Downloaded built v0.8.1
+#16 4.619   Downloaded arrow-arith v58.4.1
+#16 4.620   Downloaded base64 v0.13.1
+#16 4.623   Downloaded blake2 v0.10.6
+#16 4.626   Downloaded bitflags v2.13.2
+#16 4.629   Downloaded lazy_static v1.5.1
+#16 4.630   Downloaded arrow-data v58.4.1
+#16 4.633   Downloaded bytes v1.12.1
+#16 4.635   Downloaded multimap v0.10.1
+#16 4.636   Downloaded strsim v0.11.1
+#16 4.638   Downloaded phf_shared v0.13.1
+#16 4.638   Downloaded strum v0.26.3
+#16 4.639   Downloaded socks v0.3.4
+#16 4.640   Downloaded httparse v1.10.1
+#16 4.643   Downloaded tap v1.0.1
+#16 4.643   Downloaded schemars_derive v1.2.3
+#16 4.645   Downloaded simdutf8 v0.1.5
+#16 4.647   Downloaded bytemuck v1.25.2
+#16 4.649   Downloaded arrow-ord v58.4.1
+#16 4.650   Downloaded clap v4.6.9
+#16 4.656   Downloaded base64 v0.22.1
+#16 4.660   Downloaded arrow-schema v58.4.1
+#16 4.662   Downloaded comfy-table v7.2.2
+#16 4.667   Downloaded arc-swap v1.9.5
+#16 4.670   Downloaded phf_shared v0.12.1
+#16 4.671   Downloaded utf8_iter v1.1.0
+#16 4.672   Downloaded tiny-keccak v2.0.2
+#16 4.673   Downloaded lexical-parse-integer v1.0.6
+#16 4.675   Downloaded thiserror-impl v1.0.69
+#16 4.677   Downloaded opentelemetry-http v0.28.0
+#16 4.677   Downloaded wasm-bindgen-shared v0.2.130
+#16 4.678   Downloaded want v0.3.2
+#16 4.679   Downloaded number_prefix v0.4.0
+#16 4.680   Downloaded bitstream-io v4.10.0
+#16 4.682   Downloaded serde_cbor v0.11.2
+#16 4.685   Downloaded noop_proc_macro v0.3.0
+#16 4.686   Downloaded compact_str v0.9.1
+#16 4.688   Downloaded arrow-json v58.4.1
+#16 4.691   Downloaded jsonwebtoken v10.4.0
+#16 4.696   Downloaded profiling-procmacros v1.0.18
+#16 4.697   Downloaded thiserror-impl v2.0.21
+#16 4.698   Downloaded xxhash-rust v0.8.19
+#16 4.700   Downloaded zeroize v1.9.1
+#16 4.701   Downloaded bumpalo v3.20.4
+#16 4.703   Downloaded image-webp v0.2.4
+#16 4.705   Downloaded lock_api v0.4.14
+#16 4.706   Downloaded arrow v58.4.1
+#16 4.711   Downloaded base64 v0.23.1
+#16 4.715   Downloaded rayon-cond v0.4.0
+#16 4.716   Downloaded lance-linalg v7.0.0
+#16 4.719   Downloaded arrow-buffer v58.4.1
+#16 4.722   Downloaded socket2 v0.6.5
+#16 4.724   Downloaded rivet-sqlite-types v3.1.1
+#16 4.725   Downloaded rivetkit-client-protocol v3.1.1
+#16 4.726   Downloaded macro_rules_attribute-proc_macro v0.2.3
+#16 4.726   Downloaded maybe-rayon v0.1.1
+#16 4.727   Downloaded zstd-safe v7.4.1
+#16 4.729   Downloaded quote v1.0.47
+#16 4.731   Downloaded rand_core v0.6.4
+#16 4.732   Downloaded rand_core v0.9.5
+#16 4.733   Downloaded rivetkit-shared-types v3.1.1
+#16 4.734   Downloaded rustc-hash v2.1.3
+#16 4.735   Downloaded async-compression v0.4.52
+#16 4.743   Downloaded tracing-core v0.1.36
+#16 4.746   Downloaded rustls-webpki v0.103.17
+#16 4.749   Downloaded num-derive v0.4.2
+#16 4.750   Downloaded num-conv v0.2.2
+#16 4.751   Downloaded http v1.5.0
+#16 4.754   Downloaded arrow-ipc v58.4.1
+#16 4.757   Downloaded rig-vectorize v0.46.0
+#16 4.759   Downloaded tinyvec v1.13.3
+#16 4.762   Downloaded darling_macro v0.24.1
+#16 4.762   Downloaded csv-core v0.1.13
+#16 4.763   Downloaded socket2 v0.5.10
+#16 4.764   Downloaded percent-encoding v2.3.2
+#16 4.765   Downloaded futures-macro v0.3.34
+#16 4.766   Downloaded bigdecimal v0.4.11
+#16 4.768   Downloaded datafusion-common-runtime v53.1.0
+#16 4.769   Downloaded arrow-select v58.4.1
+#16 4.772   Downloaded cc v1.11.2
+#16 4.775   Downloaded proc-macro2 v1.0.107
+#16 4.777   Downloaded datafusion-macros v53.1.0
+#16 4.778   Downloaded datafusion-doc v53.1.0
+#16 4.778   Downloaded rig-harness-protocol v0.46.0
+#16 4.779   Downloaded rig-typesafeai v0.46.0
+#16 4.780   Downloaded derive_builder_macro v0.20.2
+#16 4.781   Downloaded tungstenite v0.29.0
+#16 4.784   Downloaded url v2.5.9
+#16 4.785   Downloaded uuid v1.29.2
+#16 4.787   Downloaded prost-build v0.14.6
+#16 4.791   Downloaded unicode-normalization-alignments v0.1.12
+#16 4.793   Downloaded arrow-cast v58.4.1
+#16 4.795   Downloaded crossbeam-utils v0.8.23
+#16 4.798   Downloaded md-5 v0.10.6
+#16 4.800   Downloaded datafusion-session v53.1.0
+#16 4.800   Downloaded displaydoc v0.2.7
+#16 4.802   Downloaded constant_time_eq v0.4.2
+#16 4.803   Downloaded tonic v0.12.3
+#16 4.810   Downloaded qrcode v0.14.1
+#16 4.813   Downloaded http-body v1.1.0
+#16 4.813   Downloaded either v1.19.0
+#16 4.815   Downloaded fs_extra v1.3.0
+#16 4.816   Downloaded zune-jpeg v0.5.15
+#16 4.818   Downloaded jiff-core v0.1.5
+#16 4.821   Downloaded lance-bitpacking v7.0.0
+#16 4.823   Downloaded datafusion-datasource-json v53.1.0
+#16 4.824   Downloaded futures-timer v3.0.4
+#16 4.826   Downloaded hashlink v0.10.0
+#16 4.827   Downloaded humantime v2.4.0
+#16 4.829   Downloaded lebe v0.5.3
+#16 4.830   Downloaded serde_ignored v0.1.14
+#16 4.832   Downloaded hyper-rustls v0.27.10
+#16 4.833   Downloaded tower v0.4.13
+#16 4.844   Downloaded axum v0.8.9
+#16 4.851   Downloaded clap_builder v4.6.7
+#16 4.856   Downloaded darling v0.24.1
+#16 4.859   Downloaded aho-corasick v1.1.5
+#16 4.864   Downloaded sha1 v0.10.7
+#16 4.865   Downloaded h2 v0.4.20
+#16 4.870   Downloaded ipnet v2.12.2
+#16 4.872   Downloaded vbare-compiler v0.2.0
+#16 4.873   Downloaded powerfmt v0.2.1
+#16 4.874   Downloaded axum v0.7.9
+#16 4.880   Downloaded signature v2.2.0
+#16 4.881   Downloaded strum v0.28.0
+#16 4.881   Downloaded serde_bare v0.5.0
+#16 4.882   Downloaded futures-util v0.3.34
+#16 4.891   Downloaded gif v0.14.2
+#16 4.893   Downloaded tracing-opentelemetry v0.29.0
+#16 4.896   Downloaded paste v1.0.15
+#16 4.898   Downloaded pest_generator v2.9.6
+#16 4.900   Downloaded zerovec v0.11.9
+#16 4.904   Downloaded lexical-core v1.0.6
+#16 4.906   Downloaded stacker v0.1.25
+#16 4.908   Downloaded untrusted v0.7.1
+#16 4.909   Downloaded crossbeam-channel v0.5.17
+#16 4.912   Downloaded phf v0.13.1
+#16 4.913   Downloaded utf-8 v0.7.6
+#16 4.914   Downloaded y4m v0.8.0
+#16 4.915   Downloaded rig-memory v0.46.0
+#16 4.920   Downloaded parking v2.2.1
+#16 4.921   Downloaded serde_derive_internals v0.30.0
+#16 4.922   Downloaded pin-project-internal v1.1.13
+#16 4.923   Downloaded ed25519-dalek v2.2.0
+#16 4.926   Downloaded mime v0.3.18
+#16 4.928   Downloaded path_abs v0.5.1
+#16 4.929   Downloaded tokio-tungstenite v0.26.2
+#16 4.931   Downloaded phf v0.12.1
+#16 4.931   Downloaded v_frame v0.3.9
+#16 4.933   Downloaded pest_derive v2.9.6
+#16 4.934   Downloaded flate2 v1.1.11
+#16 4.938   Downloaded tracing-attributes v0.1.31
+#16 4.940   Downloaded zerofrom-derive v0.1.8
+#16 4.941   Downloaded zeroize_derive v1.5.0
+#16 4.942   Downloaded rancor v0.1.3
+#16 4.943   Downloaded serde_with_macros v3.24.0
+#16 4.945   Downloaded hyper v1.12.0
+#16 4.951   Downloaded rawpointer v0.2.1
+#16 4.951   Downloaded blake3 v1.8.7
+#16 4.957   Downloaded walkdir v2.5.0
+#16 4.958   Downloaded ptr_meta v0.3.2
+#16 4.959   Downloaded bitvec v1.1.1
+#16 4.971   Downloaded ref-cast-impl v1.0.27
+#16 4.971   Downloaded nu-ansi-term v0.50.3
+#16 4.974   Downloaded matchit v0.7.3
+#16 4.977   Downloaded tempfile v3.27.0
+#16 4.980   Downloaded zerofrom v0.1.8
+#16 4.980   Downloaded prost-derive v0.14.6
+#16 4.982   Downloaded cpufeatures v0.2.17
+#16 4.983   Downloaded rand_xoshiro v0.7.0
+#16 4.984   Downloaded concurrent-queue v2.5.0
+#16 4.986   Downloaded pin-project-lite v0.2.17
+#16 4.992   Downloaded onig v6.5.3
+#16 4.993   Downloaded regex v1.13.1
+#16 4.997   Downloaded lance-namespace-reqwest-client v0.7.7
+#16 5.004   Downloaded chrono v0.4.45
+#16 5.010   Downloaded ptr_meta_derive v0.3.2
+#16 5.011   Downloaded const-random-macro v0.1.16
+#16 5.011   Downloaded snafu v0.9.2
+#16 5.015   Downloaded rivetkit-client v3.1.1
+#16 5.017   Downloaded datafusion-functions-aggregate v53.1.0
+#16 5.020   Downloaded lexical-write-integer v1.0.6
+#16 5.022   Downloaded data-encoding v2.11.1
+#16 5.023   Downloaded crossbeam-deque v0.8.8
+#16 5.024   Downloaded litemap v0.8.3
+#16 5.026   Downloaded aws-lc-rs v1.19.0
+#16 5.037   Downloaded digest v0.10.7
+#16 5.039   Downloaded ed25519 v2.2.3
+#16 5.041   Downloaded rig-lancedb v0.46.0
+#16 5.043   Downloaded hashbrown v0.14.5
+#16 5.047   Downloaded deepsize_derive v0.1.2
+#16 5.048   Downloaded tiff v0.11.3
+#16 5.052   Downloaded av-scenechange v0.14.1
+#16 5.062   Downloaded webpki-roots v1.0.12
+#16 5.064   Downloaded prettyplease v0.3.0
+#16 5.068   Downloaded croner v2.2.0
+#16 5.069   Downloaded generic-array v0.14.7
+#16 5.070   Downloaded idna_adapter v1.2.2
+#16 5.071   Downloaded futures-task v0.3.34
+#16 5.072   Downloaded arrow-array v58.4.1
+#16 5.077   Downloaded event-listener v5.4.2
+#16 5.079   Downloaded icu_properties v2.4.0
+#16 5.082   Downloaded time-core v0.1.9
+#16 5.083   Downloaded quinn v0.11.12
+#16 5.087   Downloaded foldhash v0.2.0
+#16 5.089   Downloaded sqlparser_derive v0.5.0
+#16 5.091   Downloaded lance-core v7.0.0
+#16 5.097   Downloaded fdeflate v0.3.7
+#16 5.099   Downloaded num-rational v0.4.2
+#16 5.100   Downloaded oorandom v11.1.5
+#16 5.101   Downloaded pkcs8 v0.10.2
+#16 5.103   Downloaded prometheus v0.14.0
+#16 5.107   Downloaded pastey v0.2.3
+#16 5.109   Downloaded rivet-envoy-client v3.1.1
+#16 5.111   Downloaded sha2 v0.10.9
+#16 5.113   Downloaded jobserver v0.1.35
+#16 5.115   Downloaded lance-namespace v7.0.0
+#16 5.116   Downloaded try-lock v0.2.5
+#16 5.118   Downloaded datafusion-catalog v53.1.0
+#16 5.119   Downloaded semver v1.0.28
+#16 5.122   Downloaded brotli-decompressor v6.3.1
+#16 5.128   Downloaded datafusion-functions-aggregate-common v53.1.0
+#16 5.131   Downloaded wasm-bindgen-macro v0.2.130
+#16 5.132   Downloaded yoke-derive v0.8.4
+#16 5.133   Downloaded num-integer v0.1.47
+#16 5.135   Downloaded foldhash v0.1.5
+#16 5.135   Downloaded idna v1.1.0
+#16 5.139   Downloaded daachorse v2.1.1
+#16 5.141   Downloaded futures-channel v0.3.34
+#16 5.143   Downloaded rustls-platform-verifier v0.7.1
+#16 5.146   Downloaded utf8-ranges v1.0.5
+#16 5.147   Downloaded profiling v1.0.18
+#16 5.148   Downloaded radium v0.7.0
+#16 5.148   Downloaded rivet-metrics v3.1.1
+#16 5.149   Downloaded protobuf v3.7.2
+#16 5.158   Downloaded rand_core v0.10.1
+#16 5.159   Downloaded tower-http v0.6.11
+#16 5.167   Downloaded indicatif v0.17.11
+#16 5.170   Downloaded signal-hook-registry v1.4.8
+#16 5.171   Downloaded vbare v0.2.0
+#16 5.172   Downloaded weezl v0.1.12
+#16 5.175   Downloaded rig-fastembed v0.46.0
+#16 5.177   Downloaded rig-tungstenite v0.46.0
+#16 5.178   Downloaded crunchy v0.2.4
+#16 5.179   Downloaded webpki-root-certs v1.0.12
+#16 5.181   Downloaded jieba-macros v0.9.0
+#16 5.182   Downloaded prost v0.13.5
+#16 5.184   Downloaded icu_locale_core v2.4.0
+#16 5.191   Downloaded utoipa-gen v5.5.0
+#16 5.195   Downloaded syn v3.0.10
+#16 5.201   Downloaded datafusion-optimizer v53.1.0
+#16 5.207   Downloaded dyn-clone v1.0.20
+#16 5.209   Downloaded tokenizers v0.21.4
+#16 5.215   Downloaded tungstenite v0.26.2
+#16 5.218   Downloaded datafusion v53.1.0
+#16 5.226   Downloaded equator v0.4.2
+#16 5.227   Downloaded prost-types v0.14.6
+#16 5.229   Downloaded rangemap v1.8.0
+#16 5.231   Downloaded reqwest v0.13.5
+#16 5.235   Downloaded parking_lot v0.12.5
+#16 5.237   Downloaded dirs-sys v0.5.0
+#16 5.238   Downloaded fnv v1.0.7
+#16 5.239   Downloaded unicase v2.10.0
+#16 5.240   Downloaded console v0.15.11
+#16 5.243   Downloaded matchit v0.8.4
+#16 5.245   Downloaded memmap2 v0.9.12
+#16 5.247   Downloaded deranged v0.5.9
+#16 5.248   Downloaded lz4_flex v0.13.1
+#16 5.251   Downloaded unicode_categories v0.1.1
+#16 5.252   Downloaded indexmap v2.14.2
+#16 5.255   Downloaded serde_bytes v0.11.19
+#16 5.257   Downloaded ordered-float v5.5.1
+#16 5.259   Downloaded dary_heap v0.3.9
+#16 5.259   Downloaded no_std_io2 v0.9.4
+#16 5.261   Downloaded once_cell v1.21.4
+#16 5.263   Downloaded ort-sys v2.0.0-rc.9
+#16 5.264   Downloaded serde_repr v0.1.21
+#16 5.266   Downloaded serde_with v3.24.0
+#16 5.275   Downloaded portable-atomic v1.15.0
+#16 5.281   Downloaded rkyv v0.8.18
+#16 5.293   Downloaded exr v1.74.3
+#16 5.301   Downloaded indoc v2.0.8
+#16 5.304   Downloaded num-complex v0.4.6
+#16 5.305   Downloaded hashbrown v0.16.1
+#16 5.310   Downloaded datafusion-functions-window v53.1.0
+#16 5.311   Downloaded thread-tree v0.3.3
+#16 5.312   Downloaded tower v0.5.3
+#16 5.323   Downloaded hyperloglogplus v0.4.1
+#16 5.325   Downloaded mime_guess v2.0.5
+#16 5.327   Downloaded getrandom v0.3.4
+#16 5.329   Downloaded hf-hub v0.4.3
+#16 5.331   Downloaded tracing-futures v0.2.5
+#16 5.333   Downloaded icu_provider v2.4.0
+#16 5.335   Downloaded zerocopy v0.8.63
+#16 5.348   Downloaded shlex v2.0.1
+#16 5.349   Downloaded version_check v0.9.5
+#16 5.351   Downloaded futures v0.3.34
+#16 5.353   Downloaded tokio-util v0.7.20
+#16 5.359   Downloaded tokio-tungstenite v0.29.0
+#16 5.361   Downloaded const-random v0.1.18
+#16 5.362   Downloaded lance-arrow v7.0.0
+#16 5.364   Downloaded datafusion-physical-optimizer v53.1.0
+#16 5.366   Downloaded log v0.4.35
+#16 5.368   Downloaded rend v0.5.4
+#16 5.369   Downloaded fast-float2 v0.2.4
+#16 5.370   Downloaded unicode-blocks v0.1.11
+#16 5.371   Downloaded zmij v1.0.23
+#16 5.373   Downloaded rivet-error v3.1.1
+#16 5.374   Downloaded utf_types v1.0.0
+#16 5.375   Downloaded schemars v0.9.0
+#16 5.383   Downloaded crossbeam-queue v0.3.14
+#16 5.384   Downloaded zstd v0.13.5
+#16 5.387   Downloaded rig-http v0.46.0
+#16 5.390   Downloaded dirs v6.0.0
+#16 5.391   Downloaded equivalent v1.0.3
+#16 5.392   Downloaded lance-encoding v7.0.0
+#16 5.399   Downloaded criterion v0.8.2
+#16 5.405   Downloaded datafusion-datasource v53.1.0
+#16 5.407   Downloaded futures-io v0.3.34
+#16 5.408   Downloaded futures-executor v0.3.34
+#16 5.409   Downloaded siphasher v1.0.4
+#16 5.410   Downloaded darling v0.20.11
+#16 5.413   Downloaded find-msvc-tools v0.1.15
+#16 5.414   Downloaded include_dir v0.7.4
+#16 5.415   Downloaded wasm-bindgen v0.2.130
+#16 5.417   Downloaded rand_distr v0.5.1
+#16 5.419   Downloaded simd_helpers v0.1.0
+#16 5.420   Downloaded equator-macro v0.4.2
+#16 5.420   Downloaded flatbuffers v25.12.19
+#16 5.421   Downloaded datafusion-catalog-listing v53.1.0
+#16 5.423   Downloaded synstructure v0.14.0
+#16 5.424   Downloaded thiserror v1.0.69
+#16 5.427   Downloaded ref-cast v1.0.27
+#16 5.428   Downloaded rustc_version v0.4.1
+#16 5.430   Downloaded strum_macros v0.26.4
+#16 5.432   Downloaded hashbrown v0.15.5
+#16 5.435   Downloaded web-time v1.1.0
+#16 5.437   Downloaded datafusion-expr v53.1.0
+#16 5.442   Downloaded twox-hash v2.1.5
+#16 5.444   Downloaded lexical-util v1.0.7
+#16 5.447   Downloaded serde_core v1.0.229
+#16 5.449   Downloaded opentelemetry-otlp v0.28.0
+#16 5.451   Downloaded lance-datagen v7.0.0
+#16 5.452   Downloaded half v2.7.1
+#16 5.454   Downloaded sharded-slab v0.1.7
+#16 5.457   Downloaded fastembed v4.9.1
+#16 5.462   Downloaded unicode-segmentation v1.13.3
+#16 5.465   Downloaded ryu v1.0.23
+#16 5.468   Downloaded datafusion-execution v53.1.0
+#16 5.470   Downloaded prost v0.14.6
+#16 5.471   Downloaded zlib-rs v0.6.8
+#16 5.475   Downloaded scopeguard v1.2.0
+#16 5.476   Downloaded tracing-serde v0.2.0
+#16 5.477   Downloaded datafusion-physical-expr v53.1.0
+#16 5.484   Downloaded fsst v7.0.0
+#16 5.485   Downloaded errno v0.3.15
+#16 5.486   Downloaded roaring v0.11.5
+#16 5.490   Downloaded untrusted v0.9.0
+#16 5.492   Downloaded iana-time-zone v0.1.65
+#16 5.494   Downloaded derive_builder_core v0.20.2
+#16 5.496   Downloaded fax v0.2.7
+#16 5.498   Downloaded jiff-static v0.2.43
+#16 5.499   Downloaded hyper-timeout v0.5.2
+#16 5.501   Downloaded tinytemplate v1.2.1
+#16 5.502   Downloaded tagptr v0.2.0
+#16 5.504   Downloaded tokio-stream v0.1.19
+#16 5.507   Downloaded dashmap v6.2.1
+#16 5.510   Downloaded lance-namespace-impls v7.0.0
+#16 5.513   Downloaded spki v0.7.3
+#16 5.514   Downloaded rand_chacha v0.9.0
+#16 5.515   Downloaded icu_collections v2.4.0
+#16 5.519   Downloaded event-listener-strategy v0.5.4
+#16 5.520   Downloaded icu_normalizer v2.4.0
+#16 5.527   Downloaded hashbrown v0.12.3
+#16 5.530   Downloaded rivetkit v3.1.1
+#16 5.531   Downloaded protobuf-support v3.7.2
+#16 5.532   Downloaded zerocopy-derive v0.8.63
+#16 5.539   Downloaded std_prelude v0.2.12
+#16 5.540   Downloaded snafu-derive v0.9.2
+#16 5.541   Downloaded rand v0.8.8
+#16 5.544   Downloaded ravif v0.13.0
+#16 5.545   Downloaded syn v2.0.119
+#16 5.551   Downloaded wyz v0.5.1
+#16 5.552   Downloaded crypto-common v0.1.7
+#16 5.553   Downloaded datafusion-physical-expr-common v53.1.0
+#16 5.554   Downloaded sdd v4.10.0
+#16 5.557   Downloaded quinn-udp v0.5.16
+#16 5.559   Downloaded darling_macro v0.20.11
+#16 5.560   Downloaded deepsize v0.2.0
+#16 5.561   Downloaded include_dir_macros v0.7.4
+#16 5.561   Downloaded parking_lot_core v0.9.12
+#16 5.563   Downloaded httpdate v1.0.3
+#16 5.564   Downloaded fixedbitset v0.5.9
+#16 5.566   Downloaded tower-service v0.3.3
+#16 5.567   Downloaded thread_local v1.1.10
+#16 5.568   Downloaded encoding_rs_io v0.1.8
+#16 5.569   Downloaded slab v0.4.12
+#16 5.570   Downloaded quick-error v2.0.1
+#16 5.572   Downloaded rayon v1.12.0
+#16 5.577   Downloaded prettyplease v0.2.37
+#16 5.579   Downloaded rivet-envoy-protocol v3.1.1
+#16 5.581   Downloaded pest_meta v2.9.6
+#16 5.583   Downloaded getrandom v0.2.17
+#16 5.585   Downloaded pin-project v1.1.13
+#16 5.594   Downloaded lancedb v0.30.0
+#16 5.603   Downloaded tracing v0.1.44
+#16 5.613   Downloaded vbare-gen v0.2.0
+#16 5.616   Downloaded const-oid v0.9.6
+#16 5.617   Downloaded kanaria v0.2.0
+#16 5.623   Downloaded lance-index v7.0.0
+#16 5.635   Downloaded serde_yaml_ng v0.10.0
+#16 5.637   Downloaded rkyv_derive v0.8.18
+#16 5.639   Downloaded hashbrown v0.17.1
+#16 5.643   Downloaded rayon-core v1.13.0
+#16 5.646   Downloaded lance-testing v7.0.0
+#16 5.647   Downloaded matrixmultiply v0.3.11
+#16 5.649   Downloaded fallible-iterator v0.3.0
+#16 5.650   Downloaded datafusion-datasource-arrow v53.1.0
+#16 5.652   Downloaded crc32fast v1.5.5
+#16 5.654   Downloaded tracing-subscriber v0.3.23
+#16 5.661   Downloaded strum_macros v0.28.0
+#16 5.663   Downloaded form_urlencoded v1.2.3
+#16 5.664   Downloaded tokio-macros v2.7.2
+#16 5.664   Downloaded datafusion-pruning v53.1.0
+#16 5.666   Downloaded datafusion-functions-window-common v53.1.0
+#16 5.666   Downloaded tower-layer v0.3.3
+#16 5.667   Downloaded datafusion-sql v53.1.0
+#16 5.672   Downloaded dunce v1.0.5
+#16 5.673   Downloaded serde_path_to_error v0.1.20
+#16 5.676   Downloaded procfs-core v0.17.0
+#16 5.678   Downloaded time-macros v0.2.32
+#16 5.680   Downloaded psm v0.1.32
+#16 5.682   Downloaded datafusion-functions-nested v53.1.0
+#16 5.685   Downloaded subtle v2.6.1
+#16 5.686   Downloaded lance-io v7.0.0
+#16 5.690   Downloaded spm_precompiled v0.1.4
+#16 5.695   Downloaded saa v5.6.4
+#16 5.697   Downloaded lexical-write-float v1.0.6
+#16 5.699   Downloaded http-body-util v0.1.5
+#16 5.700   Downloaded thiserror v2.0.21
+#16 5.704   Downloaded webpki-roots v0.26.11
+#16 5.706   Downloaded rivetkit-actor-persist v3.1.1
+#16 5.707   Downloaded rivetkit-inspector-protocol v3.1.1
+#16 5.709   Downloaded rivetkit-core v3.1.1
+#16 5.715   Downloaded zune-core v0.5.3
+#16 5.717   Downloaded rand_chacha v0.3.1
+#16 5.718   Downloaded ppv-lite86 v0.2.21
+#16 5.719   Downloaded rgb v0.8.53
+#16 5.721   Downloaded datafusion-physical-expr-adapter v53.1.0
+#16 5.722   Downloaded unicode-ident v1.0.27
+#16 5.725   Downloaded stable_deref_trait v1.2.1
+#16 5.726   Downloaded serde_derive v1.0.229
+#16 5.727   Downloaded compression-core v0.4.34
+#16 5.729   Downloaded brotli v9.1.1
+#16 5.738   Downloaded futures-core v0.3.34
+#16 5.740   Downloaded futures-sink v0.3.34
+#16 5.741   Downloaded procfs v0.17.0
+#16 5.744   Downloaded derive_builder v0.20.2
+#16 5.747   Downloaded darling_core v0.20.11
+#16 5.750   Downloaded rig-helixdb v0.46.0
+#16 5.752   Downloaded criterion-plot v0.8.2
+#16 5.753   Downloaded vcpkg v0.2.15
+#16 5.779   Downloaded chrono-tz v0.10.4
+#16 5.789   Downloaded prost-derive v0.13.5
+#16 5.791   Downloaded datafusion-functions-table v53.1.0
+#16 5.792   Downloaded icu_normalizer_data v2.4.0
+#16 5.794   Downloaded datafusion-functions v53.1.0
+#16 5.801   Downloaded fastrand v2.5.0
+#16 5.803   Downloaded tracing-log v0.2.0
+#16 5.804   Downloaded fallible-streaming-iterator v0.1.9
+#16 5.805   Downloaded wasm-bindgen-macro-support v0.2.130
+#16 5.807   Downloaded getrandom v0.4.3
+#16 5.810   Downloaded rand_pcg v0.10.2
+#16 5.810   Downloaded zerovec-derive v0.11.7
+#16 5.812   Downloaded urlencoding v2.1.3
+#16 5.813   Downloaded rand v0.10.3
+#16 5.816   Downloaded sync_wrapper v1.0.2
+#16 5.816   Downloaded rig v0.46.0
+#16 5.823   Downloaded rivet-error-macros v3.1.1
+#16 5.823   Downloaded hyper-util v0.1.21
+#16 5.830   Downloaded image v0.25.10
+#16 5.837   Downloaded zune-inflate v0.2.54
+#16 5.839   Downloaded itertools v0.13.0
+#16 5.843   Downloaded glob v0.3.4
+#16 5.845   Downloaded crossbeam-epoch v0.9.21
+#16 5.847   Downloaded qoi v0.4.1
+#16 5.850   Downloaded snafu-derive v0.8.9
+#16 5.850   Downloaded static_assertions v1.1.0
+#16 5.851   Downloaded regex-syntax v0.8.11
+#16 5.856   Downloaded serde v1.0.229
+#16 5.860   Downloaded datafusion-physical-plan v53.1.0
+#16 5.871   Downloaded unsafe-libyaml v0.2.11
+#16 5.874   Downloaded icu_properties_data v2.4.0
+#16 5.880   Downloaded lexical-parse-float v1.0.6
+#16 5.883   Downloaded itertools v0.14.0
+#16 5.887   Downloaded jsonb v0.5.6
+#16 5.898   Downloaded datafusion-common v53.1.0
+#16 5.903   Downloaded funty v2.0.0
+#16 5.904   Downloaded http-range-header v0.4.2
+#16 5.905   Downloaded potential_utf v0.1.6
+#16 5.906   Downloaded rig-agent v0.46.0
+#16 5.917   Downloaded time v0.3.55
+#16 5.927   Downloaded jiff v0.2.43
+#16 5.938   Downloaded stfu8 v0.2.7
+#16 5.939   Downloaded simd-adler32 v0.3.10
+#16 5.941   Downloaded lance-tokenizer v7.0.0
+#16 5.942   Downloaded indexmap v1.9.3
+#16 5.946   Downloaded sqlparser v0.61.0
+#16 5.952   Downloaded hmac v0.12.1
+#16 5.953   Downloaded zstd-sys v2.1.3+zstd.1.5.7
+#16 5.965   Downloaded rivetkit-engine-process v3.1.1
+#16 5.966   Downloaded rig-milvus v0.46.0
+#16 5.967   Downloaded tokio v1.54.1
+#16 5.998   Downloaded hex v0.4.3
+#16 6.000   Downloaded miniz_oxide v0.9.1
+#16 6.002   Downloaded opentelemetry v0.28.0
+#16 6.006   Downloaded rustversion v1.0.23
+#16 6.008   Downloaded encoding_rs v0.8.44
+#16 6.015   Downloaded num-traits v0.2.19
+#16 6.016   Downloaded regex-automata v0.4.18
+#16 6.028   Downloaded crossbeam-skiplist v0.1.3
+#16 6.029   Downloaded csv v1.4.0
+#16 6.041   Downloaded ucd-trie v0.1.7
+#16 6.042   Downloaded tinystr v0.8.5
+#16 6.044   Downloaded rav1e v0.8.1
+#16 6.067   Downloaded tokio-rustls v0.26.6
+#16 6.069   Downloaded writeable v0.6.4
+#16 6.070   Downloaded lindera v3.0.7
+#16 6.074   Downloaded miniz_oxide v0.8.9
+#16 6.076   Downloaded ring v0.17.14
+#16 6.107   Downloaded minimal-lexical v0.2.1
+#16 6.110   Downloaded rig-core v0.46.0
+#16 6.164   Downloaded ort v2.0.0-rc.9
+#16 6.168   Downloaded lance v7.0.0
+#16 6.193   Downloaded lindera-dictionary v3.0.7
+#16 6.196   Downloaded rust-stemmers v1.2.0
+#16 6.218   Downloaded yoke v0.8.4
+#16 6.219   Downloaded snafu v0.8.9
+#16 6.223   Downloaded rig-reqwest v0.46.0
+#16 6.225   Downloaded memchr v2.8.3
+#16 6.230   Downloaded ethnum v1.5.3
+#16 6.233   Downloaded jieba-rs v0.9.0
+#16 6.262   Downloaded der v0.7.10
+#16 6.266   Downloaded mio v1.2.5
+#16 6.271   Downloaded rand v0.9.5
+#16 6.274   Downloaded schemars v1.2.3
+#16 6.281   Downloaded datafusion-datasource-csv v53.1.0
+#16 6.282   Downloaded smallvec v1.16.5
+#16 6.283   Downloaded typenum v1.20.1
+#16 6.286   Downloaded io-uring v0.7.16
+#16 6.288   Downloaded nom v7.1.3
+#16 6.293   Downloaded num-bigint v0.4.8
+#16 6.297   Downloaded libm v0.2.16
+#16 6.302   Downloaded utoipa v5.5.0
+#16 6.304   Downloaded random_word v0.5.3
+#16 6.328   Downloaded aws-lc-sys v0.47.0
+#16 6.496   Downloaded pest v2.9.6
+#16 6.499   Downloaded darling_core v0.24.1
+#16 6.503   Downloaded zerotrie v0.2.5
+#16 6.507   Downloaded datafusion-expr-common v53.1.0
+#16 6.510   Downloaded opentelemetry-proto v0.28.0
+#16 6.519   Downloaded nom v8.0.0
+#16 6.524   Downloaded lance-datafusion v7.0.0
+#16 6.527   Downloaded ureq v2.12.1
+#16 6.530   Downloaded png v0.18.1
+#16 6.533   Downloaded scc v3.8.8
+#16 6.537   Downloaded lance-table v7.0.0
+#16 6.541   Downloaded serde_json v1.0.154
+#16 6.547   Downloaded esaxx-rs v0.1.10
+#16 6.549   Downloaded moxcms v0.8.1
+#16 6.556   Downloaded reqwest v0.12.28
+#16 6.560   Downloaded rusqlite v0.37.0
+#16 6.564   Downloaded unicode-normalization v0.1.26
+#16 6.567   Downloaded lance-file v7.0.0
+#16 6.570   Downloaded opentelemetry_sdk v0.28.0
+#16 6.576   Downloaded moka v0.12.16
+#16 6.582   Downloaded object_store v0.13.2
+#16 6.587   Downloaded unicode-width v0.2.3
+#16 6.591   Downloaded syn v1.0.109
+#16 6.597   Downloaded ndarray v0.16.1
+#16 6.605   Downloaded quinn-proto v0.11.19
+#16 6.611   Downloaded rig-cassette v0.46.0
+#16 6.617   Downloaded curve25519-dalek v4.1.3
+#16 6.624   Downloaded nix v0.30.1
+#16 6.632   Downloaded object v0.39.1
+#16 6.639   Downloaded rustix v0.38.44
+#16 6.661   Downloaded rustls v0.23.46
+#16 6.669   Downloaded lz4-sys v1.11.1+lz4-1.10.0
+#16 6.684   Downloaded rustix v1.1.6
+#16 6.706   Downloaded onig_sys v69.9.3
+#16 6.716   Downloaded libc v0.2.191
+#16 6.771   Downloaded petgraph v0.8.3
+#16 6.785   Downloaded pxfm v0.1.30
+#16 6.798   Downloaded fst v0.4.7
+#16 6.813   Downloaded linux-raw-sys v0.4.15
+#16 6.839   Downloaded linux-raw-sys v0.12.1
+#16 6.876   Downloaded libsqlite3-sys v0.35.0
+#16 7.284    Compiling proc-macro2 v1.0.107
+#16 7.284    Compiling quote v1.0.47
+#16 7.408    Compiling unicode-ident v1.0.27
+#16 7.472    Compiling serde_core v1.0.229
+#16 7.581    Compiling libc v0.2.191
+#16 7.800    Compiling syn v3.0.10
+#16 8.334    Compiling syn v2.0.119
+#16 10.02    Compiling jobserver v0.1.35
+#16 10.13    Compiling find-msvc-tools v0.1.15
+#16 10.21    Compiling shlex v2.0.1
+#16 10.26     Checking cfg-if v1.0.5
+#16 10.28    Compiling cc v1.11.2
+#16 10.39    Compiling serde v1.0.229
+#16 10.51    Compiling serde_derive v1.0.229
+#16 10.94     Checking memchr v2.8.3
+#16 11.06     Checking pin-project-lite v0.2.17
+#16 11.09     Checking itoa v1.0.19
+#16 11.13     Checking smallvec v1.16.5
+#16 11.20     Checking once_cell v1.21.4
+#16 11.25     Checking futures-core v0.3.34
+#16 11.29     Checking log v0.4.35
+#16 11.34     Checking futures-sink v0.3.34
+#16 11.37     Checking scopeguard v1.2.0
+#16 11.40    Compiling parking_lot_core v0.9.12
+#16 11.60     Checking lock_api v0.4.14
+#16 11.75     Checking tracing-core v0.1.36
+#16 11.98     Checking slab v0.4.12
+#16 12.12     Checking parking_lot v0.12.5
+#16 12.14     Checking bytes v1.12.1
+#16 12.24     Checking futures-channel v0.3.34
+#16 12.32     Checking errno v0.3.15
+#16 12.36    Compiling tracing-attributes v0.1.31
+#16 12.60    Compiling futures-macro v0.3.34
+#16 13.05     Checking futures-io v0.3.34
+#16 13.08     Checking futures-task v0.3.34
+#16 13.13     Checking futures-util v0.3.34
+#16 13.26     Checking tracing v0.1.44
+#16 13.37     Checking signal-hook-registry v1.4.8
+#16 13.52     Checking socket2 v0.6.5
+#16 13.69     Checking mio v1.2.5
+#16 13.83     Checking getrandom v0.2.17
+#16 13.93    Compiling tokio-macros v2.7.2
+#16 14.27    Compiling synstructure v0.14.0
+#16 14.68    Compiling pkg-config v0.3.34
+#16 14.78     Checking tokio v1.54.1
+#16 15.13     Checking http v1.5.0
+#16 15.52    Compiling zeroize_derive v1.5.0
+#16 16.22    Compiling zmij v1.0.23
+#16 16.51     Checking zeroize v1.9.1
+#16 16.65    Compiling zerofrom-derive v0.1.8
+#16 16.84    Compiling object v0.39.1
+#16 17.13    Compiling fs_extra v1.3.0
+#16 17.37    Compiling yoke-derive v0.8.4
+#16 17.70     Checking zerofrom v0.1.8
+#16 17.81     Checking stable_deref_trait v1.2.1
+#16 18.56     Checking yoke v0.8.4
+#16 18.68    Compiling cmake v0.1.58
+#16 18.98     Checking percent-encoding v2.3.2
+#16 19.06    Compiling dunce v1.0.5
+#16 19.18    Compiling aws-lc-sys v0.47.0
+#16 19.99    Compiling ar_archive_writer v0.5.5
+#16 20.41    Compiling zerovec-derive v0.11.7
+#16 20.65    Compiling serde_json v1.0.154
+#16 20.89    Compiling psm v0.1.32
+#16 21.42     Checking zerovec v0.11.9
+#16 21.98    Compiling displaydoc v0.2.7
+#16 22.35     Checking subtle v2.6.1
+#16 22.75     Checking rustls-pki-types v1.16.0
+#16 22.85     Checking http-body v1.1.0
+#16 22.88    Compiling stacker v0.1.25
+#16 23.01    Compiling httparse v1.10.1
+#16 23.13     Checking tower-service v0.3.3
+#16 23.15    Compiling aws-lc-rs v1.19.0
+#16 23.25     Checking equivalent v1.0.3
+#16 23.28     Checking hashbrown v0.17.1
+#16 23.53     Checking indexmap v2.14.2
+#16 23.80    Compiling ring v0.17.14
+#16 24.04    Compiling zerocopy v0.8.63
+#16 24.17     Checking fnv v1.0.7
+#16 24.19    Compiling pest_stack_guard v1.0.1
+#16 25.01     Checking tinystr v0.8.5
+#16 25.06     Checking tokio-util v0.7.20
+#16 25.24    Compiling zerocopy-derive v0.8.63
+#16 25.97     Checking utf_types v1.0.0
+#16 26.03     Checking untrusted v0.7.1
+#16 26.07     Checking litemap v0.8.3
+#16 26.13     Checking writeable v0.6.4
+#16 26.19     Checking icu_locale_core v2.4.0
+#16 26.42     Checking utf8_iter v1.1.0
+#16 27.83     Checking zerotrie v0.2.5
+#16 27.91     Checking potential_utf v0.1.6
+#16 27.95    Compiling icu_normalizer_data v2.4.0
+#16 28.02    Compiling thiserror v2.0.21
+#16 28.13    Compiling rustversion v1.0.23
+#16 28.25    Compiling icu_properties_data v2.4.0
+#16 28.32     Checking bitflags v2.13.2
+#16 28.36    Compiling ucd-trie v0.1.7
+#16 28.44     Checking mime v0.3.18
+#16 28.50     Checking untrusted v0.9.0
+#16 28.53     Checking tower-layer v0.3.3
+#16 28.58    Compiling version_check v0.9.5
+#16 28.67    Compiling generic-array v0.14.7
+#16 29.12    Compiling pest v2.9.6
+#16 29.70     Checking icu_collections v2.4.0
+#16 29.82     Checking icu_provider v2.4.0
+#16 29.89     Checking sync_wrapper v1.0.2
+#16 29.92    Compiling thiserror-impl v2.0.21
+#16 30.47     Checking httpdate v1.0.3
+#16 30.51     Checking try-lock v0.2.5
+#16 30.54     Checking atomic-waker v1.1.2
+#16 30.57    Compiling rustls v0.23.46
+#16 30.63    Compiling autocfg v1.5.1
+#16 30.77    Compiling anyhow v1.0.104
+#16 30.90     Checking h2 v0.4.20
+#16 32.23     Checking want v0.3.2
+#16 32.55    Compiling pest_meta v2.9.6
+#16 33.22     Checking http-body-util v0.1.5
+#16 33.30     Checking typenum v1.20.1
+#16 33.70    Compiling pest_generator v2.9.6
+#16 33.93     Checking icu_properties v2.4.0
+#16 34.29     Checking icu_normalizer v2.4.0
+#16 34.40     Checking hyper v1.12.0
+#16 34.79     Checking form_urlencoded v1.2.3
+#16 34.83     Checking ipnet v2.12.2
+#16 34.90     Checking base64 v0.23.1
+#16 35.00    Compiling prettyplease v0.2.37
+#16 35.09     Checking hyper-util v0.1.21
+#16 35.60     Checking idna_adapter v1.2.2
+#16 35.65    Compiling pest_derive v2.9.6
+#16 35.94     Checking tower v0.5.3
+#16 36.07     Checking openssl-probe v0.2.2
+#16 36.11    Compiling heck v0.5.0
+#16 36.15     Checking rustls-webpki v0.103.17
+#16 36.17    Compiling vbare-gen v0.2.0
+#16 36.90     Checking rustls-native-certs v0.8.5
+#16 36.95     Checking idna v1.1.0
+#16 37.32     Checking crypto-common v0.1.7
+#16 37.35     Checking block-buffer v0.10.4
+#16 37.39     Checking ppv-lite86 v0.2.21
+#16 37.47     Checking webpki-roots v1.0.12
+#16 37.50    Compiling unicase v2.10.0
+#16 37.51     Checking tokio-rustls v0.26.6
+#16 37.56    Compiling mime_guess v2.0.5
+#16 37.59     Checking digest v0.10.7
+#16 37.65    Compiling vbare-compiler v0.2.0
+#16 37.72     Checking url v2.5.9
+#16 37.77    Compiling encoding_rs v0.8.44
+#16 37.84     Checking futures-executor v0.3.34
+#16 37.91     Checking rand_core v0.6.4
+#16 37.96     Checking cpufeatures v0.2.17
+#16 37.99    Compiling multiversion_no_op v1.0.0
+#16 38.05     Checking simdutf8 v0.1.5
+#16 38.07     Checking http-range-header v0.4.2
+#16 38.10     Checking base64 v0.22.1
+#16 38.11     Checking tower-http v0.6.11
+#16 38.47     Checking hyper-rustls v0.27.10
+#16 38.53    Compiling num-traits v0.2.19
+#16 38.65     Checking rand_chacha v0.3.1
+#16 38.70     Checking rand v0.8.8
+#16 39.15    Compiling async-trait v0.1.92
+#16 39.41    Compiling getrandom v0.3.4
+#16 39.52     Checking glob v0.3.4
+#16 39.58    Compiling pin-project-internal v1.1.13
+#16 39.61    Compiling async-stream-impl v0.3.6
+#16 39.91    Compiling getrandom v0.4.3
+#16 40.01     Checking hex v0.4.3
+#16 40.09     Checking async-stream v0.3.6
+#16 40.12     Checking pin-project v1.1.13
+#16 40.15     Checking futures v0.3.34
+#16 40.18    Compiling thiserror v1.0.69
+#16 40.27     Checking lazy_static v1.5.1
+#16 40.28     Checking regex-syntax v0.8.11
+#16 40.30     Checking ryu v1.0.23
+#16 40.34     Checking serde_urlencoded v0.7.1
+#16 40.43     Checking rand_core v0.9.5
+#16 40.52     Checking vbare v0.2.0
+#16 40.58     Checking regex-automata v0.4.18
+#16 40.65     Checking sha2 v0.10.9
+#16 40.71     Checking opentelemetry v0.28.0
+#16 40.88    Compiling indexmap v1.9.3
+#16 40.96    Compiling thiserror-impl v1.0.69
+#16 41.22     Checking serde_bytes v0.11.19
+#16 41.27    Compiling rustix v0.38.44
+#16 41.39    Compiling either v1.19.0
+#16 41.45    Compiling itertools v0.14.0
+#16 41.56     Checking uuid v1.29.2
+#16 41.68     Checking rand_chacha v0.9.0
+#16 41.73     Checking serde_path_to_error v0.1.20
+#16 41.90     Checking linux-raw-sys v0.4.15
+#16 41.97     Checking hashbrown v0.12.3
+#16 42.01    Compiling protobuf v3.7.2
+#16 42.10    Compiling ref-cast v1.0.27
+#16 42.12    Compiling procfs v0.17.0
+#16 42.31    Compiling prost-derive v0.13.5
+#16 42.97     Checking rand v0.9.5
+#16 43.13     Checking protobuf-support v3.7.2
+#16 43.14     Checking opentelemetry_sdk v0.28.0
+#16 43.20     Checking reqwest v0.12.28
+#16 43.54     Checking procfs-core v0.17.0
+#16 43.73     Checking axum-core v0.4.5
+#16 44.36     Checking sha1 v0.10.7
+#16 44.40     Checking rustls-platform-verifier v0.7.1
+#16 44.48     Checking serde_bare v0.5.0
+#16 44.55    Compiling ref-cast-impl v1.0.27
+#16 44.56    Compiling serde_derive_internals v0.30.0
+#16 44.81     Checking data-encoding v2.11.1
+#16 44.87    Compiling prometheus v0.14.0
+#16 44.90     Checking matchit v0.7.3
+#16 44.97     Checking utf-8 v0.7.6
+#16 44.99     Checking futures-timer v3.0.4
+#16 45.01     Checking tungstenite v0.26.2
+#16 45.05     Checking rig-http v0.46.0
+#16 45.18     Checking axum v0.7.9
+#16 45.63    Compiling schemars_derive v1.2.3
+#16 46.38    Compiling utoipa-gen v5.5.0
+#16 46.45     Checking reqwest v0.13.5
+#16 47.83     Checking prost v0.13.5
+#16 47.93     Checking tower v0.4.13
+#16 48.25     Checking matchers v0.2.0
+#16 48.28     Checking sharded-slab v0.1.7
+#16 48.44    Compiling rivetkit-client-protocol v3.1.1
+#16 48.67    Compiling rivet-envoy-protocol v3.1.1
+#16 48.72     Checking webpki-roots v0.26.11
+#16 48.75     Checking hyper-timeout v0.5.2
+#16 48.81     Checking half v2.7.1
+#16 48.90     Checking webpki-root-certs v1.0.12
+#16 48.93     Checking tokio-stream v0.1.19
+#16 48.96     Checking tracing-serde v0.2.0
+#16 49.00     Checking tracing-log v0.2.0
+#16 49.04     Checking socket2 v0.5.10
+#16 49.06     Checking thread_local v1.1.10
+#16 49.10     Checking nu-ansi-term v0.50.3
+#16 49.13     Checking iana-time-zone v0.1.65
+#16 49.16     Checking ciborium-io v0.2.2
+#16 49.17     Checking dyn-clone v1.0.20
+#16 49.19    Compiling cfg_aliases v0.2.2
+#16 49.20     Checking siphasher v1.0.4
+#16 49.21    Compiling semver v1.0.28
+#16 49.25     Checking phf_shared v0.12.1
+#16 49.29    Compiling rustc_version v0.4.1
+#16 49.31    Compiling nix v0.30.1
+#16 49.38     Checking schemars v1.2.3
+#16 49.43     Checking ciborium-ll v0.2.2
+#16 49.48     Checking tracing-subscriber v0.3.23
+#16 49.59     Checking chrono v0.4.45
+#16 49.85     Checking tonic v0.12.3
+#16 50.33     Checking rig-reqwest v0.46.0
+#16 50.42     Checking tokio-tungstenite v0.26.2
+#16 50.66     Checking utoipa v5.5.0
+#16 50.90    Compiling rivet-error-macros v3.1.1
+#16 51.25     Checking opentelemetry-http v0.28.0
+#16 51.28     Checking ordered-float v5.5.1
+#16 51.37    Compiling rivetkit-inspector-protocol v3.1.1
+#16 51.39    Compiling rivetkit-actor-persist v3.1.1
+#16 51.65     Checking urlencoding v2.1.3
+#16 51.66    Compiling indoc v2.0.8
+#16 51.69     Checking web-time v1.1.0
+#16 51.71    Compiling chrono-tz v0.10.4
+#16 51.77     Checking saa v5.6.4
+#16 51.80     Checking fastrand v2.5.0
+#16 51.85     Checking sdd v4.10.0
+#16 51.87     Checking rig-core v0.46.0
+#16 51.97     Checking scc v3.8.8
+#16 52.43     Checking rivet-error v3.1.1
+#16 56.51     Checking rivet-metrics v3.1.1
+#16 56.92     Checking opentelemetry-proto v0.28.0
+#16 57.49     Checking tracing-opentelemetry v0.29.0
+#16 57.56     Checking ciborium v0.2.2
+#16 57.73    Compiling curve25519-dalek v4.1.3
+#16 57.83     Checking phf v0.12.1
+#16 57.87    Compiling rivetkit-core v3.1.1
+#16 57.98     Checking rivetkit-shared-types v3.1.1
+#16 58.07     Checking axum-core v0.5.6
+#16 58.55    Compiling axum-macros v0.5.1
+#16 58.82    Compiling include_dir_macros v0.7.4
+#16 58.98     Checking half v1.8.3
+#16 59.05     Checking matchit v0.8.4
+#16 59.12     Checking signature v2.2.0
+#16 59.15     Checking serde_cbor v0.11.2
+#16 59.27     Checking axum v0.8.9
+#16 59.28     Checking include_dir v0.7.4
+#16 59.32     Checking rig-memory v0.46.0
+#16 61.03     Checking opentelemetry-otlp v0.28.0
+#16 61.16     Checking rivet-envoy-client v3.1.1
+#16 62.24     Checking rivetkit-engine-process v3.1.1
+#16 62.54     Checking croner v2.2.0
+#16 62.60     Checking tracing-futures v0.2.5
+#16 62.64     Checking rivet-sqlite-types v3.1.1
+#16 62.68     Checking rig-agent v0.46.0
+#16 64.03     Checking rivetkit-client v3.1.1
+#16 64.58     Checking ed25519 v2.2.3
+#16 64.62     Checking rig-harness-protocol v0.46.0
+#16 64.71     Checking rig v0.46.0
+#16 64.74     Checking ed25519-dalek v2.2.0
+#16 64.79     Checking hmac v0.12.1
+#16 64.83     Checking serde_ignored v0.1.14
+#16 64.88    Compiling vcpkg v0.2.15
+#16 65.11    Compiling libsqlite3-sys v0.35.0
+#16 65.31    Compiling alloca v0.4.0
+#16 65.45     Checking foldhash v0.1.5
+#16 65.55     Checking anstyle v1.0.14
+#16 65.60     Checking clap_lex v1.1.2
+#16 65.65     Checking clap_builder v4.6.7
+#16 66.14     Checking itertools v0.13.0
+#16 66.56     Checking hashbrown v0.15.5
+#16 67.25     Checking rivetkit v3.1.1
+#16 69.63     Checking cast v0.3.0
+#16 69.68     Checking same-file v1.0.6
+#16 69.71     Checking walkdir v2.5.0
+#16 69.76     Checking criterion-plot v0.8.2
+#16 69.94     Checking hashlink v0.10.0
+#16 70.02     Checking clap v4.6.9
+#16 70.04     Checking regex v1.13.1
+#16 70.13     Checking tinytemplate v1.2.1
+#16 70.20     Checking page_size v0.6.0
+#16 70.23     Checking fallible-streaming-iterator v0.1.9
+#16 70.27     Checking anes v0.1.6
+#16 70.32     Checking oorandom v11.1.5
+#16 70.36     Checking fallible-iterator v0.3.0
+#16 70.46     Checking rusqlite v0.37.0
+#16 70.71     Checking criterion v0.8.2
+#16 71.13     Checking qrcode v0.14.1
+#16 71.22     Checking jsonwebtoken v10.4.0
+#16 114.8     Checking robot-buddy v0.1.0 (/src/crates/buddy)
+#16 117.5     Checking robot-buddy-server v0.1.0 (/src/apps/server)
+#16 118.3     Checking robot-buddy-robot v0.1.0 (/src/apps/robot)
+#16 123.3     Finished `dev` profile [unoptimized] target(s) in 2m 02s
+#16 123.5 
+#16 123.5 >>> [bookworm][DEFAULT] cargo test --workspace --locked -j 2
+#16 124.0    Compiling serde_core v1.0.229
+#16 124.0    Compiling libc v0.2.191
+#16 124.4    Compiling pin-project-lite v0.2.17
+#16 124.5    Compiling smallvec v1.16.5
+#16 124.5    Compiling once_cell v1.21.4
+#16 124.6    Compiling futures-core v0.3.34
+#16 124.6    Compiling log v0.4.35
+#16 124.7    Compiling serde v1.0.229
+#16 124.7    Compiling futures-sink v0.3.34
+#16 124.7    Compiling scopeguard v1.2.0
+#16 124.7    Compiling parking_lot_core v0.9.12
+#16 124.8    Compiling lock_api v0.4.14
+#16 124.8    Compiling bytes v1.12.1
+#16 124.8    Compiling tracing-core v0.1.36
+#16 125.0    Compiling slab v0.4.12
+#16 125.0    Compiling parking_lot v0.12.5
+#16 125.1    Compiling futures-channel v0.3.34
+#16 125.1    Compiling errno v0.3.15
+#16 125.2    Compiling futures-task v0.3.34
+#16 125.2    Compiling futures-io v0.3.34
+#16 125.2    Compiling futures-util v0.3.34
+#16 125.2    Compiling tracing v0.1.44
+#16 125.3    Compiling signal-hook-registry v1.4.8
+#16 125.3    Compiling getrandom v0.2.17
+#16 125.4    Compiling socket2 v0.6.5
+#16 125.6    Compiling mio v1.2.5
+#16 125.7    Compiling tokio v1.54.1
+#16 126.1    Compiling http v1.5.0
+#16 126.4    Compiling zeroize v1.9.1
+#16 126.4    Compiling zerofrom v0.1.8
+#16 126.5    Compiling stable_deref_trait v1.2.1
+#16 126.5    Compiling yoke v0.8.4
+#16 126.5    Compiling percent-encoding v2.3.2
+#16 126.6    Compiling zerovec v0.11.9
+#16 126.8    Compiling subtle v2.6.1
+#16 126.8    Compiling serde_json v1.0.154
+#16 127.2    Compiling rustls-pki-types v1.16.0
+#16 127.3    Compiling http-body v1.1.0
+#16 127.4    Compiling equivalent v1.0.3
+#16 127.4    Compiling hashbrown v0.17.1
+#16 127.6    Compiling tower-service v0.3.3
+#16 127.6    Compiling indexmap v2.14.2
+#16 127.7    Compiling fnv v1.0.7
+#16 127.7    Compiling httparse v1.10.1
+#16 127.8    Compiling tokio-util v0.7.20
+#16 127.8    Compiling tinystr v0.8.5
+#16 127.9    Compiling aws-lc-sys v0.47.0
+#16 128.0    Compiling writeable v0.6.4
+#16 128.1    Compiling untrusted v0.7.1
+#16 128.1    Compiling utf_types v1.0.0
+#16 128.1    Compiling litemap v0.8.3
+#16 128.1    Compiling utf8_iter v1.1.0
+#16 128.1    Compiling icu_locale_core v2.4.0
+#16 128.2    Compiling aws-lc-rs v1.19.0
+#16 128.5    Compiling zerocopy v0.8.63
+#16 128.7    Compiling zerotrie v0.2.5
+#16 128.8    Compiling potential_utf v0.1.6
+#16 128.8    Compiling bitflags v2.13.2
+#16 128.9    Compiling untrusted v0.9.0
+#16 128.9    Compiling tower-layer v0.3.3
+#16 129.0    Compiling mime v0.3.18
+#16 129.0    Compiling ring v0.17.14
+#16 129.6    Compiling icu_collections v2.4.0
+#16 129.8    Compiling icu_provider v2.4.0
+#16 129.8    Compiling sync_wrapper v1.0.2
+#16 129.8    Compiling httpdate v1.0.3
+#16 129.9    Compiling try-lock v0.2.5
+#16 129.9    Compiling atomic-waker v1.1.2
+#16 129.9    Compiling want v0.3.2
+#16 129.9    Compiling h2 v0.4.20
+#16 129.9    Compiling thiserror v2.0.21
+#16 130.0    Compiling rustls-webpki v0.103.17
+#16 130.3    Compiling icu_normalizer_data v2.4.0
+#16 130.3    Compiling icu_properties_data v2.4.0
+#16 130.3    Compiling http-body-util v0.1.5
+#16 130.4    Compiling typenum v1.20.1
+#16 130.6    Compiling generic-array v0.14.7
+#16 130.8    Compiling icu_properties v2.4.0
+#16 131.3    Compiling icu_normalizer v2.4.0
+#16 131.4    Compiling rustls v0.23.46
+#16 131.8    Compiling hyper v1.12.0
+#16 132.3    Compiling form_urlencoded v1.2.3
+#16 132.4    Compiling base64 v0.23.1
+#16 132.5    Compiling ipnet v2.12.2
+#16 132.6    Compiling hyper-util v0.1.21
+#16 133.3    Compiling idna_adapter v1.2.2
+#16 133.3    Compiling tower v0.5.3
+#16 133.4    Compiling openssl-probe v0.2.2
+#16 133.5    Compiling rustls-native-certs v0.8.5
+#16 133.5    Compiling idna v1.1.0
+#16 133.6    Compiling block-buffer v0.10.4
+#16 133.6    Compiling crypto-common v0.1.7
+#16 133.6    Compiling ppv-lite86 v0.2.21
+#16 133.7    Compiling webpki-roots v1.0.12
+#16 133.7    Compiling url v2.5.9
+#16 133.7    Compiling digest v0.10.7
+#16 133.8    Compiling tokio-rustls v0.26.6
+#16 133.9    Compiling futures-executor v0.3.34
+#16 133.9    Compiling mime_guess v2.0.5
+#16 134.0    Compiling rand_core v0.6.4
+#16 134.0    Compiling cpufeatures v0.2.17
+#16 134.1    Compiling simdutf8 v0.1.5
+#16 134.1    Compiling base64 v0.22.1
+#16 134.1    Compiling http-range-header v0.4.2
+#16 134.2    Compiling tower-http v0.6.11
+#16 134.2    Compiling encoding_rs v0.8.44
+#16 134.6    Compiling hyper-rustls v0.27.10
+#16 134.7    Compiling rand_chacha v0.3.1
+#16 134.8    Compiling num-traits v0.2.19
+#16 134.9    Compiling rand v0.8.8
+#16 135.0    Compiling glob v0.3.4
+#16 135.1    Compiling hex v0.4.3
+#16 135.1    Compiling pin-project v1.1.13
+#16 135.1    Compiling async-stream v0.3.6
+#16 135.2    Compiling getrandom v0.3.4
+#16 135.2    Compiling futures v0.3.34
+#16 135.2    Compiling regex-syntax v0.8.11
+#16 135.2    Compiling ryu v1.0.23
+#16 135.3    Compiling lazy_static v1.5.1
+#16 135.3    Compiling serde_urlencoded v0.7.1
+#16 135.3    Compiling rand_core v0.9.5
+#16 135.4    Compiling getrandom v0.4.3
+#16 135.5    Compiling sha2 v0.10.9
+#16 135.5    Compiling vbare v0.2.0
+#16 135.7    Compiling regex-automata v0.4.18
+#16 135.8    Compiling opentelemetry v0.28.0
+#16 136.1    Compiling serde_bytes v0.11.19
+#16 136.2    Compiling thiserror v1.0.69
+#16 136.2    Compiling uuid v1.29.2
+#16 136.4    Compiling rand_chacha v0.9.0
+#16 136.5    Compiling serde_path_to_error v0.1.20
+#16 136.6    Compiling hashbrown v0.12.3
+#16 136.8    Compiling linux-raw-sys v0.4.15
+#16 136.9    Compiling indexmap v1.9.3
+#16 136.9    Compiling rustix v0.38.44
+#16 137.0    Compiling rand v0.9.5
+#16 137.2    Compiling protobuf-support v3.7.2
+#16 137.3    Compiling opentelemetry_sdk v0.28.0
+#16 138.0    Compiling reqwest v0.12.28
+#16 138.6    Compiling procfs-core v0.17.0
+#16 139.3    Compiling axum-core v0.4.5
+#16 139.6    Compiling sha1 v0.10.7
+#16 139.6    Compiling rustls-platform-verifier v0.7.1
+#16 139.7    Compiling serde_bare v0.5.0
+#16 139.7    Compiling data-encoding v2.11.1
+#16 139.9    Compiling futures-timer v3.0.4
+#16 140.0    Compiling utf-8 v0.7.6
+#16 140.0    Compiling matchit v0.7.3
+#16 140.0    Compiling tungstenite v0.26.2
+#16 140.1    Compiling axum v0.7.9
+#16 140.3    Compiling rig-http v0.46.0
+#16 140.5    Compiling ref-cast v1.0.27
+#16 140.5    Compiling reqwest v0.13.5
+#16 141.3    Compiling procfs v0.17.0
+#16 141.7    Compiling protobuf v3.7.2
+#16 141.9    Compiling prost v0.13.5
+#16 142.0    Compiling tower v0.4.13
+#16 142.3    Compiling matchers v0.2.0
+#16 142.4    Compiling sharded-slab v0.1.7
+#16 142.5    Compiling webpki-roots v0.26.11
+#16 142.6    Compiling hyper-timeout v0.5.2
+#16 142.6    Compiling half v2.7.1
+#16 142.7    Compiling webpki-root-certs v1.0.12
+#16 142.7    Compiling tokio-stream v0.1.19
+#16 142.9    Compiling tracing-log v0.2.0
+#16 142.9    Compiling tracing-serde v0.2.0
+#16 143.0    Compiling socket2 v0.5.10
+#16 143.1    Compiling thread_local v1.1.10
+#16 143.1    Compiling ciborium-io v0.2.2
+#16 143.2    Compiling siphasher v1.0.4
+#16 143.2    Compiling dyn-clone v1.0.20
+#16 143.2    Compiling iana-time-zone v0.1.65
+#16 143.3    Compiling nu-ansi-term v0.50.3
+#16 143.4    Compiling tracing-subscriber v0.3.23
+#16 143.6    Compiling chrono v0.4.45
+#16 144.1    Compiling schemars v1.2.3
+#16 144.1    Compiling phf_shared v0.12.1
+#16 144.2    Compiling ciborium-ll v0.2.2
+#16 144.2    Compiling tonic v0.12.3
+#16 144.5    Compiling prometheus v0.14.0
+#16 145.1    Compiling rig-reqwest v0.46.0
+#16 145.2    Compiling tokio-tungstenite v0.26.2
+#16 145.3    Compiling utoipa v5.5.0
+#16 145.3    Compiling opentelemetry-http v0.28.0
+#16 145.5    Compiling ordered-float v5.5.1
+#16 145.6    Compiling fastrand v2.5.0
+#16 145.7    Compiling web-time v1.1.0
+#16 145.7    Compiling saa v5.6.4
+#16 145.8    Compiling sdd v4.10.0
+#16 146.0    Compiling urlencoding v2.1.3
+#16 146.0    Compiling rivet-envoy-protocol v3.1.1
+#16 146.3    Compiling scc v3.8.8
+#16 146.7    Compiling rig-core v0.46.0
+#16 150.3    Compiling rivet-error v3.1.1
+#16 150.4    Compiling rivetkit-client-protocol v3.1.1
+#16 150.9    Compiling opentelemetry-proto v0.28.0
+#16 151.6    Compiling rivet-metrics v3.1.1
+#16 151.7    Compiling ciborium v0.2.2
+#16 151.9    Compiling phf v0.12.1
+#16 151.9    Compiling tracing-opentelemetry v0.29.0
+#16 152.0    Compiling rivetkit-shared-types v3.1.1
+#16 152.1    Compiling axum-core v0.5.6
+#16 152.7    Compiling half v1.8.3
+#16 152.7    Compiling signature v2.2.0
+#16 152.8    Compiling matchit v0.8.4
+#16 152.9    Compiling axum v0.8.9
+#16 154.3    Compiling serde_cbor v0.11.2
+#16 154.5    Compiling include_dir v0.7.4
+#16 154.6    Compiling nix v0.30.1
+#16 155.3    Compiling chrono-tz v0.10.4
+#16 157.3    Compiling rig-memory v0.46.0
+#16 158.6    Compiling rivet-envoy-client v3.1.1
+#16 159.3    Compiling opentelemetry-otlp v0.28.0
+#16 159.8    Compiling rivetkit-actor-persist v3.1.1
+#16 160.2    Compiling rivetkit-inspector-protocol v3.1.1
+#16 160.8    Compiling rivetkit-engine-process v3.1.1
+#16 161.2    Compiling croner v2.2.0
+#16 161.3    Compiling tracing-futures v0.2.5
+#16 161.4    Compiling rivet-sqlite-types v3.1.1
+#16 161.4    Compiling rig-agent v0.46.0
+#16 162.0    Compiling rivetkit-core v3.1.1
+#16 163.6    Compiling curve25519-dalek v4.1.3
+#16 163.8    Compiling rivetkit-client v3.1.1
+#16 165.1    Compiling ed25519 v2.2.3
+#16 165.1    Compiling rig-harness-protocol v0.46.0
+#16 165.3    Compiling rig v0.46.0
+#16 165.4    Compiling ed25519-dalek v2.2.0
+#16 165.4    Compiling hmac v0.12.1
+#16 165.5    Compiling serde_ignored v0.1.14
+#16 165.5    Compiling foldhash v0.1.5
+#16 165.6    Compiling anstyle v1.0.14
+#16 165.6    Compiling clap_lex v1.1.2
+#16 165.7    Compiling clap_builder v4.6.7
+#16 166.7    Compiling hashbrown v0.15.5
+#16 166.9    Compiling itertools v0.13.0
+#16 167.5    Compiling cast v0.3.0
+#16 167.6    Compiling same-file v1.0.6
+#16 167.6    Compiling walkdir v2.5.0
+#16 167.7    Compiling criterion-plot v0.8.2
+#16 167.9    Compiling libsqlite3-sys v0.35.0
+#16 167.9    Compiling rivetkit v3.1.1
+#16 170.5    Compiling alloca v0.4.0
+#16 170.5    Compiling hashlink v0.10.0
+#16 170.6    Compiling clap v4.6.9
+#16 170.6    Compiling regex v1.13.1
+#16 170.7    Compiling tinytemplate v1.2.1
+#16 170.9    Compiling page_size v0.6.0
+#16 170.9    Compiling fallible-iterator v0.3.0
+#16 171.0    Compiling oorandom v11.1.5
+#16 171.0    Compiling anes v0.1.6
+#16 171.1    Compiling fallible-streaming-iterator v0.1.9
+#16 171.1    Compiling rusqlite v0.37.0
+#16 171.5    Compiling criterion v0.8.2
+#16 172.5    Compiling qrcode v0.14.1
+#16 172.7    Compiling jsonwebtoken v10.4.0
+#16 239.9    Compiling robot-buddy v0.1.0 (/src/crates/buddy)
+#16 249.8    Compiling robot-buddy-server v0.1.0 (/src/apps/server)
+#16 274.1    Compiling robot-buddy-robot v0.1.0 (/src/apps/robot)
+#16 283.6     Finished `test` profile [unoptimized] target(s) in 2m 40s
+#16 283.6      Running unittests src/lib.rs (target/debug/build/robot-buddy/7240d76b335454e4/out/robot_buddy-7240d76b335454e4)
+#16 283.6 
+#16 283.6 running 79 tests
+#16 283.6 test actor::tests::codes_are_six_digits_and_inputs_are_bounded ... ok
+#16 283.6 test audio::tests::requires_explicit_supported_audio_format ... ok
+#16 283.6 test auth::tests::ct_eq_matches_equality ... ok
+#16 283.6 test auth::tests::short_keys_are_rejected_for_sign_and_verify ... ok
+#16 283.6 test auth::tests::signing_keys_zeroize_on_drop ... ok
+#16 283.6 test config::tests::errors_never_contain_the_key ... ok
+#16 283.6 test auth::tests::tokens_are_bound_to_purpose_and_key ... ok
+#16 283.6 test conversation::delivery::tests::all_valid_connections_broadcast ... ok
+#16 283.6 test conversation::delivery::tests::closed_connections_are_forgotten ... ok
+#16 283.6 test conversation::delivery::tests::an_expired_connection_that_failed_to_close_gets_nothing ... ok
+#16 283.6 test context::tests::rejects_unknown_timezone ... ok
+#16 283.6 test config::tests::signing_key_requires_32_bytes ... ok
+#16 283.6 test auth::tests::secrets_are_redacted_and_round_trip_identity_files ... ok
+#16 283.6 test conversation::harness::tests::first_dialogue_pins_once_then_accepts ... ok
+#16 283.6 test context::tests::local_time_handles_dst_and_date_boundary ... ok
+#16 283.6 test conversation::harness::tests::leading_whitespace_does_not_admit_speech ... ok
+#16 283.6 test conversation::harness::tests::modes_gate_admission ... ok
+#16 283.6 test conversation::harness::tests::spoken_budget_is_enforced ... ok
+#16 283.7 test conversation::delivery::tests::closed_connections_lose_their_subscription ... ok
+#16 283.7 test conversation::delivery::tests::fallback_skips_connections_never_seen_subscribing ... ok
+#16 283.7 test conversation::harness::tests::spoken_numbers_chunks_and_skips_whitespace ... ok
+#16 283.7 test conversation::delivery::tests::sessions_are_verified_once_per_connection ... ok
+#16 283.7 test conversation::harness::tests::spoken_phase_tolerates_a_tool_start_before_text ... ok
+#16 283.7 test actor::tests::migration_is_idempotent_and_keeps_rows ... ok
+#16 283.7 test auth::tests::certificate_and_proof_bind_device_key ... ok
+#16 283.7 test conversation::harness::tests::tool_call_after_dialogue_closes_speech_but_keeps_the_sentence ... ok
+#16 283.7 test conversation::harness::tests::whitespace_before_dialogue_is_not_in_the_output ... ok
+#16 283.7 test conversation::harness::tests::unpinned_calls_finish_without_chunks ... ok
+#16 283.7 test conversation::history::tests::batch_size_matches_the_statement ... ok
+#16 283.7 test conversation::history::tests::older_triggers_force_a_restart ... ok
+#16 283.7 test conversation::speech::tests::early_speech_waits_for_a_queued_turn_and_stops_with_the_turn ... ok
+#16 283.7 test conversation::retention::tests::prune_guard_prevents_overlap_and_releases_on_drop_or_panic ... ok
+#16 283.7 test conversation::tests::drain_guard_clears_the_flag_and_rechecks_on_panic ... ok
+#16 283.7 test conversation::tests::drain_guard_clears_the_flag_on_return ... ok
+#16 283.7 test conversation::tests::schema_changes_raise_the_schema_version ... ok
+#16 283.7 test actor::tests::a_correct_code_after_some_failures_claims ... ok
+#16 283.7 test conversation::tools::tests::a_web_search_refuses_persistent_and_history_tools_for_the_rest_of_the_turn ... ok
+#16 283.7 test conversation::tools::tests::arguments_name_what_is_missing ... ok
+#16 283.7 test conversation::tools::tests::every_write_tool_in_the_catalog_is_refused_after_a_web_search ... ok
+#16 283.7 test db::tests::bot_key_is_exactly_one_string_segment ... ok
+#16 283.7 test db::tests::params_bind_text_in_order ... ok
+#16 283.7 test db::tests::readers_check_column_types ... ok
+#16 283.7 test actor::tests::five_wrong_codes_invalidate_the_pending_claim ... ok
+#16 283.7 test memory::tests::inputs_are_bounded ... ok
+#16 283.7 test memory::tests::fact_cap_rejects_new_keys_but_allows_updates ... ok
+#16 283.7 test memory::tests::newest_fact_reads_use_the_updated_index ... ok
+#16 283.7 test model::tests::budget_counts_reasoning_arguments_and_unknown_payloads ... ok
+#16 283.7 test model::tests::budget_limits_text_separately ... ok
+#16 283.7 test model::tests::catalog_holds_every_tool_with_the_voice_schema ... ok
+#16 283.7 test model::tests::express_schema_names_match_the_device_wire_names ... ok
+#16 283.7 test model::tests::only_loopback_hosts_may_skip_tls ... ok
+#16 283.7 test model::tests::tools_are_parsed_once ... ok
+#16 283.7 test sentences::tests::bounds_unpunctuated_unicode ... ok
+#16 283.7 test sentences::tests::coalesces_terminal_runs_and_closers ... ok
+#16 283.7 test sentences::tests::digits_and_domains ... ok
+#16 283.7 test sentences::tests::first_chunk_breaks_early_at_a_clause ... ok
+#16 283.7 test sentences::tests::flush_boundary_decides_a_stalled_sentence_end ... ok
+#16 283.7 test sentences::tests::splits_before_completion_and_preserves_text ... ok
+#16 283.7 test sentences::tests::whitespace_stays_with_the_chunk_it_ends ... ok
+#16 283.7 test voice::speech_rule_tests::annotations_preserve_punctuation_and_word_boundaries ... ok
+#16 283.7 test voice::speech_rule_tests::rejects_markup_in_phonemes ... ok
+#16 283.7 test voice::tests::curated_voice_rejects_arbitrary_provider_ids ... ok
+#16 283.7 test voice::tests::default_voice_is_will_and_factory_adrian_still_matches ... ok
+#16 283.7 test voice::tests::eleven_request_speaks_the_line_only ... ok
+#16 283.7 test voice::tests::legacy_fish_names_load_as_premade_speakers ... ok
+#16 283.7 test voice::tests::synthesis_rejects_out_of_bounds_controls ... ok
+#16 283.7 test conversation::expression::tests::only_a_running_turn_can_offer_one_cue_and_the_log_is_inert ... ok
+#16 283.7 test memory::tests::search_reads_matches_then_the_newest_facts_in_one_statement ... ok
+#16 283.7 test conversation::tests::factory_adoption_keeps_a_persona_saved_after_the_read ... ok
+#16 283.7 test conversation::speech::tests::pinning_twice_keeps_the_first_voice ... ok
+#16 283.7 test conversation::speech::tests::a_stopped_turn_is_never_pinned ... ok
+#16 283.7 test conversation::speech::tests::one_read_returns_status_and_the_chunk_once_committed ... ok
+#16 283.7 test conversation::tests::schema_state_tracks_version_and_legacy_triggers ... ok
+#16 283.7 test conversation::retention::tests::an_active_turn_is_never_pruned ... ok
+#16 283.7 test conversation::retention::tests::only_the_newest_turns_keep_events_and_speech ... ok
+#16 283.7 test conversation::retention::tests::a_full_window_keeps_everything ... ok
+#16 283.7 test conversation::retention::tests::the_start_probe_finds_rows_past_the_window_until_a_pass_clears_them ... ok
+#16 283.7 test conversation::tests::replay_pages_hold_the_byte_budget_and_never_stall ... ok
+#16 283.8 test conversation::retention::tests::batches_are_bounded ... ok
+#16 283.8 
+#16 283.8 test result: ok. 79 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+#16 283.8 
+#16 283.8      Running tests/actors.rs (target/debug/build/robot-buddy/41e64632fa36e2db/out/actors-41e64632fa36e2db)
+#16 283.8 
+#16 283.8 running 23 tests
+#16 283.8 test a_cancel_in_the_spoken_phase_frees_the_worker_at_once ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test barge_in_closes_the_provider_stream_and_commits_nothing_after ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test bots_are_isolated_from_each_other ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test cancel_by_request_id_stops_an_unacknowledged_turn_and_one_not_yet_submitted ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test challenges_are_single_use_and_claims_confirm_once ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test chat_turn_is_one_provider_call_and_hides_private_text ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test direct_mode_tool_call_after_spoken_text_runs_the_tool_and_continues ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test enrollment_is_idempotent_and_session_bound ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test expression_push_is_typed_and_replay_is_inert ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test history_pages_newest_first_and_searches_phrases ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test memory_remembers_searches_and_forgets ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test output_events_match_their_golden_fixtures ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test persona_library_keeps_50_names_and_16_versions ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test personas_save_activate_and_roll_back_together ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test restart_interrupts_streams_and_fails_closed_on_unresolved_tools ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test revoke_blocks_bot_conversation_and_memory ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test running_turn_pins_voice_rejects_busy_and_cancels_cleanly ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test speech_streams_one_numbered_chunk_per_sentence ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test system_prompt_tool_write_applies_to_the_next_turn ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test tool_turn_writes_memory_then_speaks_without_tools ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test version_one_history_upgrades_on_the_engine_across_interruptions ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test voice_and_context_settings_are_compare_and_swap ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 test web_results_cannot_drive_persistent_writes_in_the_same_turn ... ignored, needs the isolated engine; run bun run test:integration
+#16 283.8 
+#16 283.8 test result: ok. 0 passed; 0 failed; 23 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#16 283.8 
+#16 283.8      Running tests/core_index_cost.rs (target/debug/build/robot-buddy/53ba485b685fdd6a/out/core_index_cost-53ba485b685fdd6a)
+#16 283.8 
+#16 283.8 running 3 tests
+#16 283.8 test history_search_latency ... ignored, measurement; run explicitly
+#16 283.8 test memory_search_cost ... ignored, measurement; run explicitly
+#16 283.8 test turns_completed_build_cost ... ignored, measurement; run explicitly
+#16 283.8 
+#16 283.8 test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#16 283.8 
+#16 283.8      Running tests/core_logs.rs (target/debug/build/robot-buddy/9d09ff1b86509718/out/core_logs-9d09ff1b86509718)
+#16 283.8 
+#16 283.8 running 1 test
+#16 283.8 test logs_carry_no_conversation_text ... ignored, needs the isolated engine; run with the integration environment
+#16 283.8 
+#16 283.8 test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#16 283.8 
+#16 283.8      Running tests/core_retention.rs (target/debug/build/robot-buddy/c30f7c32b0517433/out/core_retention-c30f7c32b0517433)
+#16 283.8 
+#16 283.8 running 2 tests
+#16 283.8 test old_turns_lose_events_and_speech_but_replay_still_works ... ignored, needs the isolated engine; run with the integration environment
+#16 283.8 test retention_catches_up_across_short_actor_lifetimes ... ignored, needs the isolated engine; run with the integration environment
+#16 283.8 
+#16 283.8 test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#16 283.8 
+#16 283.8      Running tests/core_sql_counts.rs (target/debug/build/robot-buddy/48bdd61d88a331ea/out/core_sql_counts-48bdd61d88a331ea)
+#16 283.8 
+#16 283.8 running 1 test
+#16 283.8 test per_turn_statement_and_transaction_counts ... ignored, needs the isolated engine; run with the integration environment
+#16 283.8 
+#16 283.8 test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#16 283.8 
+#16 283.8      Running tests/history_sql.rs (target/debug/build/robot-buddy/a6fbff6711f4d06a/out/history_sql-a6fbff6711f4d06a)
+#16 283.8 
+#16 283.8 running 10 tests
+#16 283.8 test an_empty_database_marks_the_rebuild_done ... ok
+#16 283.8 test current_triggers_stand_down_beside_version_one ... ok
+#16 283.9 test recent_turns_use_the_completed_index ... ok
+#16 283.9 test terminal_answer_replaces_its_search_row_by_key ... ok
+#16 283.9 test rebuild_statements_read_by_key_and_range ... ok
+#16 283.9 test version_one_history_migrates_without_loss ... ok
+#16 284.0 test second_rows_from_the_first_keyed_layout_are_removed ... ok
+#16 284.2 test rebuild_resumes_after_interruption_at_any_batch ... ok
+#16 284.5 test version_one_code_during_a_rolling_deploy ... ok
+#16 284.8 test five_thousand_turns_rebuild_in_bounded_batches ... ok
+#16 284.8 
+#16 284.8 test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.96s
+#16 284.8 
+#16 284.8      Running tests/protocol_golden.rs (target/debug/build/robot-buddy/de77371c1f19e74e/out/protocol_golden-de77371c1f19e74e)
+#16 284.8 
+#16 284.8 running 16 tests
+#16 284.8 test busy_refusals_name_the_open_turn ... ok
+#16 284.8 test expression_reader_ignores_future_fields_but_never_moves_on_unknown_or_invalid_cues ... ok
+#16 284.8 test stored_voice_names_from_older_actors_still_parse ... ok
+#16 284.8 test action_envelope_and_connection_params_are_pinned ... ok
+#16 284.8 test speech_ready_carries_only_the_sentence_index ... ok
+#16 284.8 test speech_request_is_pinned_and_stream_defaults_off ... ok
+#16 284.8 test unknown_event_kinds_parse_and_unknown_commands_are_rejected ... ok
+#16 284.8 test settings_payloads_are_pinned ... ok
+#16 284.8 test enrollment_and_bundle_are_pinned ... ok
+#16 284.8 test settings_read_back_ignore_additive_fields ... ok
+#16 284.8 test settings_writes_reject_unknown_fields ... ok
+#16 284.8 test output_events_are_pinned ... ok
+#16 284.8 test action_replies_are_pinned ... ok
+#16 284.8 test replies_older_clients_read_are_unchanged ... ok
+#16 284.8 test messages_a_client_reads_ignore_additive_fields ... ok
+#16 284.8 test every_command_variant_has_a_golden_fixture ... ok
+#16 284.8 
+#16 284.8 test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#16 284.8 
+#16 284.8      Running tests/sentences.rs (target/debug/build/robot-buddy/644b1307b1fa44ee/out/sentences-644b1307b1fa44ee)
+#16 284.8 
+#16 284.8 running 4 tests
+#16 284.8 test corpus_has_realistic_coverage ... ok
+#16 284.8 test corpus_matches_whole_input ... ok
+#16 284.8 test corpus_is_fragmentation_invariant ... ok
+#16 285.0 test random_text_concatenates_bounds_and_ignores_fragmentation ... ok
+#16 285.0 
+#16 285.0 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+#16 285.0 
+#16 285.0      Running tests/voice_rules.rs (target/debug/build/robot-buddy/59d58eff22d97efe/out/voice_rules-59d58eff22d97efe)
+#16 285.0 
+#16 285.0 running 11 tests
+#16 285.0 test equal_length_overlaps_go_to_the_leftmost ... ok
+#16 285.0 test every_style_renders_whisper_or_plain ... ok
+#16 285.0 test longest_overlapping_match_wins_across_start_positions ... ok
+#16 285.0 test model_authored_tags_do_not_reach_the_provider ... ok
+#16 285.0 test model_markup_is_removed_with_tidy_spacing ... ok
+#16 285.0 test corpus_cases_render_exactly ... ok
+#16 285.0 test rules_do_not_change_the_canonical_transcript ... ok
+#16 285.0 test rendering_never_changes_the_spoken_words ... ok
+#16 285.0 test thirty_two_rules_are_allowed_and_the_thirty_third_is_not ... ok
+#16 285.0 test provider_input_has_no_markup_except_whispering ... ok
+#16 285.0 test rendered_input_is_capped_at_24_kib ... ok
+#16 285.0 
+#16 285.0 test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+#16 285.0 
+#16 285.0      Running unittests src/main.rs (target/debug/build/robot-buddy-robot/544c8d727657e7b7/out/robot_buddy_robot-544c8d727657e7b7)
+#16 285.0 
+#16 285.0 running 250 tests
+#16 285.0 test audio::tests::aplay_environment_strips_secrets_and_gates_bench_socket_on_simulate ... ok
+#16 285.0 test audio::tests::player_arguments_include_buffer_and_device ... ok
+#16 285.0 test audio::tests::early_exit_of_the_player_ends_playback ... ok
+#16 285.0 test audio::tests::a_stop_before_the_headers_cancels_the_request_and_the_player ... ok
+#16 285.0 test backoff::tests::setup_reopens_only_after_the_grace_period ... ok
+#16 285.0 test backoff::tests::backoff_grows_with_jitter_and_resets_only_when_healthy ... ok
+#16 285.0 test audio::tests::plays_incrementally_before_http_completion_and_stop_kills_the_player ... ok
+#16 285.0 test cache::tests::debug_output_never_shows_the_claim_token_or_utterance_text ... ok
+#16 285.0 test cache::tests::flush_is_durable_before_returning_and_never_rewinds ... ok
+#16 285.0 test audio::tests::runtime_shutdown_kills_an_abandoned_player ... ok
+#16 285.0 test audio::tests::format_mismatch_reaps_early_player_before_spawning_replacement ... ok
+#16 285.0 test audio::tests::player_stderr_is_kept_bounded_and_drained ... ok
+#16 285.0 test cache::tests::reads_caches_written_before_cancel_and_active_turn_existed ... ok
+#16 285.0 test cache::tests::request_cancellations_are_bounded_and_deduplicated ... ok
+#16 285.0 test cache::tests::ordinary_checkpoints_are_written_after_the_interval ... ok
+#16 285.0 test cache::tests::shutdown_writes_the_outstanding_checkpoint ... ok
+#16 285.0 test cache::tests::load_tolerates_corruption_and_removes_stale_temps ... ok
+#16 285.0 test cache::tests::coalesces_a_burst_of_checkpoints_into_few_fsyncs ... ok
+#16 285.0 test config::tests::engine_endpoints_need_tls_unless_local_and_opted_in ... ok
+#16 285.0 test config::tests::hardware_mode_keeps_the_journal_compact ... ok
+#16 285.0 test config::tests::rejects_plain_http_outside_local_simulation ... ok
+#16 285.0 test cache::tests::terminal_checkpoint_is_written_without_waiting_for_the_interval ... ok
+#16 285.0 test controller::tests::a_cancelled_submit_reply_does_not_start_speech_or_live_turn ... ok
+#16 285.0 test controller::tests::a_failed_write_keeps_the_utterance_and_blocks_only_its_submit ... ok
+#16 285.0 test config::tests::the_identity_file_must_be_private ... ok
+#16 285.0 test controller::tests::a_request_cancel_an_old_server_refuses_is_dropped ... ok
+#16 285.0 test controller::tests::a_ready_submit_preempts_a_replay_in_flight ... ok
+#16 285.0 test controller::tests::a_stale_cached_utterance_is_never_submitted ... ok
+#16 285.0 test controller::tests::a_superseded_cancelled_submit_needs_no_followup_cancel ... ok
+#16 285.0 test controller::tests::a_waiting_replay_that_hangs_is_unanswered_after_its_deadline ... ok
+#16 285.0 test controller::tests::a_submit_waits_for_request_cancels_and_never_queues_unsent_ones ... ok
+#16 285.0 test controller::tests::an_acknowledgement_for_a_replaced_utterance_is_cancelled_silently ... ok
+#16 285.0 test controller::tests::an_answered_replaced_submit_is_cancelled_by_turn_not_by_request ... ok
+#16 285.0 test controller::tests::an_unanswered_submit_is_retried_with_the_same_id_and_stays_silent ... ok
+#16 285.0 test controller::tests::an_utterance_expires_after_its_time_to_live ... ok
+#16 285.0 test controller::tests::an_unanswered_submit_replaced_by_wake_is_cancelled_by_request_after_reconnect ... ok
+#16 285.0 test controller::tests::audible_speech_clears_the_first_audio_deadline ... ok
+#16 285.0 test controller::tests::barge_in_silences_first_and_submits_only_after_persisting ... ok
+#16 285.0 test controller::tests::busy_stays_true_until_online_speaker_stops_on_wake_sleep_and_offline ... ok
+#16 285.0 test controller::tests::face_follows_wake_think_speak_and_failure ... ok
+#16 285.0 test controller::tests::idle_rest_and_explicit_sleep_end_on_wake ... ok
+#16 285.0 test controller::tests::listening_true_clears_sleeping_and_resting_neck ... ok
+#16 285.0 test controller::tests::next_sequence_applies_directly_and_gaps_fall_back_to_replay ... ok
+#16 285.0 test controller::tests::long_reply_claim_offline_and_mute_reset_the_rest_timer ... ok
+#16 285.0 test controller::tests::not_owned_robots_keep_the_utterance_until_registration ... ok
+#16 285.0 test controller::tests::offline_mute_and_say_answer_at_once ... ok
+#16 285.0 test controller::tests::only_a_replay_while_waiting_on_the_turn_has_the_short_deadline ... ok
+#16 285.0 test controller::tests::only_a_stop_into_idle_rewarms_the_speaker ... ok
+#16 285.0 test controller::tests::only_live_contiguous_cues_for_our_turn_move_the_face ... ok
+#16 285.0 test controller::tests::refusals_drop_the_utterance_with_an_apology ... ok
+#16 285.0 test controller::tests::replayed_history_never_auto_speaks ... ok
+#16 285.0 test controller::tests::silent_speech_after_ready_is_retried_once_at_the_deadline ... ok
+#16 285.0 test controller::tests::speech_retries_once_whichever_of_ready_and_silence_comes_first ... ok
+#16 285.0 test controller::tests::speech_starts_at_acknowledgement_only_for_new_turns ... ok
+#16 285.0 test controller::tests::the_busy_turn_is_cancelled_by_the_id_the_server_names ... ok
+#16 285.0 test controller::tests::wake_cancels_the_live_turn_and_clears_the_utterance ... ok
+#16 285.0 test controller::tests::a_request_silent_past_the_deadline_is_cancelled_and_the_retry_plays ... ok
+#16 285.0 test audio::tests::stop_reaps_player_before_returning_for_exclusive_replacement ... ok
+#16 285.0 test audio::tests::the_player_starts_while_the_request_waits_for_audio ... ok
+#16 285.0 test device::tests::a_question_is_submitted_while_a_catch_up_replay_hangs ... ok
+#16 285.0 test cache::tests::interrupted_write_never_replaces_the_cache_with_partial_content ... ok
+#16 285.0 test cache::tests::claim_url_helper_reports_active_expired_owned_and_missing_states ... ok
+#16 285.0 test device::tests::a_closed_connection_reconnects_and_owned_bots_poll_rarely ... ok
+#16 285.0 test device::tests::a_lost_submit_ack_never_replays_old_speech_and_the_next_turn_plays ... ok
+#16 285.0 test device::tests::a_request_replaced_mid_submit_is_cancelled_after_reconnect ... ok
+#16 285.0 test cache::tests::store_writes_real_files ... ok
+#16 285.0 test controller::tests::offline_announcement_participates_in_busy_and_reaps_before_wake_or_reconnect ... ok
+#16 285.0 test device::tests::an_unowned_robot_refuses_utterances_without_queuing_them ... ok
+#16 285.0 test device::tests::a_replacement_that_closes_while_waiting_is_dropped ... ok
+#16 285.0 test device::tests::an_idle_loop_keeps_beating ... ok
+#16 285.0 test device::tests::a_replacement_that_fails_its_first_call_never_touches_the_current_session ... ok
+#16 285.0 test device::tests::a_spoken_code_confirms_the_claim_and_registers_at_once ... ok
+#16 285.1 test device::tests::long_claim_and_long_reply_do_not_prematurely_sleep_in_device_loop ... ok
+#16 285.1 test device::tests::an_owned_robot_forgets_its_claim_link ... ok
+#16 285.1 test device::tests::offline_mute_and_say_answer_at_once ... ok
+#16 285.1 test device::tests::rotation_is_scheduled_ahead_of_expiry_but_not_too_early ... ok
+#16 285.1 test device::tests::cached_pending_is_cleared_when_registration_confirms_unowned ... ok
+#16 285.1 test device::tests::unowned_and_claiming_spoken_digits_are_never_persisted_or_submitted_after_confirm ... ok
+#16 285.1 test device::tests::wake_then_replacement_say_submits_before_a_held_replay_releases ... ok
+#16 285.1 test device::tests::rotation_mid_speech_keeps_talking_and_closes_the_old_connection ... ok
+#16 285.1 test face::tests::a_failure_clearing_the_eyes_does_not_restart_the_link_on_shutdown ... ok
+#16 285.1 test face::tests::a_flash_never_hides_listening_speaking_or_muted ... ok
+#16 285.1 test device::tests::a_silent_connection_is_replaced_fast_only_while_a_turn_is_awaited ... ok
+#16 285.1 test face::tests::commands_serialize_to_the_exact_wire_shapes ... ok
+#16 285.1 test device::tests::barge_in_while_calls_and_the_disk_are_stalled_stops_first ... ok
+#16 285.1 test face::tests::every_open_applies_raw_115200_clocal_without_hupcl ... ok
+#16 285.1 test face::tests::frames_are_every_command_line_in_one_buffer ... ok
+#16 285.1 test face::tests::heartbeat_keeps_the_esp32_out_of_its_5s_fallback ... ok
+#16 285.1 test face::tests::heartbeat_refreshes_expression_but_never_replays_gestures_or_qr ... ok
+#16 285.1 test face::tests::idle_lost_face_releases_tracking_and_sorry_overrides_the_last_cue ... ok
+#16 285.1 test face::tests::mood_follows_conversation_signals ... ok
+#16 285.1 test face::tests::reads_board_status_from_the_same_raw_tty ... ok
+#16 285.1 test face::tests::reopens_the_device_after_it_disappears ... ok
+#16 285.1 test face::tests::second_hello_repaints_qr_mood_and_gaze_without_replaying_gesture ... ok
+#16 285.1 test face::tests::state_changes_are_written_immediately_and_flash_returns_to_steady ... ok
+#16 285.1 test device::tests::offline_announcement_clears_busy_on_natural_finish ... ok
+#16 285.1 test controller::tests::wake_never_waits_on_a_paused_journal_reader ... ok
+#16 285.1 test guard::tests::connections_past_the_cap_wait_for_a_free_slot ... ok
+#16 285.1 test hardware::tests::face_controls_work_without_a_neck_or_camera ... ok
+#16 285.1 test input::tests::a_control_fifo_is_reopened_after_each_writer ... ok
+#16 285.1 test input::tests::a_failed_reader_spawn_releases_its_slot ... ok
+#16 285.1 test input::tests::a_stale_socket_is_replaced_but_other_files_are_kept ... ok
+#16 285.1 test input::tests::an_open_input_does_not_delay_runtime_shutdown ... ok
+#16 285.1 test input::tests::bounded_reads_discard_oversized_lines_and_keep_going ... ok
+#16 285.1 test input::tests::confirmation_codes_are_six_digits_only ... ok
+#16 285.1 test input::tests::invalid_lines_are_rejected ... ok
+#16 285.1 test input::tests::json_lines_are_commands ... ok
+#16 285.1 test input::tests::plain_lines_are_utterances ... ok
+#16 285.2 test audio::tests::only_an_idle_stop_warms_a_connection ... ok
+#16 285.2 test input::tests::the_control_socket_comes_from_the_environment ... ok
+#16 285.2 test device::tests::wifi_setup_opens_after_the_boot_grace_while_input_still_works ... ok
+#16 285.2 test input::tests::the_socket_belongs_to_the_control_group_with_mode_0660 ... ok
+#16 285.2 test input::tests::the_socket_is_owner_only_from_the_moment_it_is_bound ... ok
+#16 285.2 test input::tests::writer_slots_are_bounded_and_released_on_drop ... ok
+#16 285.3 test face::tests::device_sink_writes_lines_to_a_file ... ok
+#16 285.3 test journal::tests::claim_lines_emit_clean_urls_and_ignore_unsafe_values ... ok
+#16 285.3 test journal::tests::compact_lines_carry_no_conversation_text ... ok
+#16 285.3 test listen::io::tests::alsa_extracts_selected_channel_and_reports_safe_exit_signal_and_spawn_errors ... ok
+#16 285.3 test listen::io::tests::capture_stop_reaps_the_child_before_a_reopen ... ok
+#16 285.3 test listen::io::tests::cli_drains_long_wav_stdin_and_returns_normalized_segments ... ok
+#16 285.3 test listen::io::tests::local_command_preserves_thread_caps_and_strips_credentials ... ok
+#16 285.3 test listen::io::tests::recognizer_reports_safe_exit_code_signal_and_spawn_errors ... ok
+#16 285.3 test listen::io::tests::wav_has_exact_lengths_rate_and_little_endian_pcm ... ok
+#16 285.3 test listen::policy::tests::barge_requires_address_and_stop_never_starts_a_turn ... ok
+#16 285.3 test listen::policy::tests::followup_is_scoped_to_voice_onset_not_decoder_finish_time ... ok
+#16 285.3 test input::tests::reader_skips_bad_lines_and_eof_disables_the_branch ... ok
+#16 285.3 test listen::policy::tests::leading_punctuation_and_misheard_name_work_after_acoustic_wake ... ok
+#16 285.3 test listen::policy::tests::only_confirming_state_interprets_digits_as_claim_input ... ok
+#16 285.3 test listen::policy::tests::silence_and_song_artifacts_are_ignored_without_blocking_addressed_speech ... ok
+#16 285.3 test listen::policy::tests::sleep_clears_the_window_without_a_wake_or_chat_turn ... ok
+#16 285.3 test listen::tests::busy_acoustic_wake_accepts_immediate_idle_clip_but_not_old_playback ... ok
+#16 285.3 test listen::tests::leaving_claim_mode_cancels_inflight_recognition ... ok
+#16 285.3 test listen::tests::drop_log_is_rate_limited_and_emits_only_safe_metadata ... FAILED
+#16 285.3 test listen::tests::mock_beam_reaches_existing_control_channel_in_order ... ok
+#16 285.3 test listen::tests::neural_wake_interrupts_held_followup_decode_with_full_queue_and_skips_prewake_clip ... ok
+#16 285.3 test listen::tests::priority_wake_preserves_aba_generation_mute_and_claim_confirmation ... ok
+#16 285.3 test listen::tests::transcript_mode_blocks_busy_echo_cancels_stale_decode_and_accepts_post_playback_wake ... ok
+#16 285.3 test listen::tests::transcript_mode_disables_barge_in_even_with_legacy_env_and_preserves_enrollment ... ok
+#16 285.3 test listen::tests::wake_worker_load_failure_falls_back_to_transcript_without_barge_in_and_keeps_claims ... ok
+#16 285.3 test listen::tests::wake_detector_stays_warm_across_busy_and_resets_on_privacy_or_claim_boundaries ... ok
+#16 285.3 test listen::vad::tests::reset_preserves_noise_floor_and_clears_inflight_recording ... ok
+#16 285.3 test listen::vad::tests::speech_keeps_onset_and_waits_through_short_pauses ... ok
+#16 285.3 test listen::vad::tests::noise_click_and_continuous_input_are_bounded ... ok
+#16 285.3 test motion::poses::tests::gestures_ease_from_rest_and_return_to_neutral ... ok
+#16 285.3 test motion::sts3215::tests::baud_verification_fails_closed_when_rate_is_not_one_megabaud ... ok
+#16 285.3 test motion::sts3215::tests::read_frame_and_fragmented_echo_status ... ok
+#16 285.3 test motion::sts3215::tests::serial_transaction_reads_reply_after_a_real_tty_echo ... ok
+#16 285.3 test motion::sts3215::tests::status_tolerates_extra_leading_0xff_before_header_and_echo ... ok
+#16 285.3 test listen::vad::tests::sustained_ambient_above_500_rms_recovers_for_speech ... ok
+#16 285.3 test motion::sts3215::tests::sync_write_packs_three_bounded_goals_in_one_frame ... ok
+#16 285.3 test motion::tests::admission_rejects_unlocked_wrong_mode_limits_and_outside_position ... ok
+#16 285.3 test motion::tests::arm_uses_measured_position_and_drop_disables_every_axis ... ok
+#16 285.3 test guard::tests::a_half_sent_request_is_cut_off_and_its_slot_freed ... ok
+#16 285.3 test journal::tests::a_paused_reader_never_blocks_the_caller ... ok
+#16 285.3 test audio::tests::a_stalled_speech_body_ends_playback_at_the_idle_deadline ... ok
+#16 285.3 test motion::tests::cue_expires_after_four_seconds_reenabling_tracking_while_express_persists_and_gesture_completes ... ok
+#16 285.3 test audio::tests::a_player_that_stops_reading_is_killed_at_the_deadline ... ok
+#16 285.3 test audio::tests::started_follows_the_first_pipe_write_not_the_whole_chunk ... ok
+#16 285.3 test motion::tests::loop_timing_tracks_p95_and_missed_20ms_deadlines_across_windows ... ok
+#16 285.3 test motion::tests::malformed_or_missing_calibration_is_never_replaced_by_defaults ... ok
+#16 285.3 test motion::tests::planned_goals_stay_inset_bounded_by_center_clearance_while_initial_goal_is_preserved ... ok
+#16 285.3 test motion::sts3215::tests::write_uses_addressed_inst_write_and_handles_ack_silent_and_error ... ok
+#16 285.3 test motion::tests::provisioning_needs_explicit_consent_before_hardware_access ... ok
+#16 285.3 test motion::tests::staggered_health_reads_once_per_tick_and_latches_every_safety_fault ... ok
+#16 285.3 test motion::tests::tracking_does_not_absorb_yaw_or_pitch_gestures ... ok
+#16 285.3 test motion::tests::tracking_moves_then_recenters_and_manual_pose_wins_over_gesture ... ok
+#16 285.3 test motion::tests::tracking_pitch_clamp_is_relative_to_active_expression ... ok
+#16 285.3 test input::tests::the_control_socket_survives_its_writer_restarting ... ok
+#16 285.3 test piper::tests::failed_partial_and_oversized_renders_never_start_playback ... ok
+#16 285.3 test piper::tests::speaks_only_housekeeping_line_and_sends_pcm_to_player ... ok
+#16 285.3 test piper::tests::startup_and_announce_reject_unsafe_or_invalid_sidecar ... ok
+#16 285.3 test motion::tests::worker_alive_flips_false_on_stop_fault_and_panic_with_torque_off ... ok
+#16 285.3 test piper::tests::startup_validation_rejects_bad_paths_binary_and_model ... ok
+#16 285.3 test piper::tests::voice_colouring_is_feedforward_and_bounded ... ok
+#16 285.3 test screen::operator::tests::aborted_setup_clears_physical_qr_pair ... ok
+#16 285.3 test motion::tests::deadline_log::run_emits_missed_deadline_warning_when_bus_exceeds_20ms_period ... ok
+#16 285.3 test motion::tests::failed_arm_readback_does_not_leave_partially_enabled_neck ... ok
+#16 285.3 test piper::tests::stop_cancels_and_reaps_synth_and_player_before_returning ... ok
+#16 285.3 test screen::operator::tests::limits_and_local_only_address ... ok
+#16 285.3 test screen::operator::tests::enrollment_surfaces_sanitized_precondition_and_offline_errors_without_leaks ... ok
+#16 285.3 test screen::operator::tests::log_retains_only_bounded_callsite_metadata ... ok
+#16 285.4 test screen::operator::tests::local_people_enrollment_and_recognition_use_the_device_adapter ... ok
+#16 285.4 test screen::operator::tests::offline_camera_returns_503_immediately_and_preserves_caps ... ok
+#16 285.4 test screen::tests::a_moved_panel_answers_only_its_own_host_and_origin ... ok
+#16 285.4 test screen::tests::an_off_or_invalid_panel_binds_nothing ... ok
+#16 285.4 test screen::tests::an_unchanged_qr_code_is_rendered_once ... ok
+#16 285.4 test screen::tests::confirm_checks_origin_host_and_rotating_csrf ... ok
+#16 285.4 test screen::tests::page_is_locked_down ... ok
+#16 285.4 test screen::tests::the_address_is_loopback_configurable_or_off ... ok
+#16 285.4 test session::tests::a_busy_refusal_names_the_open_turn ... ok
+#16 285.4 test session::tests::a_cleared_claim_is_replaced_at_once ... ok
+#16 285.4 test session::tests::calls_keep_the_typed_wire_shape ... ok
+#16 285.4 test session::tests::http_dates_parse_to_unix_seconds ... ok
+#16 285.4 test session::tests::only_server_answers_count_as_rejections ... ok
+#16 285.4 test session::tests::output_events_decode_from_one_argument ... ok
+#16 285.4 test session::tests::request_cancels_and_probes_use_the_shared_wire_shape ... ok
+#16 285.4 test session::tests::session_lifetime_uses_the_server_clock_within_bounds ... ok
+#16 285.4 test session::tests::submit_reply_honors_cancelled_and_duplicate_flags ... ok
+#16 285.4 test systemd::tests::notifications_reach_the_socket ... ok
+#16 285.4 test systemd::tests::the_watchdog_is_pinged_only_while_the_loop_beats ... ok
+#16 285.4 test systemd::tests::watchdog_interval_honors_pid_and_zero ... ok
+#16 285.4 test vision::tests::bad_boxes_are_skipped_without_failing_detection ... ok
+#16 285.4 test vision::tests::camera_accepts_a_complete_i420_frame_and_rejects_a_truncated_next_frame ... ok
+#16 285.4 test vision::tests::camera_passes_noir_options_and_reports_bounded_exit_status_without_private_data ... ok
+#16 285.4 test vision::tests::capture_drives_tracking_lost_face_and_disconnect ... ok
+#16 285.4 test vision::tests::config_validates_model_files_and_rejects_git_lfs_pointers ... ok
+#16 285.4 test vision::tests::config_validates_noir_tuning_file_and_awb_gains ... ok
+#16 285.4 test vision::tests::error_rate_limiter_suppresses_bursts_and_reports_suppressed_count ... ok
+#16 285.4 test vision::tests::gallery_rejects_shared_files_invalid_vectors_and_symlinks ... ok
+#16 285.4 test vision::tests::gallery_roundtrips_samples_and_forgets_without_storing_photos ... ok
+#16 285.4 test vision::tests::inference_activity_log_emits_once_per_interval_only_on_valid_inference_without_private_data ... ok
+#16 285.4 test vision::tests::jpeg_is_decoupled_from_engine_mutex_and_avoids_reencoding_same_frame ... ok
+#16 285.4 test motion::tests::confirm_retries_read_only_without_extra_write ... ok
+#16 285.4 test vision::tests::panel_enrolls_only_one_fresh_face_clears_stale_labels_and_loses_access_on_shutdown ... ok
+#16 285.4 test vision::tests::per_frame_inference_errors_recover_then_stop_at_bounded_limit ... ok
+#16 285.4 test vision::tests::recognition_uses_cosine_and_rejects_a_close_but_below_threshold_match ... ok
+#16 285.4 test wifi::card::tests::a_damaged_file_is_an_error_not_a_new_password ... ok
+#16 285.4 test wifi::card::tests::a_symlink_at_setup_wifi_is_refused ... ok
+#16 285.4 test wifi::card::tests::credentials_are_created_once_private_and_reused ... ok
+#16 285.4 test wifi::card::tests::generated_credentials_differ_per_robot ... ok
+#16 285.4 test wifi::card::tests::the_card_carries_the_network_password_and_a_qr_code ... ok
+#16 285.4 test wifi::card::tests::the_setup_card_command_prints_the_stored_network ... ok
+#16 285.4 test motion::tests::provision_skips_matching_eeprom_and_relocks_after_readback_error ... ok
+#16 285.4 test wifi::tests::a_mistyped_password_keeps_the_working_home_network ... ok
+#16 285.4 test wifi::tests::a_proven_join_clears_stale_home_profiles ... ok
+#16 285.4 test wifi::tests::an_unsaved_password_fails_the_join_and_keeps_the_old_profile ... ok
+#16 285.4 test wifi::tests::interface_names_cannot_be_options ... ok
+#16 285.4 test wifi::tests::connected_reads_the_general_state ... ok
+#16 285.4 test wifi::tests::nmcli_never_receives_the_operator_secret ... ok
+#16 285.4 test wifi::tests::only_a_global_route_counts_as_connected ... ok
+#16 285.4 test wifi::tests::passwords_are_escaped_for_passwd_file_and_terse_output ... ok
+#16 285.4 test wifi::tests::rejects_keyfile_injection ... ok
+#16 285.4 test wifi::tests::setup_form_requires_host_origin_and_csrf ... ok
+#16 285.4 test wifi::tests::joining_home_proves_the_new_profile_before_retiring_the_old ... ok
+#16 285.4 test vision::tests::recognition_intervals_distinguish_unchecked_no_match_and_known_and_react_to_forget ... ok
+#16 285.4 test wifi::tests::the_new_profile_uuid_comes_from_nmcli ... ok
+#16 285.5 test motion::tests::cli_reports_unconfirmed_torque_off_to_stderr_on_finish_error_and_panic ... ok
+#16 285.5 test screen::operator::tests::camera_enforces_work_and_viewer_caps_and_closes_when_camera_drops ... ok
+#16 285.6 test screen::operator::tests::operator_requires_local_authenticated_owned_session_on_every_route ... ok
+#16 285.6 test wifi::tests::the_setup_bind_waits_for_its_address ... ok
+#16 285.7 test guard::tests::a_silent_or_trickling_client_is_disconnected ... ok
+#16 285.7 test device::tests::offline_announcement_reaps_before_online_playback_on_reconnect ... ok
+#16 285.7 test screen::operator::tests::guarded_camera_and_routes_recover_across_guard_lifetime ... ok
+#16 285.8 test audio::tests::first_audio_tracks_server_latency_and_reuses_the_connection ... ok
+#16 285.9 test wifi::tests::setup_timeout_cancels_inflight_join_home_cleanly ... ok
+#16 286.2 test wifi::tests::the_hotspot_is_deleted_when_setup_is_abandoned ... ok
+#16 286.3 test motion::tests::center_accepts_reference_tolerance_eight_and_preserves_stall_cutoff ... ok
+#16 286.5 test audio::tests::a_slow_steady_player_takes_a_large_chunk_past_the_deadline ... ok
+#16 286.7 test device::tests::claim_url_is_emitted_once_per_new_url_and_reset_when_owned ... ok
+#16 288.6 test face::tests::a_stalled_port_times_out_without_leaking_threads_and_reopens_raw ... ok
+#16 288.6 
+#16 288.6 failures:
+#16 288.6 
+#16 288.6 ---- listen::tests::drop_log_is_rate_limited_and_emits_only_safe_metadata stdout ----
+#16 288.6 
+#16 288.6 thread 'listen::tests::drop_log_is_rate_limited_and_emits_only_safe_metadata' (10000) panicked at apps/robot/src/listen/mod.rs:1734:9:
+#16 288.6 assertion `left == right` failed
+#16 288.6   left: 1
+#16 288.6  right: 3
+#16 288.6 note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+#16 288.6 
+#16 288.6 
+#16 288.6 failures:
+#16 288.6     listen::tests::drop_log_is_rate_limited_and_emits_only_safe_metadata
+#16 288.6 
+#16 288.6 test result: FAILED. 249 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.59s
+#16 288.6 
+#16 288.6 error: test failed, to rerun pass `-p robot-buddy-robot --bin robot-buddy-robot`
+#16 ERROR: process "/bin/sh -c /usr/local/bin/arm64-matrix-check bookworm \"$CARGO_JOBS\" \"$SOURCE_SHA\" \"$EXPECTED_TREE_HASH\"" did not complete successfully: exit code: 101
+------
+ > [bookworm-gate 1/1] RUN --mount=type=cache,id=arm64-matrix-cargo-registry,target=/usr/local/cargo/registry,sharing=locked     --mount=type=cache,id=arm64-matrix-bookworm-target,target=/src/target,sharing=locked     /usr/local/bin/arm64-matrix-check bookworm "2" "5351762bf285e8a3ece7c5ca8980458349ac7624" "dcbcb88569e1ec1655b3b9d88a9c8d2a8107fcf393695c1d6baa6e12d2465189":
+288.6  right: 3
+288.6 note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+288.6 
+288.6 
+288.6 failures:
+288.6     listen::tests::drop_log_is_rate_limited_and_emits_only_safe_metadata
+288.6 
+288.6 test result: FAILED. 249 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.59s
+288.6 
+288.6 error: test failed, to rerun pass `-p robot-buddy-robot --bin robot-buddy-robot`
+------
+arm64-matrix.Dockerfile:59
+--------------------
+  58 |     ARG EXPECTED_TREE_HASH=skip
+  59 | >>> RUN --mount=type=cache,id=arm64-matrix-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+  60 | >>>     --mount=type=cache,id=arm64-matrix-bookworm-target,target=/src/target,sharing=locked \
+  61 | >>>     /usr/local/bin/arm64-matrix-check bookworm "$CARGO_JOBS" "$SOURCE_SHA" "$EXPECTED_TREE_HASH"
+  62 |     
+--------------------
+ERROR: failed to build: failed to solve: process "/bin/sh -c /usr/local/bin/arm64-matrix-check bookworm \"$CARGO_JOBS\" \"$SOURCE_SHA\" \"$EXPECTED_TREE_HASH\"" did not complete successfully: exit code: 101
+
+View build details: docker-desktop://dashboard/build/desktop-linux/desktop-linux/rt2e9ygk2u5j43i1n92e4b7n6
