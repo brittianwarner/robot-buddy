@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Use an arm64 userspace (native or Buildx/QEMU), so clang sees exactly the
 # OpenCV headers, C++ ABI and target libraries used by the linker.
-FROM rust:1.97.1-slim-trixie@sha256:8e8cf8f7fd54a2d23d5a743b3a03f56e26b6c774276c33fa0595111704ebb15c AS toolchain
+FROM rust:1.100.0-slim-trixie@sha256:3b199fd6db7d709274df56565b8f4003f9e30d7bfcff9d53148c86053b7855e2 AS toolchain
 ARG TARGETARCH
 RUN test "$TARGETARCH" = arm64 && apt-get update && apt-get install -y --no-install-recommends \
     clang libclang-dev libopencv-dev cmake pkg-config && rm -rf /var/lib/apt/lists/* \
