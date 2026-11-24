@@ -72,7 +72,7 @@ impl ActorSource {
                 turn_id: self.turn_id.clone(),
             })
             .await?;
-        spoken(value).map(Chunk::Ready)
+        spoken(&value).map(Chunk::Ready)
     }
 }
 
@@ -103,7 +103,7 @@ async fn subscribe(
     connection
 }
 
-fn spoken(value: Value) -> Result<Spoken> {
+fn spoken(value: &Value) -> Result<Spoken> {
     Ok(Spoken {
         text: value["text"]
             .as_str()
@@ -129,7 +129,7 @@ impl ChunkSource for ActorSource {
             })
             .await?;
         match value["state"].as_str() {
-            Some("ready") => spoken(value).map(Chunk::Ready),
+            Some("ready") => spoken(&value).map(Chunk::Ready),
             Some("pending") => Ok(Chunk::Pending),
             Some("done") => Ok(Chunk::Done),
             _ => bail!("invalid speech state"),

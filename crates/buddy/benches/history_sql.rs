@@ -64,14 +64,14 @@ fn bench(c: &mut Criterion) {
     for (name, current) in [("v1", false), ("current", true)] {
         let db = database(current);
         group.bench_function(BenchmarkId::new("recent_12", name), |b| {
-            b.iter(|| black_box(recent(&db)))
+            b.iter(|| black_box(recent(&db)));
         });
         let mut i = 0u64;
         group.bench_function(BenchmarkId::new("finish_turn", name), |b| {
             b.iter(|| {
                 i += 7919;
                 finish(&db, black_box(i));
-            })
+            });
         });
     }
     group.finish();

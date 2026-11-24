@@ -1,4 +1,4 @@
-//! The real conversation schema on local SQLite: query plans for history reads and the
+//! The real conversation schema on local `SQLite`: query plans for history reads and the
 //! version 1 to version 2 history search migration.
 use rusqlite::{Connection, params};
 

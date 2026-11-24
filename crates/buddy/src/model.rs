@@ -30,6 +30,10 @@ pub struct ToolCall {
 }
 impl Model {
     pub fn from_env() -> Result<Self> {
+        static CAPACITY: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
+            std::sync::OnceLock::new();
+        static HTTP: std::sync::OnceLock<rig::http_client::ReqwestClient> =
+            std::sync::OnceLock::new();
         let provider = std::env::var("AI_PROVIDER").unwrap_or_else(|_| "openrouter".into());
         ensure!(
             ["openrouter", "openai_compatible"].contains(&provider.as_str()),
@@ -75,8 +79,6 @@ impl Model {
             &OPENAI
         };
         let name = std::env::var("AI_MODEL").context("AI_MODEL must be explicitly configured")?;
-        static CAPACITY: std::sync::OnceLock<std::sync::Arc<tokio::sync::Semaphore>> =
-            std::sync::OnceLock::new();
         let limit = std::env::var("AI_MAX_CONCURRENT")
             .unwrap_or_else(|_| "16".into())
             .parse::<usize>()
@@ -86,8 +88,6 @@ impl Model {
             "AI_MAX_CONCURRENT must be between 1 and 256"
         );
         ensure!(!name.trim().is_empty(), "AI_MODEL must not be empty");
-        static HTTP: std::sync::OnceLock<rig::http_client::ReqwestClient> =
-            std::sync::OnceLock::new();
         let http = if let Some(http) = HTTP.get() {
             http.clone()
         } else {
@@ -120,9 +120,10 @@ impl Model {
             .try_acquire()
             .context("inference capacity reached")?;
         let request = if let Some(effort) = &self.reasoning_effort {
-            request.additional_params(
-                json!({"reasoning":{"effort":effort},"provider":{"require_parameters":true}}),
-            )
+            request.additional_params(json!({
+                "reasoning": { "effort": effort },
+                "provider": { "require_parameters": true },
+            }))
         } else {
             request
         };
@@ -181,43 +182,43 @@ impl StreamBudget {
     }
 }
 
+/// The tool catalog. `"$voice_config"` stands for the voice configuration schema.
+const TOOL_CATALOG: &str = include_str!("model/tools.json");
+const VOICE_SCHEMA_SLOT: &str = "$voice_config";
+
+/// The tools offered to the model. Web search is offered only when it is configured.
 pub fn tools() -> Result<Vec<ToolDefinition>> {
-    tool_json()
-        .as_array()
-        .context("tool catalog invalid")?
-        .iter()
-        .filter(|v| {
-            v["function"]["name"] != "web_search"
-                || std::env::var("BRAVE_SEARCH_API_KEY").is_ok_and(|key| !key.is_empty())
-        })
+    let web_search = std::env::var("BRAVE_SEARCH_API_KEY").is_ok_and(|key| !key.is_empty());
+    catalog()?
+        .into_iter()
+        .filter(|v| web_search || v["function"]["name"] != "web_search")
         .map(|v| serde_json::from_value(v["function"].clone()).map_err(Into::into))
         .collect()
 }
-fn tool_json() -> Value {
-    json!([
-      {"type":"function","function":{"name":"list_personas","description":"List saved named persona profiles with latest versions. Buddy is the default robot profile. Up to 50 names, 16 retained versions each.","parameters":{"type":"object","properties":{},"additionalProperties":false}}},
-      {"type":"function","function":{"name":"get_persona","description":"Read a saved character prompt, full voice config and available version metadata. Version 0 reads latest.","parameters":{"type":"object","properties":{"name":{"type":"string"},"version":{"type":"integer","minimum":0}},"required":["name","version"],"additionalProperties":false}}},
-      {"type":"function","function":{"name":"save_persona","description":"Save a complete named character profile and voice settings without activating it. Use expected_version 0 for a new name or the latest version to revise it. Rewrite coherently with short style examples. Preserve an existing profile before switching if it has unsaved changes. Then activate the returned version to switch.","parameters":{"type":"object","properties":{"name":{"type":"string"},"expected_version":{"type":"integer"},"prompt":{"type":"string"},"voice":crate::voice::schema(),"reason":{"type":"string"}},"required":["name","expected_version","prompt","voice","reason"],"additionalProperties":false}}},
-      {"type":"function","function":{"name":"activate_persona","description":"Atomically switch to a saved character's prompt and voice settings. The application reads and checks current revisions. Requires an explicit saved version. Location/timezone are unchanged. Adopt the character in your immediate reply; saved prompt is loaded next turn.","parameters":{"type":"object","properties":{"name":{"type":"string"},"version":{"type":"integer"}},"required":["name","version"],"additionalProperties":false}}},
-      {"type":"function","function":{"name":"get_context_config","description":"Read this robot's saved IANA timezone, optional location label, revision and current local time. Unknown location uses UTC until configured.","parameters":{"type":"object","properties":{},"additionalProperties":false}}},
-      {"type":"function","function":{"name":"update_context_config","description":"Save location and timezone when the user asks. Read current settings first, preserve unchanged values, use IANA timezone (America/New_York etc), never infer GPS or use a fixed offset. Location is an optional plain label (max 200 bytes). Ask if timezone is ambiguous.","parameters":{"type":"object","properties":{"expected_revision":{"type":"integer"},"config":{"type":"object","properties":{"timezone":{"type":"string"},"location":{"type":["string","null"]}},"required":["timezone","location"],"additionalProperties":false},"reason":{"type":"string"}},"required":["expected_revision","config","reason"],"additionalProperties":false}}},
-      {"type":"function","function":{"name":"get_voice_config","description":"Read your saved voice identity, delivery direction, revision and curated voice choices. Voice identity and speaking style are separate.","parameters":{"type":"object","properties":{},"additionalProperties":false}}},
-      {"type":"function","function":{"name":"update_voice_config","description":"Update your persistent speech configuration when the user asks. Read the current config first. Preserve unspecified settings by copying the current config. Keep the same speaker unless a new character needs a different premade name from the catalog. Will is the default. Never invent a voice ID and never save adrian, delia, or sheila. Delivery is a director note, max 1500 UTF-8 bytes, and is not read aloud. Stored synthesis numbers are kept and are not sent to Eleven v4 Turbo. speech_rules: whisper and soft become [whispering]; other styles stay plain words. At most 32. Never put tags in the final answer. Applies to the next speech request.","parameters":{"type":"object","properties":{"expected_revision":{"type":"integer"},"config":crate::voice::schema(),"reason":{"type":"string"}},"required":["expected_revision","config","reason"],"additionalProperties":false}}},
-      {"type":"function","function":{"name":"read_system_prompt","description":"Read this robot's editable system prompt and current revision before rewriting it.","parameters":{"type":"object","properties":{},"additionalProperties":false}}},
-      {"type":"function","function":{"name":"update_system_prompt","description":"Freely replace your own system prompt. Persisted for this robot; takes effect next user turn. Read the current revision first. Prompt maximum 8192 UTF-8 bytes; give a short reason.","parameters":{"type":"object","properties":{"expected_revision":{"type":"integer"},"prompt":{"type":"string"},"reason":{"type":"string"}},"required":["expected_revision","prompt","reason"],"additionalProperties":false}}},
-      {"type":"function","function":{"name":"history_search","description":"Search the complete durable conversation history for earlier facts or discussion. Use when recent context is insufficient.","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}}},
-      {"type":"function","function":{"name":"web_search","description":"Search the web for current information; cite returned URLs.","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}}},
-      {"type":"function","function":{"name":"memory_remember","description":"Save a preference or fact only when the user explicitly asks to remember it.","parameters":{"type":"object","properties":{"key":{"type":"string"},"value":{"type":"string"}},"required":["key","value"],"additionalProperties":false}}},
-      {"type":"function","function":{"name":"memory_forget","description":"Forget a saved fact when asked.","parameters":{"type":"object","properties":{"key":{"type":"string"}},"required":["key"],"additionalProperties":false}}}
-    ])
+
+fn catalog() -> Result<Vec<Value>> {
+    let mut tools: Vec<Value> =
+        serde_json::from_str(TOOL_CATALOG).context("tool catalog invalid")?;
+    tools.iter_mut().for_each(insert_voice_schema);
+    Ok(tools)
 }
+
+fn insert_voice_schema(value: &mut Value) {
+    match value {
+        Value::String(slot) if slot == VOICE_SCHEMA_SLOT => *value = crate::voice::schema(),
+        Value::Array(items) => items.iter_mut().for_each(insert_voice_schema),
+        Value::Object(fields) => fields.values_mut().for_each(insert_voice_schema),
+        _ => {}
+    }
+}
+
 pub async fn search(query: &str) -> Result<Value> {
+    static HTTP: tokio::sync::OnceCell<reqwest::Client> = tokio::sync::OnceCell::const_new();
     ensure!(
         !query.is_empty() && query.len() <= 500,
         "invalid search query"
     );
     let key = std::env::var("BRAVE_SEARCH_API_KEY").context("web search is not configured")?;
-    static HTTP: tokio::sync::OnceCell<reqwest::Client> = tokio::sync::OnceCell::const_new();
     let http = HTTP
         .get_or_try_init(|| async {
             reqwest::Client::builder()
@@ -246,14 +247,57 @@ pub async fn search(query: &str) -> Result<Value> {
         .context("invalid search response")?
         .iter()
         .take(5)
-        .map(|r| json!({"title":r["title"],"url":r["url"],"description":r["description"]}))
+        .map(|r| {
+            json!({
+                "title": r["title"],
+                "url": r["url"],
+                "description": r["description"],
+            })
+        })
         .collect::<Vec<_>>();
-    Ok(json!({"results":results}))
+    Ok(json!({ "results": results }))
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     use rig::streaming::{Part, UnknownPayload};
+    #[test]
+    fn catalog_holds_every_tool_with_the_voice_schema() {
+        let tools = catalog().unwrap();
+        let names: Vec<_> = tools
+            .iter()
+            .map(|t| t["function"]["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "list_personas",
+                "get_persona",
+                "save_persona",
+                "activate_persona",
+                "get_context_config",
+                "update_context_config",
+                "get_voice_config",
+                "update_voice_config",
+                "read_system_prompt",
+                "update_system_prompt",
+                "history_search",
+                "web_search",
+                "memory_remember",
+                "memory_forget",
+            ]
+        );
+        let schema = crate::voice::schema();
+        let save = &tools[2]["function"]["parameters"]["properties"]["voice"];
+        let update = &tools[7]["function"]["parameters"]["properties"]["config"];
+        assert_eq!((save, update), (&schema, &schema));
+        assert_eq!(TOOL_CATALOG.matches(VOICE_SCHEMA_SLOT).count(), 2);
+        for tool in &tools {
+            let function = tool["function"].clone();
+            let definition: ToolDefinition = serde_json::from_value(function).unwrap();
+            assert!(!definition.description.is_empty());
+        }
+    }
     fn reasoning(bytes: usize) -> Item<StreamEvent> {
         Item::Event(StreamEvent::Reasoning {
             part: Part::new(0),

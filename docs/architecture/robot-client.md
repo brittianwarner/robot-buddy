@@ -9,7 +9,7 @@ Target hardware is the "Pip" robot: Raspberry Pi 5 (8 GB, Raspberry Pi OS Bookwo
 | Module | Role |
 |---|---|
 | `main.rs` | Settings, identity, reconnect loop with backoff, Wi-Fi recovery, SIGTERM flush |
-| `session.rs` | Bootstrap, Rivet actor handles, owner registration, the session loop |
+| `session.rs` | Bootstrap, Rivet actor handles (untyped `rivetkit-client`), owner registration, the session loop |
 | `controller.rs` | Event order, barge-in, early speech, face state (transport-free, unit tested) |
 | `cache.rs` | Durable cache and its single ordered writer |
 | `input.rs` | Control input on stdin |
@@ -17,6 +17,8 @@ Target hardware is the "Pip" robot: Raspberry Pi 5 (8 GB, Raspberry Pi OS Bookwo
 | `audio.rs` | `/v1/speech` playback through `aplay` |
 | `screen.rs` | Loopback HTML panel on 127.0.0.1:8090 (QR codes, owner confirmation) |
 | `wifi.rs` | SoftAP setup through NetworkManager |
+
+The robot links `robot-buddy` with `default-features = false`: the wire types only, without the actor server, Rig or `rivetkit-core`. It calls the `call` action and reads the `output` event through the untyped `rivetkit-client`. The JSON is the same as the typed client sends: one argument holding the serialized `Call`, and one argument holding the `OutputEvent`. Unit tests in `session.rs` pin both shapes.
 
 ### Control input (stdin)
 

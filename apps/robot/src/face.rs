@@ -88,6 +88,8 @@ impl Mood {
 }
 
 /// Conversation facts the face is derived from.
+// Independent facts from separate sources; `mood` ranks them, so an enum would lose data.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Signals {
     pub connected: bool,
@@ -215,8 +217,8 @@ pub async fn run<O: Opener>(mut target: watch::Receiver<Target>, mut opener: O) 
         if shown != Some(mood) || now >= next_beat {
             if sink.is_none() && now >= reopen_at {
                 match opener.open().await {
-                    Ok(opened) => {
-                        sink = Some(opened);
+                    Ok(fresh) => {
+                        sink = Some(fresh);
                         warned = false;
                         tracing::info!("face device open");
                     }
@@ -360,7 +362,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn heartbeat_keeps_the_esp32_out_of_its_5s_fallback() {
-        let log: Log = Default::default();
+        let log = Log::default();
         let (face, rx) = Face::new();
         let opener = Memory {
             log: log.clone(),
@@ -387,7 +389,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn state_changes_are_written_immediately_and_flash_returns_to_steady() {
-        let log: Log = Default::default();
+        let log = Log::default();
         let (face, rx) = Face::new();
         let opener = Memory {
             log: log.clone(),
@@ -426,7 +428,7 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn reopens_the_device_after_it_disappears() {
-        let log: Log = Default::default();
+        let log = Log::default();
         let (face, rx) = Face::new();
         let opener = Memory {
             log: log.clone(),

@@ -1,10 +1,13 @@
-//! Premade ElevenLabs voices for OpenRouter `elevenlabs/eleven-v4-turbo`.
+//! Premade `ElevenLabs` voices for `OpenRouter` `elevenlabs/eleven-v4-turbo`.
 //! Legacy Fish names deserialize onto the nearest catalog speaker.
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 pub const SPEECH_MODEL: &str = "elevenlabs/eleven-v4-turbo";
+/// The English phoneme symbols a phoneme speech rule may use.
+const PHONEME_SYMBOLS: &str = "AA AE AH AO AW AY B CH D DH EH ER EY F G HH IH IY JH K L M N \
+    NG OW OY P R S SH T TH UH UW V W Y Z ZH";
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -56,7 +59,7 @@ impl Voice {
         Self::Roger,
         Self::Will,
     ];
-    /// OpenRouter voice name. Premade names are not ElevenLabs voice IDs.
+    /// `OpenRouter` voice name. Premade names are not `ElevenLabs` voice IDs.
     pub fn id(self) -> &'static str {
         match self {
             Self::George => "george",
@@ -236,7 +239,7 @@ mod tests {
         assert!(invalid.validate().is_err());
         let valid = Synthesis::default();
         valid.validate().unwrap();
-        assert_eq!(valid.provider_options()["prosody"]["speed"], 1.0);
+        assert!((valid.speed - 1.0).abs() < f64::EPSILON);
     }
     #[test]
     fn curated_voice_rejects_arbitrary_provider_ids() {
@@ -269,9 +272,9 @@ mod tests {
         let config = VoiceConfig::default();
         assert_eq!(config.voice, Voice::Will);
         assert_eq!(config.voice.id(), "will");
-        assert_eq!(config.synthesis.speed, 1.0);
-        assert_eq!(config.synthesis.volume, 0.0);
-        assert_eq!(config.synthesis.temperature, 0.55);
+        assert!((config.synthesis.speed - 1.0).abs() < f64::EPSILON);
+        assert!(config.synthesis.volume.abs() < f64::EPSILON);
+        assert!((config.synthesis.temperature - 0.55).abs() < f64::EPSILON);
         assert_eq!(config.synthesis.language.as_deref(), Some("en"));
         assert!(config.delivery.contains("Grandma's Boy"));
         assert!(!config.delivery.contains('['));
@@ -389,13 +392,87 @@ impl Synthesis {
         );
         Ok(())
     }
-    pub fn provider_options(&self) -> Value {
-        json!({"temperature":self.temperature,"top_p":self.top_p,"prosody":{"speed":self.speed,"volume":self.volume,"normalize_loudness":self.normalize_loudness},"normalize":self.normalize,"language":self.language,"latency":self.latency,"chunk_length":self.chunk_length,"min_chunk_length":self.min_chunk_length,"condition_on_previous_chunks":self.condition_on_previous_chunks,"max_new_tokens":self.max_new_tokens,"repetition_penalty":self.repetition_penalty,"early_stop_threshold":self.early_stop_threshold})
-    }
 }
 pub fn schema() -> Value {
     let voices: Vec<&str> = Voice::ALL.into_iter().map(Voice::id).collect();
-    json!({"type":"object","properties":{"voice":{"type":"string","enum":voices},"delivery":{"type":"string","maxLength":1500},"speech_rules":{"type":"array","maxItems":32,"items":{"type":"object","properties":{"text":{"type":"string","maxLength":80},"style":{"type":"string","enum":["whisper","emphasis","soft","fast","slow","stress","forceful","phoneme"]},"phonemes":{"type":["string","null"]}},"required":["text","style"],"additionalProperties":false}},"synthesis":{"type":"object","properties":{"temperature":{"type":"number","minimum":0,"maximum":1},"top_p":{"type":"number","minimum":0,"maximum":1},"speed":{"type":"number","minimum":0.5,"maximum":2},"volume":{"type":"number","minimum":-20,"maximum":10},"normalize_loudness":{"type":"boolean"},"normalize":{"type":"boolean"},"language":{"type":["string","null"]},"latency":{"type":"string","enum":["normal","balanced","low"]},"chunk_length":{"type":"integer","minimum":100,"maximum":300},"min_chunk_length":{"type":"integer","minimum":0,"maximum":100},"condition_on_previous_chunks":{"type":"boolean"},"max_new_tokens":{"type":"integer","minimum":256,"maximum":2048},"repetition_penalty":{"type":"number","minimum":1,"maximum":2},"early_stop_threshold":{"type":"number","minimum":0,"maximum":1}},"additionalProperties":false}},"required":["voice","delivery"],"additionalProperties":false})
+    json!({
+        "type": "object",
+        "properties": {
+            "voice": { "type": "string", "enum": voices },
+            "delivery": { "type": "string", "maxLength": 1500 },
+            "speech_rules": {
+                "type": "array",
+                "maxItems": 32,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "text": { "type": "string", "maxLength": 80 },
+                        "style": {
+                            "type": "string",
+                            "enum": [
+                                "whisper",
+                                "emphasis",
+                                "soft",
+                                "fast",
+                                "slow",
+                                "stress",
+                                "forceful",
+                                "phoneme",
+                            ],
+                        },
+                        "phonemes": { "type": ["string", "null"] },
+                    },
+                    "required": ["text", "style"],
+                    "additionalProperties": false,
+                },
+            },
+            "synthesis": {
+                "type": "object",
+                "properties": {
+                    "temperature": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "top_p": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "speed": {
+                        "type": "number",
+                        "minimum": 0.5,
+                        "maximum": 2,
+                    },
+                    "volume": {
+                        "type": "number",
+                        "minimum": -20,
+                        "maximum": 10,
+                    },
+                    "normalize_loudness": { "type": "boolean" },
+                    "normalize": { "type": "boolean" },
+                    "language": { "type": ["string", "null"] },
+                    "latency": {
+                        "type": "string",
+                        "enum": ["normal", "balanced", "low"],
+                    },
+                    "chunk_length": {
+                        "type": "integer",
+                        "minimum": 100,
+                        "maximum": 300,
+                    },
+                    "min_chunk_length": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100,
+                    },
+                    "condition_on_previous_chunks": { "type": "boolean" },
+                    "max_new_tokens": {
+                        "type": "integer",
+                        "minimum": 256,
+                        "maximum": 2048,
+                    },
+                    "repetition_penalty": { "type": "number", "minimum": 1, "maximum": 2 },
+                    "early_stop_threshold": { "type": "number", "minimum": 0, "maximum": 1 },
+                },
+                "additionalProperties": false,
+            },
+        },
+        "required": ["voice", "delivery"],
+        "additionalProperties": false,
+    })
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -436,13 +513,12 @@ impl SpeechRule {
                 "English phoneme rules replace one word"
             );
             let phones = self.phonemes.as_deref().unwrap_or("");
-            const SYMBOLS: &str = "AA AE AH AO AW AY B CH D DH EH ER EY F G HH IH IY JH K L M N NG OW OY P R S SH T TH UH UW V W Y Z ZH";
             ensure!(
                 !phones.trim().is_empty()
                     && phones.len() <= 200
                     && phones.split_whitespace().all(|t| {
                         let base = t.trim_end_matches(['0', '1', '2']);
-                        SYMBOLS.split_whitespace().any(|p| p == base)
+                        PHONEME_SYMBOLS.split_whitespace().any(|p| p == base)
                             && (t.len() == base.len()
                                 || (t.len() == base.len() + 1
                                     && "AA AE AH AO AW AY EH ER EY IH IY OW OY UH UW"
@@ -461,7 +537,8 @@ impl SpeechRule {
     }
     fn annotate(&self, text: &str) -> String {
         match self.style {
-            // Eleven documents [whispering]. Other Fish tags would be spoken, so the word stays plain.
+            // Eleven documents [whispering]. Other Fish tags would be spoken, so the word
+            // stays plain.
             WordStyle::Whisper | WordStyle::Soft => format!("[whispering] {text}"),
             WordStyle::Emphasis
             | WordStyle::Stress

@@ -78,7 +78,7 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            deadline: Duration::from_secs(300),
+            deadline: Duration::from_mins(5),
             max_chunks: 64,
             audio_budget: 16 * 1024 * 1024,
             prefetch_budget: 2 * 1024 * 1024,
@@ -219,7 +219,7 @@ struct Upstream {
     _permit: OwnedSemaphorePermit,
 }
 
-impl<'a, S: ChunkSource, T: Synthesizer> Ctx<'a, S, T> {
+impl<S: ChunkSource, T: Synthesizer> Ctx<'_, S, T> {
     /// Re-checks authorization off the audio path and extends `authorized_until`.
     /// A failed or timed-out check stops the stream.
     async fn guard(self, authorized_until: watch::Sender<Instant>) -> Result<()> {

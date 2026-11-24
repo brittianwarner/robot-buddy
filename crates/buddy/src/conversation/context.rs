@@ -1,28 +1,41 @@
-use super::*;
+//! Versioned runtime context: the timezone and location every model request sees.
+use super::{
+    Context, Conversation, Ctx, P, Receipt, Result, SqliteDbExt, SqliteTransaction, TxOptions,
+    Value, auth, ensure, ensure_receipt_running, integer, json, string, trim_versions,
+    write_receipt,
+};
 use crate::context::ContextConfig;
+
+const CONTEXT_SQL: &str =
+    "SELECT revision, config, updated FROM context_settings WHERE singleton = 1";
+const UPDATE_CONTEXT_SQL: &str = r"
+    UPDATE context_settings SET revision = revision + 1, config = ?, updated = ?
+    WHERE singleton = 1 AND revision = ?
+    RETURNING revision";
+const INSERT_VERSION_SQL: &str = r"
+    INSERT INTO context_versions(revision, config, reason, updated) VALUES (?, ?, ?, ?)";
+const TRIM_VERSIONS_SQL: &str = "DELETE FROM context_versions WHERE revision < ?";
+
 impl Conversation {
     pub(super) async fn context_config(&self, ctx: &Ctx<Self>) -> Result<Value> {
-        let rows = ctx
-            .sql()
-            .query(
-                "SELECT revision,config,updated FROM context_settings WHERE singleton=1",
-                None,
-            )
-            .await?
-            .rows;
+        let rows = ctx.sql().query(CONTEXT_SQL, None).await?.rows;
         let row = rows.first().context("context configuration missing")?;
         let config: ContextConfig = serde_json::from_str(&string(row, 1)?)?;
-        Ok(
-            json!({"revision":integer(row,0)?,"config":config,"updated":integer(row,2)?,"current":config.at(auth::now())?}),
-        )
+        Ok(json!({
+            "revision": integer(row, 0)?,
+            "config": config,
+            "updated": integer(row, 2)?,
+            "current": config.at(auth::now())?,
+        }))
     }
+
     pub(super) async fn set_context(
         &self,
         ctx: &Ctx<Self>,
         expected_revision: i64,
         config: &ContextConfig,
         reason: &str,
-        receipt: Option<(&str, &str)>,
+        receipt: Receipt<'_>,
     ) -> Result<Value> {
         config.validate()?;
         ensure!(
@@ -30,16 +43,35 @@ impl Conversation {
             "invalid context update"
         );
         let encoded = serde_json::to_string(config)?;
-        ctx.sql().transaction(|tx|async move {
-            if let Some((turn,_))=receipt {ensure!(!tx.execute("SELECT id FROM turns WHERE id=? AND status='running'",params(&[turn])).await?.rows.is_empty(),"turn cancelled");}
-            let now=auth::now();
-            let rows=tx.execute("UPDATE context_settings SET revision=revision+1,config=?,updated=? WHERE singleton=1 AND revision=? RETURNING revision",Some(vec![P::Text(encoded.clone()),P::Integer(now),P::Integer(expected_revision)])).await?.rows;
-            let revision=integer(rows.first().context("context revision conflict; read it again")?,0)?;
-            tx.execute("INSERT INTO context_versions(revision,config,reason,updated) VALUES(?,?,?,?)",Some(vec![P::Integer(revision),P::Text(encoded),P::Text(reason.into()),P::Integer(now)])).await?;
-            tx.execute("DELETE FROM context_versions WHERE revision<?",Some(vec![P::Integer((revision-15).max(1))])).await?;
-            let result=json!({"revision":revision,"saved":true,"applies":"next_model_request"});
-            if let Some((turn,call))=receipt {tx.execute("UPDATE tool_calls SET result=? WHERE turn_id=? AND call_id=?",params(&[&result.to_string(),turn,call])).await?;}
+        let write = |tx: SqliteTransaction| async move {
+            ensure_receipt_running(&tx, receipt).await?;
+            let now = auth::now();
+            let update = vec![
+                P::Text(encoded.clone()),
+                P::Integer(now),
+                P::Integer(expected_revision),
+            ];
+            let rows = tx.execute(UPDATE_CONTEXT_SQL, Some(update)).await?.rows;
+            let row = rows
+                .first()
+                .context("context revision conflict; read it again")?;
+            let revision = integer(row, 0)?;
+            let version = vec![
+                P::Integer(revision),
+                P::Text(encoded),
+                P::Text(reason.into()),
+                P::Integer(now),
+            ];
+            tx.execute(INSERT_VERSION_SQL, Some(version)).await?;
+            trim_versions(&tx, TRIM_VERSIONS_SQL, revision).await?;
+            let result = json!({
+                "revision": revision,
+                "saved": true,
+                "applies": "next_model_request",
+            });
+            write_receipt(&tx, receipt, &result).await?;
             Ok(result)
-        },Default::default()).await
+        };
+        ctx.sql().transaction(write, TxOptions::default()).await
     }
 }

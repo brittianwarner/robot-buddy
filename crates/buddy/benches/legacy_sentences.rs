@@ -34,7 +34,7 @@ impl LegacySentences {
                         || word.len() == 1
                         || word.contains('.');
                     if !abbreviation
-                        && !before.chars().next_back().is_some_and(|c| c.is_numeric())
+                        && !before.chars().next_back().is_some_and(char::is_numeric)
                         && next.is_none_or(|c| c.is_whitespace() || "\"'”’".contains(c))
                     {
                         end = Some(i + 1);

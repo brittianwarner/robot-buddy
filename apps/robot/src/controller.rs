@@ -677,38 +677,38 @@ mod tests {
             log: rig.log.clone(),
             ..Fake::default()
         };
-        let face = rig.face.clone();
+        let shown = rig.face.clone();
         let mut c = rig.controller(&fake);
         c.needs_replay = false;
-        assert_eq!(face.steady(), Mood::Idle);
+        assert_eq!(shown.steady(), Mood::Idle);
         c.control(Control::Wake).await;
-        assert_eq!(face.steady(), Mood::Listening);
+        assert_eq!(shown.steady(), Mood::Listening);
         c.control(Control::Listening(false)).await;
-        assert_eq!(face.steady(), Mood::Idle);
+        assert_eq!(shown.steady(), Mood::Idle);
         c.control(Control::Say("hi".into())).await;
         c.send_intents(true).await.unwrap();
-        assert_eq!(face.steady(), Mood::Thinking);
+        assert_eq!(shown.steady(), Mood::Thinking);
         c.playback(PlaybackEvent::Started { generation: 1 });
-        assert_eq!(face.steady(), Mood::Speaking);
+        assert_eq!(shown.steady(), Mood::Speaking);
         c.playback(PlaybackEvent::Finished {
             generation: 1,
             played: true,
         });
-        assert_eq!(face.steady(), Mood::Thinking, "turn not finished yet");
+        assert_eq!(shown.steady(), Mood::Thinking, "turn not finished yet");
         c.pushed(event(1, "turn-hi", "turn.completed")).await;
-        assert_eq!(face.steady(), Mood::Idle);
+        assert_eq!(shown.steady(), Mood::Idle);
         c.control(Control::Say("again".into())).await;
         c.send_intents(true).await.unwrap();
         c.pushed(event(2, "turn-again", "turn.failed")).await;
-        assert_eq!(face.steady(), Mood::Idle);
-        assert_eq!(face.flashing(), Some(Mood::Sorry));
+        assert_eq!(shown.steady(), Mood::Idle);
+        assert_eq!(shown.flashing(), Some(Mood::Sorry));
         c.control(Control::Mute(true)).await;
-        assert_eq!(face.steady(), Mood::Muted);
+        assert_eq!(shown.steady(), Mood::Muted);
         c.control(Control::Say("quiet".into())).await;
         c.send_intents(true).await.unwrap();
         assert!(c.playing.is_none(), "muted robots do not auto-play");
         c.control(Control::Mute(false)).await;
-        assert_eq!(face.steady(), Mood::Thinking);
+        assert_eq!(shown.steady(), Mood::Thinking);
     }
 
     #[tokio::test]

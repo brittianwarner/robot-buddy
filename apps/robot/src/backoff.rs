@@ -118,7 +118,7 @@ mod tests {
     #[test]
     fn setup_reopens_only_after_the_grace_period() {
         let start = Instant::now();
-        let grace = Duration::from_secs(300);
+        let grace = Duration::from_mins(5);
         let mut link = LinkWatch::new(grace);
         assert_eq!(link.observe(false, start), LinkAction::Wait);
         let later = start + Duration::from_secs(200);

@@ -40,16 +40,14 @@ impl Settings {
             url.scheme() == "https" || (simulate && local),
             "HTTPS required for robot server"
         );
-        let events = match get("BUDDY_EVENTS").as_deref() {
-            Some("full") => EventDetail::Full,
-            Some("compact") => EventDetail::Compact,
-            None | Some("") if simulate => EventDetail::Full,
-            None | Some("") => EventDetail::Compact,
-            Some(_) => anyhow::bail!("BUDDY_EVENTS must be full or compact"),
+        let events = match (get("BUDDY_EVENTS").as_deref(), simulate) {
+            (Some("full"), _) | (None | Some(""), true) => EventDetail::Full,
+            (Some("compact"), _) | (None | Some(""), false) => EventDetail::Compact,
+            (Some(_), _) => anyhow::bail!("BUDDY_EVENTS must be full or compact"),
         };
         let wifi_grace = match get("BUDDY_WIFI_GRACE_SECS") {
             Some(v) => Duration::from_secs(v.parse().context("BUDDY_WIFI_GRACE_SECS")?),
-            None => Duration::from_secs(300),
+            None => Duration::from_mins(5),
         };
         Ok(Self {
             simulate,

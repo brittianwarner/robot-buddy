@@ -71,3 +71,23 @@ Local in-memory SQLite (rusqlite, bundled), with the real schema files. `v1` is 
 | Events committed after `turn.cancelled` | 0 | 0 |
 
 The latency eval is new, so there is no before number. The close time includes the cancel action round trip. The connection closes as soon as the cancellation commits.
+
+## Robot dependency tree
+
+Measured 2026-11-23 on branch `wave2-core`. The robot now links `robot-buddy` with `default-features = false` and talks to actors through the untyped `rivetkit-client`, so it no longer links `rivetkit-core`, Rig or `chrono-tz`.
+
+```sh
+cargo tree -p robot-buddy-robot -e normal | wc -l
+cargo tree -p robot-buddy-robot -e normal --prefix none --no-dedupe | sort -u | wc -l
+cargo build --release -p robot-buddy-robot && ls -l target/release/robot-buddy-robot
+```
+
+| Measure | Before | After | Change |
+|---|---|---|---|
+| `cargo tree` lines (normal deps) | 976 | 508 | −48% |
+| Unique crates | 272 | 184 | −32% |
+| Release binary (macOS aarch64, not stripped) | 8,706,816 B | 8,453,808 B | −253,008 B (−2.9%) |
+
+- The binary shrinks much less than the tree. The linker already dropped most unused server code. The tree change cuts build time and the supply-chain surface the Pi carries.
+- The baseline release build took 9 m 54 s from cold. The after build was incremental, so build times are not compared.
+- tokio stays on `full`: `rivetkit-client` enables it, so trimming the robot's own features changes nothing.
