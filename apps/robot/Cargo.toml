@@ -4,7 +4,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
+[features]
+pi-vision = ["dep:opencv"]
+
 [dependencies]
+base64.workspace = true
+opencv = { version = "=0.102.0", optional = true, default-features = false, features = ["clang-runtime", "dnn", "imgproc", "imgcodecs", "objdetect"] }
 # Contracts and device credentials only; the robot never links the actor runtime.
 robot-buddy = { path = "../../crates/buddy", default-features = false }
 anyhow.workspace = true
