@@ -24,9 +24,30 @@ trait Processes {
     fn player(&self, format: PcmFormat) -> Command;
 }
 
+// The synth and ALSA only need local runtime configuration, not the operator
+// token or any other device service settings.
+fn local_process(program: &std::ffi::OsStr) -> Command {
+    let mut cmd = Command::new(program);
+    cmd.env_clear().env("LC_ALL", "C");
+    for key in [
+        "PATH",
+        "HOME",
+        "LD_LIBRARY_PATH",
+        "ALSA_CONFIG_PATH",
+        "XDG_RUNTIME_DIR",
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+    ] {
+        if let Some(value) = std::env::var_os(key) {
+            cmd.env(key, value);
+        }
+    }
+    cmd
+}
+
 impl Processes for OfflineVoice {
     fn synth(&self) -> Command {
-        let mut cmd = Command::new(&self.binary);
+        let mut cmd = local_process(self.binary.as_os_str());
         cmd.arg("--model")
             .arg(&self.model)
             .args(["--output-raw", "--length-scale", "1.18"]);
@@ -34,7 +55,7 @@ impl Processes for OfflineVoice {
     }
 
     fn player(&self, format: PcmFormat) -> Command {
-        let mut cmd = Command::new("aplay");
+        let mut cmd = local_process("aplay".as_ref());
         cmd.args(self.player.args(format));
         cmd
     }
