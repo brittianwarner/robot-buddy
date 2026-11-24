@@ -1,9 +1,11 @@
 // /etc/polkit-1/rules.d/50-robot-buddy-nm.rules
 //
-// Lets the robot-buddy service account manage its two NetworkManager
-// profiles without root: add and delete system profiles (and save the home
-// Wi-Fi password NetworkManager receives during activation), activate them,
-// and share a connection for the setup hotspot. Nothing else is granted.
+// Lets the robot-buddy service account manage its NetworkManager profiles
+// without root: add, modify and delete system profiles (and save and read back
+// the home Wi-Fi password NetworkManager receives during activation), activate
+// them, and share a WPA-protected connection for the setup hotspot. The client
+// never opens an unprotected hotspot or turns the radio on or off, so those
+// actions are not granted. Nothing else is.
 //
 // polkit cannot see which profile a call names, so these actions cover every
 // profile. The account has no login shell and no other privileges.
@@ -15,8 +17,6 @@ polkit.addRule(function (action, subject) {
     case "org.freedesktop.NetworkManager.settings.modify.system":
     case "org.freedesktop.NetworkManager.network-control":
     case "org.freedesktop.NetworkManager.wifi.share.protected":
-    case "org.freedesktop.NetworkManager.wifi.share.open":
-    case "org.freedesktop.NetworkManager.enable-disable-wifi":
       return polkit.Result.YES;
   }
   return polkit.Result.NOT_HANDLED;
