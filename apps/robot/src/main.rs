@@ -11,6 +11,7 @@ mod input;
 mod journal;
 mod screen;
 mod session;
+mod systemd;
 mod wifi;
 
 use anyhow::Result;
@@ -86,6 +87,8 @@ async fn robot() -> Result<()> {
         .build()?;
     let stdin = std::io::BufReader::with_capacity(input::MAX_LINE, std::io::stdin());
     let mut input = Input::spawn(stdin)?;
+    // Type=notify: ready once input is served; also starts watchdog pings.
+    systemd::ready();
     // No Wi-Fi gate here: the loop serves input at once, and reopens setup
     // only after a bounded time without any network.
     let link = session::Link {

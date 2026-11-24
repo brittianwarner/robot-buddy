@@ -317,9 +317,8 @@ impl<'a, S: Speaker> Controller<'a, S> {
                 self.state.listening = true;
                 self.playing = None;
                 self.interrupt(None);
+                // Face::set clears any error flash for an active mood.
                 self.refresh();
-                // A Sorry flash would hide the listening light.
-                self.face.flash(Mood::Listening, Duration::ZERO);
                 self.stop_speaker().await;
             }
             Control::Listening(on) => self.state.listening = on,
@@ -339,6 +338,8 @@ impl<'a, S: Speaker> Controller<'a, S> {
                 } else {
                     // Refused now rather than queued behind a reconnect.
                     self.interrupt(None);
+                    // Leave Listening first: flashes are ignored over active moods.
+                    self.refresh();
                     self.face.flash(Mood::Sorry, face::SORRY);
                     tracing::info!("utterance dropped: offline");
                 }
@@ -1333,11 +1334,7 @@ pub mod tests {
         assert_eq!(shown.flashing(), Some(Mood::Sorry));
         c.control(Control::Wake).await;
         assert_eq!(shown.steady(), Mood::Listening);
-        assert_eq!(
-            shown.flashing(),
-            Some(Mood::Listening),
-            "the Sorry flash ends"
-        );
+        assert_eq!(shown.flashing(), None, "the Sorry flash ends");
         c.control(Control::Mute(true)).await;
         assert_eq!(shown.steady(), Mood::Muted);
         c.control(Control::Say("quiet".into())).await;

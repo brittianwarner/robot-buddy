@@ -782,12 +782,12 @@ mod tests {
         }
     }
     impl LineSink for PanelSink {
-        async fn write_line(&mut self, line: &[u8]) -> io::Result<()> {
-            let line = String::from_utf8_lossy(line).trim().to_owned();
-            self.0
-                .lock()
-                .unwrap()
-                .push((std::time::Instant::now(), line));
+        async fn write_frame(&mut self, frame: &[u8]) -> io::Result<()> {
+            let now = std::time::Instant::now();
+            let mut lines = self.0.lock().unwrap();
+            for line in String::from_utf8_lossy(frame).lines() {
+                lines.push((now, line.trim().to_owned()));
+            }
             Ok(())
         }
     }
