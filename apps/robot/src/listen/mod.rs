@@ -480,8 +480,15 @@ async fn capture(
             continue;
         }
         let generation = state.clone();
+        let mut mic = match Alsa::open(cfg) {
+            Ok(mic) => mic,
+            Err(error) => {
+                tracing::warn!(%error,"microphone capture unavailable; retrying");
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue;
+            }
+        };
         let session = async {
-            let mut mic = Alsa::open(cfg)?;
             #[cfg(feature = "onnx-wake")]
             if let Some((engine, models)) = worker {
                 return record(
@@ -504,23 +511,30 @@ async fn capture(
             )
             .await
         };
-        tokio::select! {
+        let result = tokio::select! {
             biased;
             closed = async {
                 state
                     .wait_for(|s| capture_must_restart(current, *s, mode.barge_in))
                     .await
                     .is_err()
-            } => if closed { return; },
-            res = session => match res {
-                Ok(()) => return,
-                Err(error) => {
-                    tracing::warn!(%error, "microphone capture unavailable; retrying");
-                    tokio::time::sleep(Duration::from_secs(2)).await;
-                }
-            }
+            } => closed.then_some(Ok(())),
+            res = session => Some(res),
+        };
+        // Drop the frame read first, then release the old device before a new
+        // claim or an immediate unmute can start a second arecord process.
+        if let Err(error) = mic.stop().await {
+            tracing::error!(%error,"microphone release not confirmed; capture stopped");
+            return;
         }
-        // Dropping the old session kills arecord and purges its kernel/pipe/VAD buffers.
+        match result {
+            Some(Ok(())) => return,
+            Some(Err(error)) => {
+                tracing::warn!(%error, "microphone capture unavailable; retrying");
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+            None => {}
+        }
     }
 }
 

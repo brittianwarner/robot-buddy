@@ -104,6 +104,15 @@ impl Alsa {
         })
     }
 
+    /// Finish releasing the exclusive PCM handle before the next ALSA open.
+    /// Only the capture task waits here; shutdown still has `kill_on_drop`.
+    pub async fn stop(&mut self) -> io::Result<()> {
+        if self.child.try_wait()?.is_none() {
+            self.child.kill().await?;
+        }
+        Ok(())
+    }
+
     async fn describe_failure(&mut self, stalled: bool, kind: io::ErrorKind) -> anyhow::Error {
         if stalled {
             if let Ok(Some(status)) = self.child.try_wait() {
@@ -242,6 +251,16 @@ impl Recognizer for Config {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn capture_stop_reaps_the_child_before_a_reopen() {
+        let mut cmd = local_command("sleep".as_ref());
+        cmd.arg("30");
+        let mut mic = Alsa::spawn(cmd, 0, 1).unwrap();
+        assert!(mic.child.try_wait().unwrap().is_none());
+        mic.stop().await.unwrap();
+        assert!(mic.child.try_wait().unwrap().is_some());
+        mic.stop().await.unwrap();
+    }
     use super::*;
 
     #[tokio::test]
