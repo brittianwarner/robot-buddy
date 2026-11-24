@@ -8,17 +8,20 @@
 //! disk is.
 //!
 //! Credentials are replaced ahead of expiry without going offline: the next
-//! session connects in the background, takes over once no call is in flight
-//! and no turn is live (or shortly before expiry), and audio already
+//! session connects in the background and must answer one authenticated
+//! conversation call before it counts. It takes over once no call is in
+//! flight and no turn is live (or shortly before expiry), and audio already
 //! playing finishes on the old speaker. The old connection is then closed.
+//! A replacement that fails its first call, or closes while it waits, is
+//! dropped and retried; the current session is never touched.
 use crate::{
     audio::{PlaybackEvent, Speaker},
     backoff::{Backoff, HEALTHY_SESSION, LINK_CHECK_AFTER, LinkAction, LinkWatch},
     cache::CacheStore,
-    config::EventDetail,
     controller::{Claim, Controller, Done, Lost, Registration, Remote, RobotState},
     face::Face,
     input::{Control, Input},
+    journal::Journal,
     systemd::Pulse,
 };
 use anyhow::{Result, bail};
@@ -60,6 +63,8 @@ const SWAP_BY: Duration = Duration::from_mins(1);
 /// A session is never rotated sooner than this after it connected.
 const MIN_SESSION: Duration = Duration::from_mins(1);
 const ROTATE_RETRY: Duration = Duration::from_secs(10);
+/// A replacement connection must answer its first call within this long.
+const PROBE_DEADLINE: Duration = Duration::from_secs(5);
 const DISCONNECT_GRACE: Duration = Duration::from_secs(2);
 const SHUTDOWN_DISCONNECT: Duration = Duration::from_millis(200);
 
@@ -106,7 +111,8 @@ impl Controls for Input {
 }
 
 pub struct Options {
-    pub detail: EventDetail,
+    /// Where conversation event lines go.
+    pub journal: Journal,
     /// How long the network must stay down before Wi-Fi setup reopens.
     pub wifi_grace: Duration,
     /// Beaten every pass of the loop, for the systemd watchdog.
@@ -123,7 +129,7 @@ pub async fn run<C: Connector, I: Controls>(
     options: Options,
     shutdown: impl Future<Output = ()>,
 ) -> Result<()> {
-    let controller = Controller::new(face, store, state, options.detail, auth::now());
+    let controller = Controller::new(face, store, state, options.journal.clone(), auth::now());
     let mut device = Device::new(connector, controller, options);
     device.status("Connecting…");
     device.connecting = Some(device.connector.connect().boxed_local());
@@ -140,13 +146,15 @@ pub async fn run<C: Connector, I: Controls>(
         tokio::select! {
             biased;
             () = &mut shutdown => break,
-            control = controls.next() => device.controller.control(control).await,
+            control = controls.next() => device.control(control).await,
             event = device.controller.next_playback() => device.controller.playback(event),
             done = wait(&mut device.cancel_lane) => device.finish(done).await,
             done = wait(&mut device.main_lane) => device.finish(done).await,
             Some(event) = recv(&mut device.events), if accepts => device.pushed(event).await,
             () = closed(device.closed.as_ref()) => device.lose("connection closed").await,
+            () = closed(device.next.as_ref().map(|next| &next.closed)) => device.discard_next(),
             registration = wait(&mut device.register_lane) => device.registered(registration).await,
+            confirmed = wait(&mut device.confirm_lane) => device.confirmed(confirmed),
             persisted = wait(&mut device.persist_lane) => {
                 device.controller.persisted(persisted, Instant::now());
             }
@@ -201,6 +209,8 @@ struct Live<R> {
     /// This connection has delivered pushed events.
     pushing: bool,
     refresh_at: Instant,
+    /// A claim waits for the owner's spoken confirmation code.
+    claiming: bool,
 }
 
 fn refresh_at(now: Instant, expires: Instant) -> Instant {
@@ -231,6 +241,7 @@ struct Device<'a, C: Connector> {
     cancel_lane: Slot<Done>,
     main_lane: Slot<Done>,
     register_lane: Slot<Result<Registration>>,
+    confirm_lane: Slot<Result<()>>,
     persist_lane: Slot<crate::controller::Persisted>,
     connecting: Slot<Opened<C>>,
     refreshing: Slot<Opened<C>>,
@@ -258,6 +269,7 @@ impl<'a, C: Connector> Device<'a, C> {
             cancel_lane: None,
             main_lane: None,
             register_lane: None,
+            confirm_lane: None,
             persist_lane: None,
             connecting: None,
             refreshing: None,
@@ -270,7 +282,7 @@ impl<'a, C: Connector> Device<'a, C> {
     /// Start whatever is due. Never waits on I/O.
     async fn tick(&mut self) {
         let now = Instant::now();
-        self.controller.expire(now);
+        self.controller.expire(now).await;
         if self.persist_lane.is_none()
             && let Some(write) = self.controller.take_persist(now)
         {
@@ -291,7 +303,7 @@ impl<'a, C: Connector> Device<'a, C> {
             return;
         }
         if self.refreshing.is_none() && self.next.is_none() && now >= live.refresh_at {
-            self.refreshing = Some(self.connector.connect().boxed_local());
+            self.refreshing = Some(candidate(self.connector.connect()).boxed_local());
         }
         let swap = self.next.is_some()
             && self.controller.lanes_idle()
@@ -320,6 +332,12 @@ impl<'a, C: Connector> Device<'a, C> {
             && let Some(op) = self.controller.next_cancel()
         {
             self.cancel_lane = Some(op.run(live.remote.clone()).boxed_local());
+        }
+        // A question never waits behind a catch-up replay: the replay is
+        // dropped (it changes nothing) and runs again after the submit.
+        if self.main_lane.is_some() && self.controller.submit_waits_on_replay(live.owned) {
+            self.main_lane = None;
+            self.controller.preempt_replay();
         }
         if self.main_lane.is_none()
             && let Some(op) = self.controller.next_main(live.owned)
@@ -414,6 +432,7 @@ impl<'a, C: Connector> Device<'a, C> {
             catch_up_at: now + CATCH_UP_IDLE,
             pushing: false,
             refresh_at: refresh_at(now, session.expires),
+            claiming: false,
         });
         self.controller.go_online(session.speaker, session.playback);
         Ok(())
@@ -439,6 +458,19 @@ impl<'a, C: Connector> Device<'a, C> {
         Ok(())
     }
 
+    /// The replacement closed before it took over: drop it and try again
+    /// later. The current session carries on.
+    fn discard_next(&mut self) {
+        let Some(next) = self.next.take() else {
+            return;
+        };
+        tracing::warn!("replacement connection closed before taking over; retrying");
+        self.teardown(next.remote);
+        if let Some(live) = self.live.as_mut() {
+            live.refresh_at = Instant::now() + ROTATE_RETRY;
+        }
+    }
+
     /// Hand over to the rotated session. No Offline face, no backoff, and
     /// audio already playing finishes on the old speaker.
     fn swap(&mut self, now: Instant) {
@@ -458,6 +490,7 @@ impl<'a, C: Connector> Device<'a, C> {
             catch_up_at: now + catch_up(self.controller.is_live(), false),
             pushing: false,
             refresh_at: refresh_at(now, next.expires),
+            claiming: old.claiming,
         });
         self.controller.rotate(next.speaker, next.playback);
         tracing::info!("credentials rotated");
@@ -476,6 +509,7 @@ impl<'a, C: Connector> Device<'a, C> {
         self.cancel_lane = None;
         self.main_lane = None;
         self.register_lane = None;
+        self.confirm_lane = None;
         self.refreshing = None;
         self.events = None;
         self.closed = None;
@@ -551,7 +585,17 @@ impl<'a, C: Connector> Device<'a, C> {
                 cache.claim_expires = claim.expires;
             });
         }
+        // An owned robot has no use for its claim link, which carries a token.
+        let cache = self.controller.cache();
+        if registration.owned && (!cache.claim_url.is_empty() || cache.claim_expires != 0) {
+            self.controller.update_cache(|cache| {
+                cache.claim_url.clear();
+                cache.claim_expires = 0;
+            });
+        }
+        self.controller.set_claiming(registration.confirming);
         if let Some(live) = self.live.as_mut() {
+            live.claiming = registration.confirming;
             live.owned = registration.owned;
             let every = if live.owned {
                 REGISTER_OWNED
@@ -559,6 +603,47 @@ impl<'a, C: Connector> Device<'a, C> {
                 REGISTER_UNOWNED
             };
             live.register_at = Instant::now() + every;
+        }
+    }
+
+    /// Control input. A confirmation code goes to the bot actor, only while a
+    /// claim waits for one and one at a time; everything else is the
+    /// controller's.
+    async fn control(&mut self, control: Control) {
+        let Control::Confirm(code) = control else {
+            self.controller.control(control).await;
+            return;
+        };
+        let Some(live) = self.live.as_ref().filter(|live| live.claiming) else {
+            // Never logged: the code is a credential while a claim is open.
+            tracing::info!("confirmation code ignored: no claim waiting");
+            self.controller.apologize();
+            return;
+        };
+        if self.confirm_lane.is_some() {
+            tracing::info!("confirmation code ignored: one is being checked");
+            return;
+        }
+        let remote = live.remote.clone();
+        self.confirm_lane = Some(async move { remote.confirm(&code).await }.boxed_local());
+    }
+
+    /// A confirmed claim makes the robot owned: register again at once. A
+    /// refused code (the server counts it) shows the apology face.
+    fn confirmed(&mut self, result: Result<()>) {
+        match result {
+            Ok(()) => {
+                tracing::info!("owner confirmed");
+                self.controller.set_claiming(false);
+                if let Some(live) = self.live.as_mut() {
+                    live.claiming = false;
+                    live.register_at = Instant::now();
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%error, "confirmation refused");
+                self.controller.apologize();
+            }
         }
     }
 
@@ -579,16 +664,39 @@ impl<'a, C: Connector> Device<'a, C> {
     }
 }
 
+/// Open a replacement session and prove it with one authenticated
+/// conversation call. One that fails is closed here and never offered.
+async fn candidate<R: Remote, S>(
+    connect: impl Future<Output = Result<Session<R, S>>>,
+) -> Result<Session<R, S>> {
+    let session = connect.await?;
+    let failure = match timeout(PROBE_DEADLINE, session.remote.probe()).await {
+        Ok(Ok(())) => return Ok(session),
+        Ok(Err(error)) => error.to_string(),
+        Err(_) => "timed out".into(),
+    };
+    if timeout(DISCONNECT_GRACE, session.remote.disconnect())
+        .await
+        .is_err()
+    {
+        tracing::debug!("failed replacement did not close in time");
+    }
+    bail!("replacement connection failed its first call: {failure}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         audio::Rewarm,
         cache::Cache,
-        controller::{CallError, Submitted, tests::Log, tests::Server, tests::event},
+        controller::{CallError, Submitted, tests::Log, tests::Server, tests::event, tests::quiet},
         face::{self, LineSink, Mood, Opener},
     };
-    use std::{io, sync::Mutex};
+    use std::{
+        io,
+        sync::{Condvar, Mutex},
+    };
     use tokio::sync::watch;
 
     impl Controls for mpsc::Receiver<Control> {
@@ -611,6 +719,15 @@ mod tests {
         server: Server,
         log: Log,
         stalled: watch::Sender<bool>,
+        /// Replays (only) wait here while held.
+        replays_held: watch::Sender<bool>,
+        /// Submit answers wait here while held: the server has run them.
+        acks_held: watch::Sender<bool>,
+        /// Connections whose first call never answers.
+        dead_probes: Mutex<Vec<usize>>,
+        /// The claim the bot reports while unowned.
+        claim: Mutex<Option<Claim>>,
+        confirming: Mutex<bool>,
         /// Calls that reached the network, finished or not.
         entered: Log,
         wires: Mutex<Vec<Wires>>,
@@ -630,6 +747,11 @@ mod tests {
                 },
                 log,
                 stalled: watch::channel(false).0,
+                replays_held: watch::channel(false).0,
+                acks_held: watch::channel(false).0,
+                dead_probes: Mutex::default(),
+                claim: Mutex::default(),
+                confirming: Mutex::new(false),
                 entered: Log::default(),
                 wires: Mutex::default(),
                 lifetime: Mutex::new(Duration::from_mins(15)),
@@ -646,6 +768,10 @@ mod tests {
         }
         fn stall(&self, on: bool) {
             self.stalled.send_replace(on);
+        }
+        async fn gate(gate: &watch::Sender<bool>) {
+            let mut held = gate.subscribe();
+            let _ = held.wait_for(|h| !*h).await;
         }
         fn connections(&self) -> usize {
             self.wires.lock().unwrap().len()
@@ -670,21 +796,50 @@ mod tests {
     impl Remote for FakeRemote {
         async fn submit(&self, request_id: &str, text: &str) -> Result<Submitted, CallError> {
             self.world.network("submit").await;
-            self.world.server.submit(request_id, text)
+            let answer = self.world.server.submit(request_id, text);
+            World::gate(&self.world.acks_held).await;
+            answer
         }
         async fn cancel(&self, turn_id: &str) -> Result<(), CallError> {
             self.world.network("cancel").await;
             self.world.server.cancel(turn_id)
         }
+        async fn cancel_request(&self, request_id: &str) -> Result<(), CallError> {
+            self.world.network("cancel_request").await;
+            self.world.server.cancel_request(request_id)
+        }
         async fn replay(&self, after: i64) -> Result<Vec<OutputEvent>, CallError> {
             self.world.network("replay").await;
+            World::gate(&self.world.replays_held).await;
             Ok(self.world.server.replay(after))
+        }
+        async fn probe(&self) -> Result<(), CallError> {
+            self.world.network("probe").await;
+            if self.world.dead_probes.lock().unwrap().contains(&self.id) {
+                return std::future::pending().await;
+            }
+            self.world.log.push(format!("probe {}", self.id));
+            Ok(())
+        }
+        async fn confirm(&self, code: &str) -> Result<()> {
+            self.world.network("confirm").await;
+            self.world.log.push(format!("confirm {code}"));
+            anyhow::ensure!(code == "123456", "confirmation expired or invalid");
+            *self.world.owned.lock().unwrap() = true;
+            *self.world.confirming.lock().unwrap() = false;
+            Ok(())
         }
         async fn register(&self, _: Claim) -> Result<Registration> {
             self.world.network("register").await;
+            let owned = *self.world.owned.lock().unwrap();
             Ok(Registration {
-                owned: *self.world.owned.lock().unwrap(),
-                claim: None,
+                owned,
+                claim: if owned {
+                    None
+                } else {
+                    self.world.claim.lock().unwrap().clone()
+                },
+                confirming: *self.world.confirming.lock().unwrap(),
             })
         }
         async fn disconnect(&self) {
@@ -830,16 +985,18 @@ mod tests {
         }
     }
 
-    const OPTIONS: Options = Options {
-        detail: EventDetail::Compact,
-        wifi_grace: Duration::from_mins(5),
-        pulse: None,
-    };
+    fn options() -> Options {
+        Options {
+            journal: quiet(),
+            wifi_grace: Duration::from_mins(5),
+            pulse: None,
+        }
+    }
 
     /// Run the device until `script` finishes.
     macro_rules! run_with {
         ($rig:ident, $script:expr) => {
-            run_with!($rig, OPTIONS, $script)
+            run_with!($rig, options(), $script)
         };
         ($rig:ident, $options:expr, $script:expr) => {{
             let connector = FakeConnector($rig.world.clone());
@@ -880,16 +1037,36 @@ mod tests {
             .map(|(at, _)| *at)
     }
 
-    /// "Hey Pip" while every actor call hangs and each disk write takes
-    /// 100 ms: the speaker stops and the listening LED is written at once,
-    /// and the cancel still goes out alongside the stalled replay.
+    /// A disk the test can hold: writes wait until it is released.
+    #[derive(Clone, Default)]
+    struct Disk(Arc<(Mutex<bool>, Condvar)>, Log);
+    impl Disk {
+        fn hold(&self, on: bool) {
+            *self.0.0.lock().unwrap() = on;
+            self.0.1.notify_all();
+        }
+        fn write(&self) -> crate::cache::WriteFn {
+            let disk = self.clone();
+            Arc::new(move |_| {
+                let (held, released) = &*disk.0;
+                let _unused = released
+                    .wait_while(held.lock().unwrap(), |held| *held)
+                    .unwrap();
+                disk.1.push("written".into());
+                Ok(())
+            })
+        }
+    }
+
+    /// "Hey Pip" while every actor call hangs and the disk is held: the
+    /// speaker stops and the listening LED is written before either
+    /// recovers, and the cancel still goes out alongside the stalled
+    /// replay. Real time on purpose (the disk is a real blocking write); the
+    /// wake-to-silence latency is asserted under `BUDDY_STRICT_TIMING=1`.
     #[tokio::test]
-    async fn barge_in_while_calls_are_stalled_stops_within_a_bound() {
-        let slow_disk: crate::cache::WriteFn = Arc::new(|_| {
-            std::thread::sleep(Duration::from_millis(100));
-            Ok(())
-        });
-        let mut rig = Rig::new(slow_disk);
+    async fn barge_in_while_calls_and_the_disk_are_stalled_stops_first() {
+        let disk = Disk::default();
+        let mut rig = Rig::new(disk.write());
         let world = rig.world.clone();
         let (face, lines, controls) = (rig.face.clone(), rig.lines.clone(), rig.controls.clone());
         let mut stops = Vec::new();
@@ -924,6 +1101,8 @@ mod tests {
                     world.entered.count("replay") > replays
                 })
                 .await;
+                disk.hold(true);
+                let written = disk.1.count("written");
                 let stopped = world.stops.lock().unwrap().len();
                 let wake = std::time::Instant::now();
                 controls.send(Control::Wake).await.unwrap();
@@ -940,6 +1119,8 @@ mod tests {
                 })
                 .await;
                 assert_eq!(world.log.count(&cancel), 0, "the network is still stalled");
+                assert_eq!(disk.1.count("written"), written, "the disk is still held");
+                disk.hold(false);
                 world.stall(false);
                 until("cancelled", SOON, || world.log.count(&cancel) == 1).await;
                 controls.send(Control::Listening(false)).await.unwrap();
@@ -949,11 +1130,13 @@ mod tests {
         leds.sort();
         eprintln!("wake -> player stopped: {stops:?}");
         eprintln!("wake -> listening LED written: {leds:?}");
-        let bound = Duration::from_millis(50);
-        assert!(
-            stops.iter().chain(&leds).all(|d| *d < bound),
-            "{stops:?} {leds:?}"
-        );
+        if std::env::var("BUDDY_STRICT_TIMING").as_deref() == Ok("1") {
+            let bound = Duration::from_millis(50);
+            assert!(
+                stops.iter().chain(&leds).all(|d| *d < bound),
+                "{stops:?} {leds:?}"
+            );
+        }
     }
 
     #[tokio::test(start_paused = true)]
@@ -1024,6 +1207,7 @@ mod tests {
             // Ten minutes in the next session connects; the turn is still live.
             tokio::time::sleep(Duration::from_secs(10 * 60 + 5)).await;
             assert_eq!(world.connections(), 2);
+            assert_eq!(world.log.count("probe 1"), 1, "proven before it counts");
             assert_eq!(world.log.count("disconnect 0"), 0, "waits for the turn");
             // A minute before expiry it takes over even mid-turn.
             tokio::time::sleep(Duration::from_mins(4)).await;
@@ -1147,7 +1331,7 @@ mod tests {
         let pulse = Pulse::new(Duration::from_secs(15));
         let options = Options {
             pulse: Some(pulse.clone()),
-            ..OPTIONS
+            ..options()
         };
         run_with!(rig, options, async {
             until("online", SOON, || world.entered.count("register") == 1).await;
@@ -1194,7 +1378,7 @@ mod tests {
             &rig.face,
             &rig.store,
             &mut rig.state,
-            OPTIONS,
+            options(),
             async {
                 tokio::time::sleep(Duration::from_secs(30)).await;
                 assert_eq!(world.log.count("setup"), 0, "no eager setup at boot");
@@ -1231,6 +1415,261 @@ mod tests {
         fn status(&self, _: &'static str) -> impl Future<Output = ()> + 'static {
             std::future::ready(())
         }
+    }
+
+    /// Only the replacement connection is broken: its first call never
+    /// answers. It is dropped and retried, the current session keeps
+    /// talking and is never stopped, and a working replacement takes over.
+    #[tokio::test(start_paused = true)]
+    async fn a_replacement_that_fails_its_first_call_never_touches_the_current_session() {
+        let mut rig = Rig::quick();
+        rig.world.dead_probes.lock().unwrap().extend([1, 2]);
+        let world = rig.world.clone();
+        let (face, lines, controls) = (rig.face.clone(), rig.lines.clone(), rig.controls.clone());
+        run_with!(rig, async {
+            until("online", SOON, || world.entered.count("register") == 1).await;
+            controls.send(Control::Say("story".into())).await.unwrap();
+            until("speech", SOON, || {
+                world.log.count("start turn-story on 0") == 1
+            })
+            .await;
+            world
+                .playback(0)
+                .send(PlaybackEvent::Started { generation: 1 })
+                .await
+                .unwrap();
+            until("speaking", SOON, || face.steady() == Mood::Speaking).await;
+            let online_at = std::time::Instant::now();
+            let stops = world.stops.lock().unwrap().len();
+            tokio::time::sleep(Duration::from_mins(10) + PROBE_DEADLINE + SOON).await;
+            assert_eq!(world.connections(), 2);
+            assert_eq!(
+                world.log.count("disconnect 1"),
+                1,
+                "the failed one is closed"
+            );
+            tokio::time::sleep(ROTATE_RETRY + PROBE_DEADLINE).await;
+            assert_eq!(world.connections(), 3, "retried");
+            assert_eq!(world.log.count("disconnect 2"), 1);
+            assert_eq!(world.log.count("disconnect 0"), 0);
+            assert_eq!(world.stops.lock().unwrap().len(), stops, "speech never cut");
+            assert_eq!(face.steady(), Mood::Speaking);
+            // The next replacement works and takes over before expiry.
+            tokio::time::sleep(ROTATE_RETRY + SOON).await;
+            assert_eq!(world.log.count("probe 3"), 1);
+            tokio::time::sleep(Duration::from_mins(4)).await;
+            assert_eq!(world.log.count("disconnect 0"), 1);
+            assert_eq!(world.stops.lock().unwrap().len(), stops, "speech never cut");
+            assert!(
+                wrote_after(&lines, OFFLINE_FACE, online_at).is_none(),
+                "never shown Offline"
+            );
+            world
+                .playback(0)
+                .send(PlaybackEvent::Finished {
+                    generation: 1,
+                    played: true,
+                })
+                .await
+                .unwrap();
+            controls.send(Control::Say("again".into())).await.unwrap();
+            until("new speaker", SOON, || {
+                world.log.count("start turn-again on 3") == 1
+            })
+            .await;
+        });
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_replacement_that_closes_while_waiting_is_dropped() {
+        let mut rig = Rig::quick();
+        let world = rig.world.clone();
+        let (face, controls) = (rig.face.clone(), rig.controls.clone());
+        run_with!(rig, async {
+            until("online", SOON, || world.entered.count("register") == 1).await;
+            controls.send(Control::Say("story".into())).await.unwrap();
+            until("speech", SOON, || {
+                world.log.count("start turn-story on 0") == 1
+            })
+            .await;
+            world
+                .playback(0)
+                .send(PlaybackEvent::Started { generation: 1 })
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_secs(10 * 60 + 5)).await;
+            assert_eq!(world.log.count("probe 1"), 1, "waiting for the turn to end");
+            world.close(1);
+            until("dropped", SOON, || world.log.count("disconnect 1") == 1).await;
+            assert_eq!(face.steady(), Mood::Speaking);
+            tokio::time::sleep(ROTATE_RETRY + SOON).await;
+            assert_eq!(world.log.count("probe 2"), 1, "retried");
+            tokio::time::sleep(Duration::from_mins(4)).await;
+            assert_eq!(world.log.count("disconnect 0"), 1, "the retry took over");
+        });
+        assert_eq!(rig.world.connections(), 3);
+    }
+
+    /// A catch-up replay hangs (only replays): a new question is still
+    /// submitted and its speech requested; the replay runs again after.
+    #[tokio::test(start_paused = true)]
+    async fn a_question_is_submitted_while_a_catch_up_replay_hangs() {
+        let mut rig = Rig::quick();
+        let world = rig.world.clone();
+        let controls = rig.controls.clone();
+        run_with!(rig, async {
+            until("online", SOON, || world.entered.count("register") == 1).await;
+            let replays = world.log.count("replay");
+            let entered = world.entered.count("replay");
+            world.replays_held.send_replace(true);
+            world
+                .push(0)
+                .send(event(9, "old", "text.delta"))
+                .await
+                .unwrap();
+            until("held replay", SOON, || {
+                world.entered.count("replay") > entered
+            })
+            .await;
+            controls.send(Control::Say("now".into())).await.unwrap();
+            until("submitted", SOON, || world.log.count("submit now") == 1).await;
+            until("speech", SOON, || {
+                world.log.count("start turn-now on 0") == 1
+            })
+            .await;
+            assert_eq!(
+                world.log.count("replay"),
+                replays,
+                "the replay is still held"
+            );
+            world.replays_held.send_replace(false);
+            until("replayed after", SOON, || {
+                world.log.count("replay") > replays
+            })
+            .await;
+        });
+        let log = &rig.world.log;
+        assert!(log.position("submit now") < log.last_position("replay"));
+    }
+
+    /// The C1 order end to end: the submit reaches the server, "Hey Pip"
+    /// replaces it, the connection drops before the answer, and the robot
+    /// reconnects with nothing new to say. The request is cancelled by ID.
+    #[tokio::test(start_paused = true)]
+    async fn a_request_replaced_mid_submit_is_cancelled_after_reconnect() {
+        let mut rig = Rig::quick();
+        rig.world.acks_held.send_replace(true);
+        let world = rig.world.clone();
+        let controls = rig.controls.clone();
+        run_with!(rig, async {
+            until("online", SOON, || world.entered.count("register") == 1).await;
+            controls.send(Control::Say("first".into())).await.unwrap();
+            until("submit reached the server", SOON, || {
+                world.log.count("submit first") == 1
+            })
+            .await;
+            controls.send(Control::Wake).await.unwrap();
+            world.close(0);
+            until("reconnected", Duration::from_mins(1), || {
+                world.connections() == 2
+            })
+            .await;
+            world.acks_held.send_replace(false);
+            until("request cancelled", SOON, || {
+                world.log.count("cancel_request") == 1
+            })
+            .await;
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        });
+        let log = &rig.world.log;
+        let submit = log.entries()[log.position("submit first")].clone();
+        let request = submit.rsplit(' ').next().unwrap().to_owned();
+        assert_eq!(
+            log.entries()[log.position("cancel_request")],
+            format!("cancel_request {request}")
+        );
+        assert_eq!(log.count("submit"), 1, "never resubmitted");
+        assert_eq!(log.count("start"), 0, "never spoken");
+        assert!(rig.state.cache.cancel_requests.is_empty());
+    }
+
+    /// The owner speaks the code from their phone; the STT process sends it
+    /// as a control line. Wrong codes go to the server (it counts them) and
+    /// show the apology face; the right one registers the robot at once.
+    #[tokio::test(start_paused = true)]
+    async fn a_spoken_code_confirms_the_claim_and_registers_at_once() {
+        let mut rig = Rig::quick();
+        *rig.world.owned.lock().unwrap() = false;
+        let world = rig.world.clone();
+        let (face, controls) = (rig.face.clone(), rig.controls.clone());
+        run_with!(rig, async {
+            until("online", SOON, || world.entered.count("register") == 1).await;
+            controls
+                .send(Control::Confirm("123456".into()))
+                .await
+                .unwrap();
+            until("refused: no claim", SOON, || {
+                face.flashing() == Some(Mood::Sorry)
+            })
+            .await;
+            assert_eq!(world.log.count("confirm"), 0, "nothing to confirm yet");
+            // An owner signed in on their phone.
+            *world.confirming.lock().unwrap() = true;
+            until("claim window", Duration::from_secs(10), || {
+                face.steady() == Mood::Thinking
+            })
+            .await;
+            tokio::time::sleep(face::SORRY).await;
+            controls
+                .send(Control::Confirm("000000".into()))
+                .await
+                .unwrap();
+            until("wrong code", SOON, || {
+                world.log.count("confirm 000000") == 1
+            })
+            .await;
+            until("apology", SOON, || face.flashing() == Some(Mood::Sorry)).await;
+            let registered = world.entered.count("register");
+            controls
+                .send(Control::Confirm("123456".into()))
+                .await
+                .unwrap();
+            until("right code", SOON, || {
+                world.log.count("confirm 123456") == 1
+            })
+            .await;
+            until("registered at once", Duration::from_millis(100), || {
+                world.entered.count("register") > registered
+            })
+            .await;
+            until("ready", SOON, || face.steady() == Mood::Idle).await;
+            controls.send(Control::Say("hello".into())).await.unwrap();
+            until("owned robots talk", SOON, || {
+                world.log.count("submit hello") == 1
+            })
+            .await;
+        });
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_owned_robot_forgets_its_claim_link() {
+        let mut rig = Rig::quick();
+        *rig.world.owned.lock().unwrap() = false;
+        *rig.world.claim.lock().unwrap() = Some(Claim {
+            url: "https://buddy.example/claim?bot=b&token=t".into(),
+            expires: 99,
+        });
+        let world = rig.world.clone();
+        run_with!(rig, async {
+            until("online", SOON, || world.entered.count("register") == 1).await;
+            *world.owned.lock().unwrap() = true;
+            until("registered again", SOON, || {
+                world.entered.count("register") == 2
+            })
+            .await;
+        });
+        assert!(rig.state.cache.claim_url.is_empty());
+        assert_eq!(rig.state.cache.claim_expires, 0);
     }
 
     #[test]

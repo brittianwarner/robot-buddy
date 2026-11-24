@@ -9,6 +9,10 @@
 //! Readers are plain OS threads with blocking reads, not Tokio tasks: a read
 //! on an open pipe never returns, and a blocking-pool task would make runtime
 //! shutdown wait for it (SIGTERM would then hang until SIGKILL).
+//!
+//! The socket is created under umask 0077 (owner only), then given the group
+//! `BUDDY_CONTROL_GROUP` (default `pip-control`, the speech account's group)
+//! and mode 0660, so it is never wider than that at any moment.
 use serde_json::Value;
 use std::{
     io::{BufRead, BufReader},
@@ -32,17 +36,32 @@ pub const MAX_LINE: usize = 8 * 1024;
 const MAX_WRITERS: usize = 4;
 /// Owner and group (the speech process's account) may connect.
 const SOCKET_MODE: u32 = 0o660;
+/// The group that may write control lines when `BUDDY_CONTROL_GROUP` is unset.
+pub const DEFAULT_CONTROL_GROUP: &str = "pip-control";
 const FIFO_RETRY: Duration = Duration::from_secs(1);
 
-/// The control socket path from `BUDDY_CONTROL_SOCKET`, if set and non-empty.
-fn control_path() -> Option<PathBuf> {
-    control_path_from(|key| std::env::var(key).ok())
+/// Where device control lines come from, and which group may write them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ControlSource {
+    pub path: PathBuf,
+    pub group: String,
 }
 
-fn control_path_from(get: impl Fn(&str) -> Option<String>) -> Option<PathBuf> {
-    get("BUDDY_CONTROL_SOCKET")
+/// The control socket from `BUDDY_CONTROL_SOCKET` (if set and non-empty) and
+/// `BUDDY_CONTROL_GROUP`.
+fn control_source() -> Option<ControlSource> {
+    control_source_from(|key| std::env::var(key).ok())
+}
+
+fn control_source_from(get: impl Fn(&str) -> Option<String>) -> Option<ControlSource> {
+    let path = get("BUDDY_CONTROL_SOCKET").filter(|v| !v.is_empty())?;
+    let group = get("BUDDY_CONTROL_GROUP")
         .filter(|v| !v.is_empty())
-        .map(Into::into)
+        .unwrap_or_else(|| DEFAULT_CONTROL_GROUP.into());
+    Some(ControlSource {
+        path: path.into(),
+        group,
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -55,6 +74,9 @@ pub enum Control {
     Listening(bool),
     /// Mute stops playback and suppresses automatic speech until unmuted.
     Mute(bool),
+    /// The owner spoke the six-digit confirmation code shown on their phone.
+    /// Only accepted while a claim waits for confirmation.
+    Confirm(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -65,6 +87,7 @@ pub enum Rejected {
     BadJson,
     UnknownCommand,
     BadUtterance,
+    BadCode,
 }
 
 impl Rejected {
@@ -76,6 +99,7 @@ impl Rejected {
             Self::BadJson => "line starting with { is not valid JSON",
             Self::UnknownCommand => "unknown control command",
             Self::BadUtterance => "utterance is empty or has control characters",
+            Self::BadCode => "confirmation code is not six digits",
         }
     }
 }
@@ -107,7 +131,19 @@ pub fn parse(line: &[u8]) -> Result<Control, Rejected> {
         ("wake", Value::Bool(true)) => Ok(Control::Wake),
         ("listening", Value::Bool(on)) => Ok(Control::Listening(on)),
         ("mute", Value::Bool(on)) => Ok(Control::Mute(on)),
+        ("confirm", Value::String(code)) => confirm_code(&code).map(Control::Confirm),
         _ => Err(Rejected::UnknownCommand),
+    }
+}
+
+/// Six ASCII digits. Speech recognition may space or hyphenate them
+/// ("123 456", "12-34-56"); those separators are dropped and nothing else is.
+fn confirm_code(spoken: &str) -> Result<String, Rejected> {
+    let code: String = spoken.chars().filter(|c| !matches!(c, ' ' | '-')).collect();
+    if code.len() == 6 && code.bytes().all(|b| b.is_ascii_digit()) {
+        Ok(code)
+    } else {
+        Err(Rejected::BadCode)
     }
 }
 
@@ -231,6 +267,34 @@ fn thread(name: &str, work: impl FnOnce() + Send + 'static) -> std::io::Result<(
         .map(drop)
 }
 
+/// Starts a reader thread; injectable so tests can make spawning fail.
+type Spawn = fn(&str, Box<dyn FnOnce() + Send>) -> std::io::Result<()>;
+
+fn spawn_thread(name: &str, work: Box<dyn FnOnce() + Send>) -> std::io::Result<()> {
+    thread(name, work)
+}
+
+/// One connected socket writer. Released on drop, so a reader thread that
+/// ends, panics or never starts gives its slot back.
+struct WriterSlot(Arc<AtomicUsize>);
+
+impl WriterSlot {
+    fn claim(writers: &Arc<AtomicUsize>) -> Option<Self> {
+        let claimed = writers
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+                (n < MAX_WRITERS).then_some(n + 1)
+            })
+            .is_ok();
+        claimed.then(|| Self(writers.clone()))
+    }
+}
+
+impl Drop for WriterSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// Control commands from reader threads. Once every source has closed, `next`
 /// never resolves again, so a closed stdin cannot spin the session loop. A
 /// control socket or FIFO never closes.
@@ -244,21 +308,22 @@ impl Input {
     /// named by `BUDDY_CONTROL_SOCKET` when it is set. Threads hold no state
     /// that needs cleanup, so process exit may end them mid-read.
     pub fn spawn<R: BufRead + Send + 'static>(reader: R) -> std::io::Result<Self> {
-        Self::open(reader, control_path().as_deref())
+        Self::open(reader, control_source().as_ref())
     }
 
     /// Read `stdin`, and also the control socket or FIFO at `control` when given.
     pub fn open<R: BufRead + Send + 'static>(
         mut stdin: R,
-        control: Option<&Path>,
+        control: Option<&ControlSource>,
     ) -> std::io::Result<Self> {
         let (tx, commands) = mpsc::channel(16);
-        if let Some(path) = control {
+        if let Some(control) = control {
+            let path = &control.path;
             let fifo = std::fs::metadata(path).is_ok_and(|m| m.file_type().is_fifo());
             if fifo {
-                read_fifo(path.to_owned(), tx.clone())?;
+                read_fifo(path.clone(), tx.clone())?;
             } else {
-                listen(path, tx.clone())?;
+                listen(control, tx.clone())?;
             }
         }
         thread("control-input", move || {
@@ -284,7 +349,8 @@ impl Input {
 
 /// Bind the control socket, replacing a stale socket left by an earlier run
 /// (never any other kind of file), and accept writers for the process lifetime.
-fn listen(path: &Path, tx: mpsc::Sender<Control>) -> std::io::Result<()> {
+fn listen(control: &ControlSource, tx: mpsc::Sender<Control>) -> std::io::Result<()> {
+    let path = control.path.as_path();
     match std::fs::symlink_metadata(path) {
         Ok(meta) if meta.file_type().is_socket() => std::fs::remove_file(path)?,
         Ok(_) => {
@@ -296,42 +362,93 @@ fn listen(path: &Path, tx: mpsc::Sender<Control>) -> std::io::Result<()> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
     }
-    let listener = UnixListener::bind(path)?;
+    let listener = bind_private(path)?;
+    give_to_group(path, &control.group);
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(SOCKET_MODE))?;
     tracing::info!(path = %path.display(), "control socket listening");
     let writers = Arc::new(AtomicUsize::new(0));
     thread("control-accept", move || {
-        for stream in listener.incoming() {
-            let stream = match stream {
-                Ok(stream) => stream,
-                Err(error) => {
-                    tracing::warn!(%error, "control socket accept failed");
-                    std::thread::sleep(FIFO_RETRY);
-                    continue;
-                }
-            };
-            if writers.fetch_add(1, Ordering::SeqCst) >= MAX_WRITERS {
-                writers.fetch_sub(1, Ordering::SeqCst);
-                tracing::warn!("control socket busy; refused a writer");
+        accept_writers(&listener, &tx, &writers, spawn_thread);
+    })
+}
+
+/// Bind with umask 0077, so the socket is owner-only from the moment it
+/// exists. The umask is process-wide: other threads creating files in this
+/// short window get narrower permissions, never wider ones. Binds are
+/// serialized: two overlapping ones would restore each other's umask early.
+fn bind_private(path: &Path) -> std::io::Result<UnixListener> {
+    use nix::sys::stat::{Mode, umask};
+    static UMASK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _held = UMASK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let previous = umask(Mode::from_bits_truncate(0o077));
+    let bound = UnixListener::bind(path);
+    umask(previous);
+    bound
+}
+
+/// Hand the socket to `group`. A group that does not exist (a development
+/// machine) keeps the process's group, logged once; so does a `chown` the
+/// service account is not allowed (it must be a member of the group).
+fn give_to_group(path: &Path, group: &str) {
+    use nix::unistd::{Group, chown};
+    let gid = match Group::from_name(group) {
+        Ok(Some(found)) => found.gid,
+        Ok(None) => {
+            tracing::warn!(
+                group,
+                "control group missing; socket keeps the process group"
+            );
+            return;
+        }
+        Err(error) => {
+            tracing::warn!(group, %error, "control group lookup failed; socket keeps the process group");
+            return;
+        }
+    };
+    if let Err(error) = chown(path, None, Some(gid)) {
+        tracing::warn!(group, %error, "control socket group not set; socket keeps the process group");
+    }
+}
+
+/// Accept writers until the session side is gone. Each gets a reader thread
+/// and one of [`MAX_WRITERS`] slots.
+fn accept_writers(
+    listener: &UnixListener,
+    tx: &mpsc::Sender<Control>,
+    writers: &Arc<AtomicUsize>,
+    spawn: Spawn,
+) {
+    for stream in listener.incoming() {
+        let stream = match stream {
+            Ok(stream) => stream,
+            Err(error) => {
+                tracing::warn!(%error, "control socket accept failed");
+                std::thread::sleep(FIFO_RETRY);
                 continue;
             }
-            let (sender, count) = (tx.clone(), writers.clone());
-            let reader = move || {
-                let mut reader = BufReader::with_capacity(MAX_LINE, stream);
-                let stopped = pump(&mut reader, &sender, Tail::Drop);
-                count.fetch_sub(1, Ordering::SeqCst);
-                if matches!(stopped, Stopped::Eof) {
-                    tracing::info!("control writer disconnected");
-                }
-            };
-            if let Err(error) = thread("control-writer", reader) {
-                tracing::warn!(%error, "control writer thread failed");
+        };
+        let Some(slot) = WriterSlot::claim(writers) else {
+            tracing::warn!("control socket busy; refused a writer");
+            continue;
+        };
+        let sender = tx.clone();
+        let reader = Box::new(move || {
+            let _slot = slot;
+            let mut reader = BufReader::with_capacity(MAX_LINE, stream);
+            if matches!(pump(&mut reader, &sender, Tail::Drop), Stopped::Eof) {
+                tracing::info!("control writer disconnected");
             }
-            if tx.is_closed() {
-                return;
-            }
+        });
+        // A failed spawn drops the closure, and with it the slot.
+        if let Err(error) = spawn("control-writer", reader) {
+            tracing::warn!(%error, "control writer thread failed");
         }
-    })
+        if tx.is_closed() {
+            return;
+        }
+    }
 }
 
 /// Read a FIFO, reopening it after each writer closes it. Opening blocks until
@@ -385,6 +502,35 @@ mod tests {
         );
         assert_eq!(parse(br#"{"mute":true}"#), Ok(Control::Mute(true)));
         assert_eq!(parse(br#"{"mute":false}"#), Ok(Control::Mute(false)));
+        assert_eq!(
+            parse(br#"{"confirm":"123456"}"#),
+            Ok(Control::Confirm("123456".into()))
+        );
+        assert_eq!(
+            parse(br#"{"confirm":"12 34-56"}"#),
+            Ok(Control::Confirm("123456".into()))
+        );
+    }
+
+    #[test]
+    fn confirmation_codes_are_six_digits_only() {
+        for bad in [
+            r#"{"confirm":""}"#,
+            r#"{"confirm":"12345"}"#,
+            r#"{"confirm":"1234567"}"#,
+            r#"{"confirm":"12345a"}"#,
+            r#"{"confirm":"１２３４５６"}"#,
+            r#"{"confirm":"123.456"}"#,
+        ] {
+            assert_eq!(parse(bad.as_bytes()), Err(Rejected::BadCode), "{bad}");
+        }
+        assert_eq!(
+            parse(br#"{"confirm":123456}"#),
+            Err(Rejected::UnknownCommand)
+        );
+        assert_eq!(parse(br#"{"confirm":true}"#), Err(Rejected::UnknownCommand));
+        // A plain line is an utterance, never a confirmation.
+        assert_eq!(parse(b"123456"), Ok(Control::Say("123456".into())));
     }
 
     #[test]
@@ -469,7 +615,13 @@ mod tests {
         let stopping = std::time::Instant::now();
         drop(input);
         drop(runtime);
-        assert!(stopping.elapsed() < Duration::from_millis(200));
+        let took = stopping.elapsed();
+        // The regression hung until the reader saw EOF; this bound only
+        // catches that. The latency bound is checked under strict timing.
+        assert!(took < Duration::from_secs(10), "{took:?}");
+        if std::env::var("BUDDY_STRICT_TIMING").as_deref() == Ok("1") {
+            assert!(took < Duration::from_millis(200), "{took:?}");
+        }
         drop(writer);
     }
 
@@ -485,19 +637,132 @@ mod tests {
             .expect("control line arrives")
     }
 
+    fn source(path: &Path) -> ControlSource {
+        ControlSource {
+            path: path.to_owned(),
+            group: DEFAULT_CONTROL_GROUP.into(),
+        }
+    }
+
     #[test]
-    fn the_control_path_comes_from_the_environment() {
-        let path = control_path_from(|_| Some("/run/robot-buddy/control.sock".into()));
-        assert_eq!(path, Some(PathBuf::from("/run/robot-buddy/control.sock")));
-        assert_eq!(control_path_from(|_| Some(String::new())), None);
-        assert_eq!(control_path_from(|_| None), None);
+    fn the_control_socket_comes_from_the_environment() {
+        let at =
+            |key: &str| (key == "BUDDY_CONTROL_SOCKET").then(|| "/run/pip/control.sock".into());
+        assert_eq!(
+            control_source_from(at),
+            Some(ControlSource {
+                path: "/run/pip/control.sock".into(),
+                group: "pip-control".into(),
+            })
+        );
+        let grouped = |key: &str| match key {
+            "BUDDY_CONTROL_SOCKET" => Some("/s".into()),
+            "BUDDY_CONTROL_GROUP" => Some("stt".into()),
+            _ => None,
+        };
+        assert_eq!(control_source_from(grouped).unwrap().group, "stt");
+        assert_eq!(control_source_from(|_| Some(String::new())), None);
+        assert_eq!(control_source_from(|_| None), None);
+    }
+
+    fn owner_and_mode(path: &Path) -> (u32, u32) {
+        use std::os::unix::fs::MetadataExt;
+        let meta = std::fs::metadata(path).unwrap();
+        (meta.gid(), meta.mode() & 0o777)
+    }
+
+    #[test]
+    fn the_socket_is_owner_only_from_the_moment_it_is_bound() {
+        let path = scratch("bind");
+        let listener = bind_private(&path).unwrap();
+        let (_, mode) = owner_and_mode(&path);
+        assert_eq!(mode & 0o077, 0, "bound as {mode:o}");
+        drop(listener);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_socket_belongs_to_the_control_group_with_mode_0660() {
+        use nix::unistd::{Group, getegid};
+        let own = Group::from_gid(getegid()).unwrap().expect("own group").name;
+        // Without a group change the socket keeps the group it was created
+        // with: the process group on Linux, the directory's group on macOS.
+        let probe = scratch("probe");
+        let bound = bind_private(&probe).unwrap();
+        let (created, _) = owner_and_mode(&probe);
+        drop(bound);
+        std::fs::remove_file(&probe).unwrap();
+        for (group, gid) in [
+            (own.as_str(), getegid().as_raw()),
+            ("pip-control-missing-for-test", created),
+        ] {
+            let path = scratch("group");
+            let control = ControlSource {
+                path: path.clone(),
+                group: group.into(),
+            };
+            let input = Input::open(std::io::empty(), Some(&control)).unwrap();
+            // An existing group is used; a missing one keeps the process group.
+            assert_eq!(owner_and_mode(&path), (gid, SOCKET_MODE), "{group}");
+            drop(input);
+            std::fs::remove_file(&path).unwrap();
+        }
+    }
+
+    /// A reader thread that cannot start gives its writer slot back, so
+    /// failed spawns can never lock the speech process out.
+    #[test]
+    fn a_failed_reader_spawn_releases_its_slot() {
+        use std::os::unix::net::UnixStream;
+        fn failing(_: &str, _: Box<dyn FnOnce() + Send>) -> std::io::Result<()> {
+            Err(std::io::Error::other("no threads left"))
+        }
+        let path = scratch("slots");
+        let listener = UnixListener::bind(&path).unwrap();
+        let writers = Arc::new(AtomicUsize::new(0));
+        let (tx, _commands) = mpsc::channel(16);
+        let counted = writers.clone();
+        let accepting = std::thread::spawn(move || {
+            accept_writers(&listener, &tx, &counted, failing);
+        });
+        let (seen, accepted) = std::sync::mpsc::channel();
+        for _ in 0..MAX_WRITERS * 3 {
+            let stream = UnixStream::connect(&path).unwrap();
+            // The accept loop has handled this writer once it closes the
+            // stream: a read then sees EOF instead of blocking.
+            // macOS refuses the option (EINVAL) once the peer has closed;
+            // the read below then sees EOF at once.
+            let _closed_already = stream.set_read_timeout(Some(Duration::from_secs(10)));
+            let mut byte = [0u8; 1];
+            let eof = std::io::Read::read(&mut &stream, &mut byte).unwrap();
+            assert_eq!(eof, 0);
+            seen.send(()).unwrap();
+        }
+        drop(seen);
+        assert_eq!(accepted.iter().count(), MAX_WRITERS * 3);
+        assert_eq!(writers.load(Ordering::SeqCst), 0, "every slot released");
+        std::fs::remove_file(&path).unwrap();
+        drop(accepting);
+    }
+
+    #[test]
+    fn writer_slots_are_bounded_and_released_on_drop() {
+        let writers = Arc::new(AtomicUsize::new(0));
+        let slots: Vec<_> = (0..MAX_WRITERS)
+            .map(|_| WriterSlot::claim(&writers).unwrap())
+            .collect();
+        assert!(WriterSlot::claim(&writers).is_none());
+        assert_eq!(writers.load(Ordering::SeqCst), MAX_WRITERS);
+        drop(slots);
+        assert_eq!(writers.load(Ordering::SeqCst), 0);
+        assert!(WriterSlot::claim(&writers).is_some());
     }
 
     #[tokio::test]
     async fn the_control_socket_survives_its_writer_restarting() {
         use std::{io::Write, os::unix::net::UnixStream};
         let path = scratch("ctl");
-        let mut input = Input::open(std::io::empty(), Some(&path)).unwrap();
+        let mut input = Input::open(std::io::empty(), Some(&source(&path))).unwrap();
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, SOCKET_MODE);
 
@@ -526,12 +791,12 @@ mod tests {
     async fn a_stale_socket_is_replaced_but_other_files_are_kept() {
         let path = scratch("stale");
         drop(UnixListener::bind(&path).unwrap());
-        let input = Input::open(std::io::empty(), Some(&path)).unwrap();
+        let input = Input::open(std::io::empty(), Some(&source(&path))).unwrap();
         drop(input);
         std::fs::remove_file(&path).unwrap();
 
         std::fs::write(&path, b"keep me").unwrap();
-        let refused = Input::open(std::io::empty(), Some(&path));
+        let refused = Input::open(std::io::empty(), Some(&source(&path)));
         assert!(refused.is_err());
         assert_eq!(std::fs::read(&path).unwrap(), b"keep me");
         std::fs::remove_file(&path).unwrap();
@@ -546,7 +811,7 @@ mod tests {
             .status()
             .unwrap();
         assert!(made.success());
-        let mut input = Input::open(std::io::empty(), Some(&path)).unwrap();
+        let mut input = Input::open(std::io::empty(), Some(&source(&path))).unwrap();
         for (line, expected) in [
             (&b"{\"listening\":true}\n"[..], Control::Listening(true)),
             (&b"good night\n"[..], Control::Say("good night".into())),

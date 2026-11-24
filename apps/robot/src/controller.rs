@@ -18,13 +18,16 @@
 //!   turns stay silent, and a superseded turn is cancelled.
 //! - An utterance is worth submitting for [`PENDING_TTL`] only. Offline, a
 //!   new utterance is refused at once with the Sorry face, never queued.
+//! - An utterance replaced while its submit was unanswered is cancelled by
+//!   request ID on the next connection, until the server acknowledges it.
+//! - Audio must start within [`FIRST_AUDIO`] of `speech.ready`; a silent
+//!   request is stopped and retried once.
 use crate::{
     audio::{PlaybackEvent, Rewarm, Speaker},
     cache::{Cache, CacheStore, Pending},
-    config::EventDetail,
     face::{self, Face, Mood, Signals},
     input::Control,
-    journal,
+    journal::Journal,
 };
 use robot_buddy::{auth, protocol::OutputEvent};
 use std::{fmt, future::Future, time::Duration};
@@ -42,6 +45,10 @@ const PERSIST_RETRY: Duration = Duration::from_secs(1);
 /// audible) gets this long before the connection is presumed dead: its pushes
 /// have gone quiet, and the 15 s call deadline is too long to look stuck.
 pub const WAITING_REPLAY_DEADLINE: Duration = Duration::from_secs(3);
+/// Once the server has audio (`speech.ready`), the speaker must play it
+/// within this long. A request that stays silent is stopped and the one
+/// retry starts; the server keeps the audio, so a retry streams it again.
+pub const FIRST_AUDIO: Duration = Duration::from_secs(5);
 const TERMINAL: [&str; 4] = [
     "turn.completed",
     "turn.cancelled",
@@ -91,6 +98,9 @@ pub struct Registration {
     pub owned: bool,
     /// A new claim to remember, when one was started.
     pub claim: Option<Claim>,
+    /// An owner signed in and the claim waits for the code on their phone to
+    /// be confirmed at the robot.
+    pub confirming: bool,
 }
 
 /// The actor calls the robot uses. Clones share one connection.
@@ -101,7 +111,16 @@ pub trait Remote: Clone + 'static {
         text: &str,
     ) -> impl Future<Output = Result<Submitted, CallError>>;
     fn cancel(&self, turn_id: &str) -> impl Future<Output = Result<(), CallError>>;
+    /// Cancel whatever turn `request_id` started, or will start: the server
+    /// keeps a tombstone when no turn has it yet.
+    fn cancel_request(&self, request_id: &str) -> impl Future<Output = Result<(), CallError>>;
     fn replay(&self, after: i64) -> impl Future<Output = Result<Vec<OutputEvent>, CallError>>;
+    /// One cheap authenticated conversation call, proving a new connection
+    /// works before it replaces the current one.
+    fn probe(&self) -> impl Future<Output = Result<(), CallError>>;
+    /// Confirm the pending claim with the code the owner spoke. The server
+    /// counts wrong codes and clears the claim after a few.
+    fn confirm(&self, code: &str) -> impl Future<Output = anyhow::Result<()>>;
     /// Check ownership and keep the panel's claim QR current. `shown` is the
     /// claim this robot last displayed.
     fn register(&self, shown: Claim) -> impl Future<Output = anyhow::Result<Registration>>;
@@ -113,6 +132,8 @@ pub trait Remote: Clone + 'static {
 #[derive(Debug)]
 pub enum Op {
     Cancel(String),
+    /// Cancel by the request ID of a replaced utterance.
+    CancelRequest(String),
     Submit(Pending),
     /// One replay page after `after`. `waiting`: under
     /// [`WAITING_REPLAY_DEADLINE`] instead of the call deadline.
@@ -124,6 +145,7 @@ pub enum Op {
 
 pub enum Done {
     Cancelled(String, Result<(), CallError>),
+    CancelledRequest(String, Result<(), CallError>),
     Submitted(Pending, Result<Submitted, CallError>),
     Replayed(Result<Vec<OutputEvent>, CallError>),
 }
@@ -134,6 +156,10 @@ impl Op {
             Self::Cancel(turn) => {
                 let result = remote.cancel(&turn).await;
                 Done::Cancelled(turn, result)
+            }
+            Self::CancelRequest(request) => {
+                let result = remote.cancel_request(&request).await;
+                Done::CancelledRequest(request, result)
             }
             Self::Submit(pending) => {
                 let result = remote.submit(&pending.request_id, &pending.text).await;
@@ -187,6 +213,8 @@ struct Voice {
     /// Audio reached the speaker at least once.
     heard: bool,
     retried: bool,
+    /// The current request must be audible by then (see [`FIRST_AUDIO`]).
+    first_audio_by: Option<Instant>,
 }
 
 struct Out<S> {
@@ -207,7 +235,7 @@ pub struct Controller<'a, S> {
     face: &'a Face,
     store: &'a CacheStore,
     state: &'a mut RobotState,
-    detail: EventDetail,
+    journal: Journal,
     online: bool,
     out: Option<Out<S>>,
     /// A rotated session's speaker, waiting for the current audio to end.
@@ -226,6 +254,11 @@ pub struct Controller<'a, S> {
     pending_born: Option<Instant>,
     /// Request ID of the pending utterance as last written to disk.
     durable: Option<String>,
+    /// Request ID of the pending utterance once a submit for it went out
+    /// (or may have, before a restart): replacing it then needs a cancel.
+    attempted: Option<String>,
+    /// A claim waits for the owner's confirmation code.
+    claiming: bool,
     persist_wanted: bool,
     persist_inflight: bool,
     persist_retry_at: Option<Instant>,
@@ -237,14 +270,14 @@ impl<'a, S: Speaker> Controller<'a, S> {
         face: &'a Face,
         store: &'a CacheStore,
         state: &'a mut RobotState,
-        detail: EventDetail,
+        journal: Journal,
         wall_now: i64,
     ) -> Self {
         let mut controller = Self {
             face,
             store,
             state,
-            detail,
+            journal,
             online: false,
             out: None,
             next_out: None,
@@ -257,6 +290,8 @@ impl<'a, S: Speaker> Controller<'a, S> {
             busy: None,
             pending_born: None,
             durable: None,
+            attempted: None,
+            claiming: false,
             persist_wanted: false,
             persist_inflight: false,
             persist_retry_at: None,
@@ -283,6 +318,8 @@ impl<'a, S: Speaker> Controller<'a, S> {
         let age = Duration::from_secs(u64::try_from(age.max(0)).unwrap_or(0));
         self.pending_born = Some(now.checked_sub(age).unwrap_or(now));
         self.durable = Some(pending.request_id.clone());
+        // It may have been submitted before the restart.
+        self.attempted = Some(pending.request_id.clone());
     }
 
     pub fn cache(&self) -> &Cache {
@@ -314,6 +351,48 @@ impl<'a, S: Speaker> Controller<'a, S> {
         self.cancelling.is_none() && self.main.is_none()
     }
 
+    /// Show (or stop showing) that a claim waits for the owner's code.
+    pub fn set_claiming(&mut self, claiming: bool) {
+        if self.claiming != claiming {
+            self.claiming = claiming;
+            self.refresh();
+        }
+    }
+
+    /// Flash the apology face: a refused confirmation, or one with no claim.
+    pub fn apologize(&self) {
+        self.face.flash(Mood::Sorry, face::SORRY);
+    }
+
+    /// A replay holds the main lane while an utterance is ready to submit.
+    /// The device drops that replay (it reads nothing it cannot read again)
+    /// and calls [`Self::preempt_replay`], so a question never waits behind
+    /// a slow catch-up.
+    pub fn submit_waits_on_replay(&self, owned: bool) -> bool {
+        matches!(self.main, Some(Main::Replay)) && self.submit_ready(owned)
+    }
+
+    /// The replay in flight was dropped; it runs again after the submit.
+    pub fn preempt_replay(&mut self) {
+        if matches!(self.main, Some(Main::Replay)) {
+            self.main = None;
+            self.needs_replay = true;
+        }
+    }
+
+    /// The pending utterance is on disk and nothing it must wait for is left.
+    fn submit_ready(&self, owned: bool) -> bool {
+        let cache = &self.state.cache;
+        let cancelled =
+            self.cancelling.is_none() && cache.cancel.is_none() && cache.cancel_requests.is_empty();
+        owned
+            && cancelled
+            && cache
+                .pending
+                .as_ref()
+                .is_some_and(|p| self.durable.as_ref() == Some(&p.request_id))
+    }
+
     /// Pushed events wait while a submit is in flight, so the new turn's
     /// first events are applied after its acknowledgement.
     pub fn accepts_events(&self) -> bool {
@@ -339,6 +418,8 @@ impl<'a, S: Speaker> Controller<'a, S> {
                     self.stop_speaker(Rewarm::Yes).await;
                 }
             }
+            // Claim confirmations go to the bot actor; the device loop takes them.
+            Control::Confirm(_) => {}
             Control::Say(text) => {
                 self.state.listening = false;
                 self.playing = None;
@@ -365,6 +446,7 @@ impl<'a, S: Speaker> Controller<'a, S> {
     /// intent and `text` (if any) replaces the pending utterance. Wake clears
     /// a pending utterance. The disk write follows through `take_persist`.
     fn interrupt(&mut self, text: Option<String>) {
+        self.abandon_attempt();
         let cache = &mut self.state.cache;
         let mut changed = cache.pending.is_some() || text.is_some();
         if let Some(turn) = cache.active_turn.take() {
@@ -449,9 +531,11 @@ impl<'a, S: Speaker> Controller<'a, S> {
         }
     }
 
-    /// Drop the pending utterance once it is too old to answer. One that is
-    /// being submitted waits for the server's answer instead.
-    pub fn expire(&mut self, now: Instant) {
+    /// Drop the pending utterance once it is too old to answer (one being
+    /// submitted waits for the server's answer instead), and stop a speech
+    /// request that stayed silent past [`FIRST_AUDIO`].
+    pub async fn expire(&mut self, now: Instant) {
+        self.silent_speech(now).await;
         let Some(born) = self.pending_born else {
             return;
         };
@@ -463,16 +547,63 @@ impl<'a, S: Speaker> Controller<'a, S> {
         }
     }
 
+    /// The server has audio but the speaker played none of it in time: stop
+    /// that request, and start the one retry if it is still unused.
+    async fn silent_speech(&mut self, now: Instant) {
+        let Some(voice) = self.voice.as_mut() else {
+            return;
+        };
+        if voice.first_audio_by.is_none_or(|by| now < by) || voice.heard {
+            return;
+        }
+        voice.first_audio_by = None;
+        let retry = !voice.retried;
+        if self.playing.take().is_none() {
+            return;
+        }
+        if retry {
+            tracing::info!("no audio after speech.ready; retrying once");
+            self.stop_speaker(Rewarm::No).await;
+            self.retry_speech();
+        } else {
+            tracing::warn!("no audio after the retry; staying silent");
+            self.stop_speaker(Rewarm::Yes).await;
+        }
+        self.refresh();
+    }
+
     /// The next time [`Self::expire`] or [`Self::take_persist`] has work.
     pub fn deadline(&self) -> Option<Instant> {
         let expiry = self.pending_born.map(|born| born + PENDING_TTL);
         let retry = self
             .persist_retry_at
             .filter(|_| self.persist_wanted && !self.persist_inflight);
-        expiry.into_iter().chain(retry).min()
+        let audio = self.voice.as_ref().and_then(|v| v.first_audio_by);
+        expiry.into_iter().chain(retry).chain(audio).min()
+    }
+
+    /// The pending utterance is being given up. If a submit for it went out
+    /// and its answer is unknown, it may have started a turn: remember its
+    /// request ID until the server confirms the cancellation.
+    fn abandon_attempt(&mut self) {
+        let cache = &mut self.state.cache;
+        if let Some(pending) = &cache.pending
+            && self.attempted.as_ref() == Some(&pending.request_id)
+        {
+            cache.cancel_request(pending.request_id.clone());
+            self.persist_wanted = true;
+            self.persist_retry_at = None;
+        }
+        self.attempted = None;
     }
 
     fn drop_pending(&mut self, reason: &'static str) {
+        // Only expiry gives up an utterance whose submit may be unanswered;
+        // the other reasons are the server's own answers.
+        if reason == "expired" {
+            self.abandon_attempt();
+        }
+        self.attempted = None;
         if self.state.cache.pending.take().is_some() {
             tracing::info!(reason, "utterance dropped");
             self.face.flash(Mood::Sorry, face::SORRY);
@@ -489,9 +620,14 @@ impl<'a, S: Speaker> Controller<'a, S> {
         if !self.online || self.cancelling.is_some() {
             return None;
         }
-        let turn = self.state.cache.cancel.clone()?;
-        self.cancelling = Some(turn.clone());
-        Some(Op::Cancel(turn))
+        let cache = &self.state.cache;
+        if let Some(turn) = cache.cancel.clone() {
+            self.cancelling = Some(turn.clone());
+            return Some(Op::Cancel(turn));
+        }
+        let request = cache.cancel_requests.first()?.clone();
+        self.cancelling = Some(request.clone());
+        Some(Op::CancelRequest(request))
     }
 
     /// The next submit or replay page. A submit waits until the utterance is
@@ -500,16 +636,12 @@ impl<'a, S: Speaker> Controller<'a, S> {
         if !self.online || self.main.is_some() {
             return None;
         }
-        let cancelled = self.cancelling.is_none() && self.state.cache.cancel.is_none();
-        if owned
-            && cancelled
+        if self.submit_ready(owned)
             && let Some(pending) = self.state.cache.pending.clone()
         {
-            let id = &pending.request_id;
-            if self.durable.as_ref() == Some(id) {
-                self.main = Some(Main::Submit(id.clone()));
-                return Some(Op::Submit(pending));
-            }
+            self.main = Some(Main::Submit(pending.request_id.clone()));
+            self.attempted = Some(pending.request_id.clone());
+            return Some(Op::Submit(pending));
         }
         if self.needs_replay {
             self.main = Some(Main::Replay);
@@ -527,6 +659,10 @@ impl<'a, S: Speaker> Controller<'a, S> {
             Done::Cancelled(turn, result) => {
                 self.cancelling = None;
                 self.cancelled(&turn, result)
+            }
+            Done::CancelledRequest(request, result) => {
+                self.cancelling = None;
+                self.cancelled_request(&request, result)
             }
             Done::Submitted(sent, result) => {
                 self.main = None;
@@ -568,11 +704,36 @@ impl<'a, S: Speaker> Controller<'a, S> {
         Ok(())
     }
 
+    /// Old servers refuse the command outright; nothing more can be done.
+    fn cancelled_request(
+        &mut self,
+        request: &str,
+        result: Result<(), CallError>,
+    ) -> Result<(), Lost> {
+        match result {
+            Ok(()) => {}
+            Err(CallError::Rejected(error)) => {
+                tracing::warn!(%error, "request cancel refused; not retrying");
+            }
+            Err(error) => return Err(Lost(format!("request cancel {error}"))),
+        }
+        if self.state.cache.cancelled_request(request) {
+            self.store.checkpoint(&self.state.cache, false);
+        }
+        Ok(())
+    }
+
     fn submitted(
         &mut self,
         sent: &Pending,
         result: Result<Submitted, CallError>,
     ) -> Result<(), Lost> {
+        // A busy or refused submit settles that this request started no turn.
+        if matches!(result, Err(CallError::Busy(_) | CallError::Rejected(_)))
+            && self.state.cache.cancelled_request(&sent.request_id)
+        {
+            self.store.checkpoint(&self.state.cache, false);
+        }
         let current = self
             .state
             .cache
@@ -613,6 +774,7 @@ impl<'a, S: Speaker> Controller<'a, S> {
             cache.pending = None;
             self.pending_born = None;
             self.busy = None;
+            self.attempted = None;
             cache.active_turn = Some(submitted.turn_id.clone());
             if !submitted.duplicate {
                 self.live_turn = Some(submitted.turn_id.clone());
@@ -621,15 +783,22 @@ impl<'a, S: Speaker> Controller<'a, S> {
                     ready: false,
                     heard: false,
                     retried: false,
+                    first_audio_by: None,
                 });
                 // The server waits for the first chunk, so ask for audio now.
                 self.speak(&submitted.turn_id);
             }
         } else {
             // Wake or a newer utterance replaced this one while it was in
-            // flight: its answer must not play.
+            // flight: its answer must not play. Cancelled by turn ID when that
+            // slot is free; otherwise its request ID stays queued instead.
             tracing::info!("superseded turn cancelled");
-            queue_cancel(cache, submitted.turn_id);
+            if cache.cancel.is_none() || cache.cancel.as_ref() == Some(&submitted.turn_id) {
+                cache.cancelled_request(&sent.request_id);
+                queue_cancel(cache, submitted.turn_id);
+            } else {
+                cache.cancel_request(sent.request_id.clone());
+            }
         }
         self.store.checkpoint(&self.state.cache, true);
         Ok(())
@@ -663,7 +832,7 @@ impl<'a, S: Speaker> Controller<'a, S> {
     }
 
     async fn apply(&mut self, event: OutputEvent) {
-        journal::print(&event, self.detail);
+        self.journal.record(&event);
         let kind = event.kind.as_str();
         let terminal = TERMINAL.contains(&kind);
         if kind == "speech.ready"
@@ -671,6 +840,10 @@ impl<'a, S: Speaker> Controller<'a, S> {
             && let Some(voice) = self.voice.as_mut().filter(|v| v.turn == event.turn_id)
         {
             voice.ready = true;
+            // The request already out must now produce audio promptly.
+            if self.playing.as_ref().is_some_and(|p| !p.audible) && !voice.heard {
+                voice.first_audio_by = Some(Instant::now() + FIRST_AUDIO);
+            }
             self.retry_speech();
         }
         if self.live_turn.as_deref() == Some(event.turn_id.as_str()) {
@@ -708,6 +881,9 @@ impl<'a, S: Speaker> Controller<'a, S> {
             voice.retried = true;
             let turn = voice.turn.clone();
             self.speak(&turn);
+            if let Some(voice) = self.voice.as_mut() {
+                voice.first_audio_by = self.playing.as_ref().map(|_| Instant::now() + FIRST_AUDIO);
+            }
         }
     }
 
@@ -730,6 +906,7 @@ impl<'a, S: Speaker> Controller<'a, S> {
                     playing.audible = true;
                     if let Some(voice) = self.voice.as_mut() {
                         voice.heard = true;
+                        voice.first_audio_by = None;
                     }
                 }
             }
@@ -740,8 +917,9 @@ impl<'a, S: Speaker> Controller<'a, S> {
                     .is_some_and(|p| p.generation == generation)
                 {
                     self.playing = None;
-                    if played && let Some(voice) = self.voice.as_mut() {
-                        voice.heard = true;
+                    if let Some(voice) = self.voice.as_mut() {
+                        voice.heard |= played;
+                        voice.first_audio_by = None;
                     }
                     self.adopt_next_speaker();
                     self.retry_speech();
@@ -798,7 +976,12 @@ impl<'a, S: Speaker> Controller<'a, S> {
 
     fn refresh(&self) {
         let speaking = self.playing.as_ref().is_some_and(|p| p.audible);
-        let thinking = self.online && (self.is_live() || self.state.cache.pending.is_some());
+        // A claim waiting for the spoken code reads as Thinking until the
+        // face has a confirmation mood of its own. An unowned robot never
+        // thinks otherwise, and Thinking still shows the apology for a
+        // refused code (Listening would hide it).
+        let thinking =
+            self.online && (self.is_live() || self.state.cache.pending.is_some() || self.claiming);
         // Mute, listening and audio already playing show without a
         // connection; only an otherwise idle robot reads Offline.
         let connected = self.online || self.state.muted || self.state.listening || speaking;
@@ -923,6 +1106,17 @@ pub mod tests {
             self.close(turn_id);
             Ok(())
         }
+        pub fn cancel_request(&self, request_id: &str) -> Result<(), CallError> {
+            self.log.push(format!("cancel_request {request_id}"));
+            if let Some(Err(error)) = self.scripted() {
+                return Err(error);
+            }
+            let turn = self.requests.lock().unwrap().get(request_id).cloned();
+            if let Some(turn) = turn {
+                self.close(&turn);
+            }
+            Ok(())
+        }
         pub fn replay(&self, after: i64) -> Vec<OutputEvent> {
             self.log.push(format!("replay {after}"));
             self.pages.lock().unwrap().pop_front().unwrap_or_default()
@@ -938,13 +1132,23 @@ pub mod tests {
         async fn cancel(&self, turn_id: &str) -> Result<(), CallError> {
             self.0.cancel(turn_id)
         }
+        async fn cancel_request(&self, request_id: &str) -> Result<(), CallError> {
+            self.0.cancel_request(request_id)
+        }
         async fn replay(&self, after: i64) -> Result<Vec<OutputEvent>, CallError> {
             Ok(self.0.replay(after))
+        }
+        async fn probe(&self) -> Result<(), CallError> {
+            Ok(())
+        }
+        async fn confirm(&self, _: &str) -> anyhow::Result<()> {
+            Ok(())
         }
         async fn register(&self, _: Claim) -> anyhow::Result<Registration> {
             Ok(Registration {
                 owned: true,
                 claim: None,
+                confirming: false,
             })
         }
         async fn disconnect(&self) {}
@@ -990,6 +1194,11 @@ pub mod tests {
         )
     }
 
+    /// The real journal writer, writing nowhere.
+    pub fn quiet() -> Journal {
+        Journal::to(crate::config::EventDetail::Compact, std::io::sink()).unwrap()
+    }
+
     pub fn event(sequence: i64, turn: &str, kind: &str) -> OutputEvent {
         OutputEvent {
             sequence,
@@ -1028,7 +1237,7 @@ pub mod tests {
                 &self.face,
                 &self.store,
                 &mut self.state,
-                EventDetail::Compact,
+                quiet(),
                 auth::now(),
             );
             let speaker = FakeSpeaker {
@@ -1329,7 +1538,16 @@ pub mod tests {
             async fn cancel(&self, _: &str) -> Result<(), CallError> {
                 std::future::pending().await
             }
+            async fn cancel_request(&self, _: &str) -> Result<(), CallError> {
+                std::future::pending().await
+            }
             async fn replay(&self, _: i64) -> Result<Vec<OutputEvent>, CallError> {
+                std::future::pending().await
+            }
+            async fn probe(&self) -> Result<(), CallError> {
+                std::future::pending().await
+            }
+            async fn confirm(&self, _: &str) -> anyhow::Result<()> {
                 std::future::pending().await
             }
             async fn register(&self, _: Claim) -> anyhow::Result<Registration> {
@@ -1525,13 +1743,7 @@ pub mod tests {
                 text: "t".into(),
                 created,
             });
-            let c = Controller::<FakeSpeaker>::new(
-                &face,
-                &store,
-                &mut state,
-                EventDetail::Compact,
-                now,
-            );
+            let c = Controller::<FakeSpeaker>::new(&face, &store, &mut state, quiet(), now);
             let left = c.deadline().map(|d| d.duration_since(Instant::now()));
             drop(c);
             assert_eq!(state.cache.pending.is_some(), kept, "created {created}");
@@ -1548,15 +1760,229 @@ pub mod tests {
         let mut c = rig.controller();
         c.control(Control::Say("hello".into())).await;
         let born = Instant::now();
-        c.expire(born + PENDING_TTL - Duration::from_millis(1));
+        c.expire(born + PENDING_TTL - Duration::from_millis(1))
+            .await;
         assert!(c.cache().pending.is_some());
         assert_eq!(c.deadline(), Some(born + PENDING_TTL));
-        c.expire(born + PENDING_TTL);
+        c.expire(born + PENDING_TTL).await;
         assert!(c.cache().pending.is_none());
         assert_eq!(shown.flashing(), Some(Mood::Sorry));
         assert!(
             c.take_persist(Instant::now()).is_some(),
             "the drop is written"
         );
+    }
+
+    /// The C1 order: the submit goes out, "Hey Pip" replaces the utterance,
+    /// the connection drops before any answer, and the robot reconnects with
+    /// nothing new to say. The unanswered request is cancelled by its ID on
+    /// the new connection, persisted until then, and nothing is resubmitted.
+    #[tokio::test]
+    async fn an_unanswered_submit_replaced_by_wake_is_cancelled_by_request_after_reconnect() {
+        let mut rig = Rig::new();
+        let remote = rig.server.clone();
+        let request = {
+            let mut c = rig.controller();
+            c.control(Control::Say("first".into())).await;
+            let write = c.take_persist(Instant::now()).unwrap();
+            c.persisted(write.await, Instant::now());
+            let Some(Op::Submit(sent)) = c.next_main(true) else {
+                panic!("submit expected");
+            };
+            // The submit reaches the server; its answer never comes back.
+            let _ = remote.0.submit(&sent.request_id, &sent.text);
+            c.control(Control::Wake).await;
+            assert_eq!(c.cache().cancel_requests, vec![sent.request_id.clone()]);
+            assert!(c.cache().pending.is_none());
+            // The intent is written before the connection is given up.
+            let write = c.take_persist(Instant::now()).unwrap();
+            c.persisted(write.await, Instant::now());
+            c.go_offline().await;
+            sent.request_id
+        };
+        assert_eq!(rig.state.cache.cancel_requests, vec![request.clone()]);
+        let mut c = rig.controller();
+        drive(&mut c, &remote).await.unwrap();
+        assert!(c.cache().cancel_requests.is_empty(), "acknowledged");
+        drop(c);
+        let log = &rig.log;
+        let submit = log.position(&format!("submit first {request}"));
+        let cancel = log.position(&format!("cancel_request {request}"));
+        assert!(submit < cancel, "{:?}", log.entries());
+        assert_eq!(log.count("submit"), 1, "nothing resubmitted");
+        assert_eq!(log.count("cancel_request"), 1);
+        assert_eq!(log.count("start"), 0, "nothing spoken");
+        assert!(
+            rig.server.0.turns.lock().unwrap().iter().all(|t| !t.1),
+            "the turn it started is closed"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_request_cancel_an_old_server_refuses_is_dropped() {
+        let mut rig = Rig::new();
+        rig.state.cache.cancel_requests = vec!["r1".into()];
+        rig.server
+            .0
+            .replies
+            .lock()
+            .unwrap()
+            .push_back(Err(CallError::Rejected("unknown variant".into())));
+        let remote = rig.server.clone();
+        let mut c = rig.controller();
+        drive(&mut c, &remote).await.unwrap();
+        assert!(c.cache().cancel_requests.is_empty());
+        drop(c);
+        assert_eq!(rig.log.count("cancel_request r1"), 1);
+    }
+
+    #[tokio::test]
+    async fn a_submit_waits_for_request_cancels_and_never_queues_unsent_ones() {
+        let mut rig = Rig::new();
+        let remote = rig.server.clone();
+        let mut c = rig.controller();
+        // Replaced before its submit went out: nothing to cancel.
+        c.control(Control::Say("unsent".into())).await;
+        c.control(Control::Say("sent".into())).await;
+        assert!(c.cache().cancel_requests.is_empty());
+        drive(&mut c, &remote).await.unwrap();
+        drop(c);
+        assert_eq!(rig.log.count("cancel_request"), 0);
+        assert_eq!(rig.log.count("submit sent"), 1);
+        // A queued request cancel goes out before the next submit.
+        let mut rig = Rig::new();
+        rig.state.cache.cancel_requests = vec!["old".into()];
+        let remote = rig.server.clone();
+        let mut c = rig.controller();
+        c.control(Control::Say("next".into())).await;
+        drive(&mut c, &remote).await.unwrap();
+        drop(c);
+        assert!(rig.log.position("cancel_request old") < rig.log.position("submit next"));
+    }
+
+    #[tokio::test]
+    async fn an_answered_replaced_submit_is_cancelled_by_turn_not_by_request() {
+        let mut rig = Rig::new();
+        let remote = rig.server.clone();
+        let mut c = rig.controller();
+        c.control(Control::Say("first".into())).await;
+        let write = c.take_persist(Instant::now()).unwrap();
+        c.persisted(write.await, Instant::now());
+        let submit = c.next_main(true).unwrap();
+        c.control(Control::Wake).await;
+        assert_eq!(c.cache().cancel_requests.len(), 1, "unknown until answered");
+        let done = submit.run(remote.clone()).await;
+        c.finish(done).await.unwrap();
+        assert!(
+            c.cache().cancel_requests.is_empty(),
+            "the answer settles it"
+        );
+        drive(&mut c, &remote).await.unwrap();
+        drop(c);
+        assert_eq!(rig.log.count("cancel turn-first"), 1);
+        assert_eq!(rig.log.count("cancel_request"), 0);
+    }
+
+    /// `speech.ready` arrived but the speaker stays silent: after
+    /// [`FIRST_AUDIO`] the request is stopped and retried once, then the
+    /// robot gives up quietly.
+    #[tokio::test(start_paused = true)]
+    async fn silent_speech_after_ready_is_retried_once_at_the_deadline() {
+        let mut rig = Rig::new();
+        let log = rig.log.clone();
+        let remote = rig.server.clone();
+        let mut c = rig.controller();
+        c.control(Control::Say("hi".into())).await;
+        drive(&mut c, &remote).await.unwrap();
+        assert_eq!(starts(&log, "turn-hi"), 1);
+        assert_eq!(
+            c.deadline(),
+            None,
+            "no deadline before the server has audio"
+        );
+        c.pushed(event(1, "turn-hi", "speech.ready")).await;
+        let ready = Instant::now();
+        assert_eq!(c.deadline(), Some(ready + FIRST_AUDIO));
+        c.expire(ready + FIRST_AUDIO - Duration::from_millis(1))
+            .await;
+        assert_eq!(starts(&log, "turn-hi"), 1, "still within the deadline");
+        let stops = log.count("stop");
+        c.expire(ready + FIRST_AUDIO).await;
+        assert!(log.count("stop") > stops, "the silent request is stopped");
+        assert_eq!(starts(&log, "turn-hi"), 2, "and retried");
+        // The stopped request ending later changes nothing.
+        c.playback(PlaybackEvent::Finished {
+            generation: 1,
+            played: false,
+        });
+        assert!(c.playing.is_some());
+        let retried = c.deadline().unwrap();
+        c.expire(retried).await;
+        assert!(c.playing.is_none(), "gives up after one retry");
+        assert_eq!(c.deadline(), None);
+        drop(c);
+        assert_eq!(starts(&log, "turn-hi"), 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn audible_speech_clears_the_first_audio_deadline() {
+        let mut rig = Rig::new();
+        let log = rig.log.clone();
+        let remote = rig.server.clone();
+        let mut c = rig.controller();
+        c.control(Control::Say("hi".into())).await;
+        drive(&mut c, &remote).await.unwrap();
+        c.pushed(event(1, "turn-hi", "speech.ready")).await;
+        c.playback(PlaybackEvent::Started { generation: 1 });
+        assert_eq!(c.deadline(), None);
+        c.expire(Instant::now() + FIRST_AUDIO * 2).await;
+        drop(c);
+        assert_eq!(starts(&log, "turn-hi"), 1);
+    }
+
+    #[tokio::test]
+    async fn a_ready_submit_preempts_a_replay_in_flight() {
+        let mut rig = Rig::new();
+        let mut c = rig.controller();
+        c.needs_replay = true;
+        assert!(matches!(c.next_main(true), Some(Op::Replay { .. })));
+        assert!(!c.submit_waits_on_replay(true), "nothing to submit");
+        c.control(Control::Say("now".into())).await;
+        assert!(!c.submit_waits_on_replay(true), "not on disk yet");
+        let write = c.take_persist(Instant::now()).unwrap();
+        c.persisted(write.await, Instant::now());
+        assert!(!c.submit_waits_on_replay(false), "not owned");
+        assert!(c.submit_waits_on_replay(true));
+        c.preempt_replay();
+        assert!(c.needs_replay, "the replay runs again afterwards");
+        assert!(matches!(c.next_main(true), Some(Op::Submit(p)) if p.text == "now"));
+    }
+
+    /// The journal's reader stops (journald or a terminal paused): event
+    /// lines are dropped and counted, and "Hey Pip" still stops the speaker.
+    #[tokio::test]
+    async fn wake_never_waits_on_a_paused_journal_reader() {
+        let (reader, writer) = std::io::pipe().unwrap();
+        let journal = Journal::to(crate::config::EventDetail::Full, writer).unwrap();
+        let mut rig = Rig::new();
+        let log = rig.log.clone();
+        let mut c = Controller::new(&rig.face, &rig.store, &mut rig.state, journal, auth::now());
+        let speaker = FakeSpeaker {
+            log: log.clone(),
+            generation: 0,
+        };
+        c.go_online(speaker, mpsc::channel(1).1);
+        let mut big = event(0, "t", "text.delta");
+        big.payload = json!({ "delta": "x".repeat(4096) });
+        // Far more than the pipe buffer and the journal queue together hold.
+        for sequence in 1..=1_000 {
+            big.sequence = sequence;
+            c.pushed(big.clone()).await;
+        }
+        c.control(Control::Wake).await;
+        assert_eq!(c.face.steady(), Mood::Listening);
+        assert_eq!(log.count("stop"), 1);
+        drop(c);
+        drop(reader);
     }
 }
