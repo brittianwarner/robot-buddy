@@ -1758,8 +1758,7 @@ fn check_hits(state: &Value) -> Result<()> {
     let ids = |query: &str| -> Vec<i64> {
         hits[query]
             .as_array()
-            .map(|a| a.iter().filter_map(turn_number).collect())
-            .unwrap_or_default()
+            .map_or_default(|a| a.iter().filter_map(turn_number).collect())
     };
     ensure!(
         ids("marker123") == [123],

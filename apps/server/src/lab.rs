@@ -149,8 +149,7 @@ fn check(app: &App, mutation: bool, headers: &HeaderMap) -> Web<Current> {
         origin(app, headers)?;
         let supplied = headers
             .get("x-buddy-csrf")
-            .map(HeaderValue::as_bytes)
-            .unwrap_or_default();
+            .map_or_default(HeaderValue::as_bytes);
         require(
             auth::ct_eq(supplied, session.csrf.as_bytes()),
             Kind::Forbidden,
