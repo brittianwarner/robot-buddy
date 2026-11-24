@@ -290,8 +290,8 @@ fn loop_timing_tracks_p95_and_missed_20ms_deadlines_across_windows() {
     assert_eq!(timing.flush(end), None);
 }
 
-#[test]
-fn run_emits_missed_deadline_warning_when_bus_exceeds_20ms_period() {
+mod deadline_log {
+    use super::*;
     use std::collections::BTreeMap;
     use tracing::field::{Field, Visit};
     use tracing_subscriber::prelude::*;
@@ -354,51 +354,54 @@ fn run_emits_missed_deadline_warning_when_bus_exceeds_20ms_period() {
         }
     }
 
-    let events = Arc::new(Mutex::new(Vec::new()));
-    let subscriber = tracing_subscriber::registry().with(Capture(events.clone()));
-    let mock = Rc::new(RefCell::new(Mock::new()));
-    let stop = Arc::new(AtomicBool::new(false));
-    let mut drive = Drive {
-        bus: SlowBus {
-            inner: mock,
-            stop: stop.clone(),
-            delay_once: false,
-        },
-        joints: fixture(),
-    };
-    let start = drive.arm().unwrap();
-    // Arm the slow tick only after `arm()` finishes its initial hold-pose write.
-    drive.bus.delay_once = true;
-    let input = MotionInput::default();
-    tracing::subscriber::with_default(subscriber, || {
-        run(&mut drive, &input, &stop, start).unwrap();
-    });
-    let recorded = events.lock().unwrap();
-    let (level, fields) = recorded
-        .iter()
-        .find(|(_, f)| {
-            f.get("message").map(String::as_str) == Some("neck loop missed 20ms deadline")
-        })
-        .expect("expected missed deadline timing event");
-    assert_eq!(*level, tracing::Level::WARN);
-    assert_eq!(fields.get("period_ms").map(String::as_str), Some("20"));
-    assert_eq!(fields.get("missed").map(String::as_str), Some("1"));
-    assert_eq!(fields.get("total_missed").map(String::as_str), Some("1"));
-    assert!(
-        fields
-            .get("skipped_slots")
-            .and_then(|v| v.parse::<u64>().ok())
-            .is_some_and(|v| v >= 1),
-        "expected >=1 skipped 20ms slot: {fields:?}"
-    );
-    assert_eq!(fields.get("ticks").map(String::as_str), Some("1"));
-    assert!(
-        fields
-            .get("max_overrun_us")
-            .and_then(|v| v.parse::<u32>().ok())
-            .is_some_and(|v| v >= 4_000),
-        "expected >=4ms overrun: {fields:?}"
-    );
+    #[test]
+    fn run_emits_missed_deadline_warning_when_bus_exceeds_20ms_period() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let subscriber = tracing_subscriber::registry().with(Capture(events.clone()));
+        let mock = Rc::new(RefCell::new(Mock::new()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut drive = Drive {
+            bus: SlowBus {
+                inner: mock,
+                stop: stop.clone(),
+                delay_once: false,
+            },
+            joints: fixture(),
+        };
+        let start = drive.arm().unwrap();
+        // Arm the slow tick only after `arm()` finishes its initial hold-pose write.
+        drive.bus.delay_once = true;
+        let input = MotionInput::default();
+        tracing::subscriber::with_default(subscriber, || {
+            run(&mut drive, &input, &stop, start).unwrap();
+        });
+        let recorded = events.lock().unwrap();
+        let (level, fields) = recorded
+            .iter()
+            .find(|(_, f)| {
+                f.get("message").map(String::as_str) == Some("neck loop missed 20ms deadline")
+            })
+            .expect("expected missed deadline timing event");
+        assert_eq!(*level, tracing::Level::WARN);
+        assert_eq!(fields.get("period_ms").map(String::as_str), Some("20"));
+        assert_eq!(fields.get("missed").map(String::as_str), Some("1"));
+        assert_eq!(fields.get("total_missed").map(String::as_str), Some("1"));
+        assert!(
+            fields
+                .get("skipped_slots")
+                .and_then(|v| v.parse::<u64>().ok())
+                .is_some_and(|v| v >= 1),
+            "expected >=1 skipped 20ms slot: {fields:?}"
+        );
+        assert_eq!(fields.get("ticks").map(String::as_str), Some("1"));
+        assert!(
+            fields
+                .get("max_overrun_us")
+                .and_then(|v| v.parse::<u32>().ok())
+                .is_some_and(|v| v >= 4_000),
+            "expected >=4ms overrun: {fields:?}"
+        );
+    }
 }
 
 #[test]

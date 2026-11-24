@@ -763,22 +763,28 @@ mod tests {
     }
     impl Opener for Memory {
         type Sink = MemorySink;
-        async fn open(&mut self) -> io::Result<MemorySink> {
+        fn open(&mut self) -> impl Future<Output = io::Result<MemorySink>> {
             if self.fail_opens > 0 {
                 self.fail_opens -= 1;
-                return Err(io::Error::new(io::ErrorKind::NotFound, "unplugged"));
+                return std::future::ready(Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "unplugged",
+                )));
             }
-            Ok(MemorySink {
+            std::future::ready(Ok(MemorySink {
                 log: self.log.clone(),
                 fail_writes: std::mem::take(&mut self.fail_writes),
-            })
+            }))
         }
     }
     impl LineSink for MemorySink {
-        async fn write_frame(&mut self, frame: &[u8]) -> io::Result<()> {
+        fn write_frame(&mut self, frame: &[u8]) -> impl Future<Output = io::Result<()>> {
             if self.fail_writes > 0 {
                 self.fail_writes -= 1;
-                return Err(io::Error::new(io::ErrorKind::BrokenPipe, "re-enumerated"));
+                return std::future::ready(Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "re-enumerated",
+                )));
             }
             let now = Instant::now();
             let text = String::from_utf8(frame.to_vec()).unwrap();
@@ -786,7 +792,7 @@ mod tests {
             for line in text.split_inclusive('\n') {
                 log.push((now, line.to_owned()));
             }
-            Ok(())
+            std::future::ready(Ok(()))
         }
     }
 
@@ -950,20 +956,20 @@ mod tests {
     async fn a_failure_clearing_the_eyes_does_not_restart_the_link_on_shutdown() {
         struct ShutdownPort(mpsc::UnboundedSender<()>);
         impl LineSink for ShutdownPort {
-            async fn write_frame(&mut self, frame: &[u8]) -> io::Result<()> {
+            fn write_frame(&mut self, frame: &[u8]) -> impl Future<Output = io::Result<()>> {
                 self.0.send(()).unwrap();
-                if frame.starts_with(b"{\"qr\":[]}") {
+                std::future::ready(if frame.starts_with(b"{\"qr\":[]}") {
                     Err(io::ErrorKind::BrokenPipe.into())
                 } else {
                     Ok(())
-                }
+                })
             }
         }
         struct Open(mpsc::UnboundedSender<()>);
         impl Opener for Open {
             type Sink = ShutdownPort;
-            async fn open(&mut self) -> io::Result<Self::Sink> {
-                Ok(ShutdownPort(self.0.clone()))
+            fn open(&mut self) -> impl Future<Output = io::Result<Self::Sink>> {
+                std::future::ready(Ok(ShutdownPort(self.0.clone())))
             }
         }
         let (tx, mut sent) = mpsc::unbounded_channel();
@@ -987,9 +993,9 @@ mod tests {
             fn has_board(&self) -> bool {
                 true
             }
-            async fn write_frame(&mut self, b: &[u8]) -> io::Result<()> {
+            fn write_frame(&mut self, b: &[u8]) -> impl Future<Output = io::Result<()>> {
                 self.frames.send(b.to_vec()).unwrap();
-                Ok(())
+                std::future::ready(Ok(()))
             }
             async fn read_status(&mut self, b: &mut [u8]) -> io::Result<usize> {
                 let data = self.status.recv().await.unwrap();
