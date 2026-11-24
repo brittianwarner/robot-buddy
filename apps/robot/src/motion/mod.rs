@@ -27,8 +27,10 @@ const TIMING_SAMPLE_CAP: usize = 256;
 struct TimingReport {
     ticks: u64,
     missed: u64,
+    skipped_slots: u64,
     total_ticks: u64,
     total_missed: u64,
+    total_skipped_slots: u64,
     p95_cycle_us: u32,
     max_cycle_us: u32,
     max_work_us: u32,
@@ -44,12 +46,14 @@ struct LoopTiming {
     window_start: Instant,
     window_ticks: u64,
     window_missed: u64,
+    window_skipped_slots: u64,
     max_cycle_us: u32,
     max_work_us: u32,
     max_overrun_us: u32,
     samples_us: Vec<u32>,
     total_ticks: u64,
     total_missed: u64,
+    total_skipped_slots: u64,
 }
 
 impl LoopTiming {
@@ -58,12 +62,14 @@ impl LoopTiming {
             window_start: now,
             window_ticks: 0,
             window_missed: 0,
+            window_skipped_slots: 0,
             max_cycle_us: 0,
             max_work_us: 0,
             max_overrun_us: 0,
             samples_us: Vec::with_capacity(TIMING_SAMPLE_CAP),
             total_ticks: 0,
             total_missed: 0,
+            total_skipped_slots: 0,
         }
     }
 
@@ -73,10 +79,18 @@ impl LoopTiming {
         started: Instant,
         finished: Instant,
     ) -> Option<TimingReport> {
-        let cycle_us = duration_us(finished.saturating_duration_since(scheduled));
+        let elapsed = finished.saturating_duration_since(scheduled);
+        let cycle_us = duration_us(elapsed);
         let work_us = duration_us(finished.saturating_duration_since(started));
         let next_deadline = scheduled + PERIOD;
         let missed = finished >= next_deadline;
+        let skipped = if missed {
+            u64::try_from(elapsed.as_nanos() / PERIOD.as_nanos())
+                .unwrap_or(u64::MAX)
+                .max(1)
+        } else {
+            0
+        };
         let overrun_us = if missed {
             duration_us(finished.saturating_duration_since(next_deadline))
         } else {
@@ -87,6 +101,8 @@ impl LoopTiming {
         if missed {
             self.window_missed = self.window_missed.saturating_add(1);
             self.total_missed = self.total_missed.saturating_add(1);
+            self.window_skipped_slots = self.window_skipped_slots.saturating_add(skipped);
+            self.total_skipped_slots = self.total_skipped_slots.saturating_add(skipped);
         }
         self.max_cycle_us = self.max_cycle_us.max(cycle_us);
         self.max_work_us = self.max_work_us.max(work_us);
@@ -115,8 +131,10 @@ impl LoopTiming {
         let report = TimingReport {
             ticks: self.window_ticks,
             missed: self.window_missed,
+            skipped_slots: self.window_skipped_slots,
             total_ticks: self.total_ticks,
             total_missed: self.total_missed,
+            total_skipped_slots: self.total_skipped_slots,
             p95_cycle_us,
             max_cycle_us: self.max_cycle_us,
             max_work_us: self.max_work_us,
@@ -125,6 +143,7 @@ impl LoopTiming {
         self.window_start = now;
         self.window_ticks = 0;
         self.window_missed = 0;
+        self.window_skipped_slots = 0;
         self.max_cycle_us = 0;
         self.max_work_us = 0;
         self.max_overrun_us = 0;
@@ -140,8 +159,10 @@ fn emit_timing(report: TimingReport) {
             period_ms,
             ticks = report.ticks,
             missed = report.missed,
+            skipped_slots = report.skipped_slots,
             total_ticks = report.total_ticks,
             total_missed = report.total_missed,
+            total_skipped_slots = report.total_skipped_slots,
             p95_cycle_us = report.p95_cycle_us,
             max_cycle_us = report.max_cycle_us,
             max_work_us = report.max_work_us,
@@ -153,8 +174,10 @@ fn emit_timing(report: TimingReport) {
             period_ms,
             ticks = report.ticks,
             missed = 0u64,
+            skipped_slots = 0u64,
             total_ticks = report.total_ticks,
             total_missed = report.total_missed,
+            total_skipped_slots = report.total_skipped_slots,
             p95_cycle_us = report.p95_cycle_us,
             max_cycle_us = report.max_cycle_us,
             max_work_us = report.max_work_us,

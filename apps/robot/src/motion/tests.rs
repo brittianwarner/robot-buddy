@@ -233,8 +233,10 @@ fn loop_timing_tracks_p95_and_missed_20ms_deadlines_across_windows() {
         TimingReport {
             ticks: 20,
             missed: 0,
+            skipped_slots: 0,
             total_ticks: 20,
             total_missed: 0,
+            total_skipped_slots: 0,
             p95_cycle_us: 19_000,
             max_cycle_us: 19_500,
             max_work_us: 19_300,
@@ -242,8 +244,9 @@ fn loop_timing_tracks_p95_and_missed_20ms_deadlines_across_windows() {
         }
     );
 
-    // Second window: one exact-boundary miss (20 ms) and one 7 ms overrun,
-    // plus a tick past TIMING_REPORT_INTERVAL that triggers automatic emission.
+    // Second window: one exact-boundary miss (20 ms -> 1 late cycle, 1 skipped slot) and
+    // one multi-slot stall (55 ms -> 1 late cycle, 2 skipped 20 ms slots, 35 ms overrun),
+    // plus an on-time tick past TIMING_REPORT_INTERVAL that triggers automatic emission.
     let w2 = origin + Duration::from_millis(400);
     assert_eq!(
         timing.record(
@@ -257,7 +260,7 @@ fn loop_timing_tracks_p95_and_missed_20ms_deadlines_across_windows() {
         timing.record(
             w2 + PERIOD,
             w2 + PERIOD + Duration::from_millis(2),
-            w2 + PERIOD + Duration::from_millis(27),
+            w2 + PERIOD + Duration::from_millis(55),
         ),
         None
     );
@@ -274,12 +277,14 @@ fn loop_timing_tracks_p95_and_missed_20ms_deadlines_across_windows() {
         TimingReport {
             ticks: 3,
             missed: 2,
+            skipped_slots: 3,
             total_ticks: 23,
             total_missed: 2,
-            p95_cycle_us: 27_000,
-            max_cycle_us: 27_000,
-            max_work_us: 25_000,
-            max_overrun_us: 7_000,
+            total_skipped_slots: 3,
+            p95_cycle_us: 55_000,
+            max_cycle_us: 55_000,
+            max_work_us: 53_000,
+            max_overrun_us: 35_000,
         }
     );
     assert_eq!(timing.flush(end), None);
@@ -379,6 +384,13 @@ fn run_emits_missed_deadline_warning_when_bus_exceeds_20ms_period() {
     assert_eq!(fields.get("period_ms").map(String::as_str), Some("20"));
     assert_eq!(fields.get("missed").map(String::as_str), Some("1"));
     assert_eq!(fields.get("total_missed").map(String::as_str), Some("1"));
+    assert!(
+        fields
+            .get("skipped_slots")
+            .and_then(|v| v.parse::<u64>().ok())
+            .is_some_and(|v| v >= 1),
+        "expected >=1 skipped 20ms slot: {fields:?}"
+    );
     assert_eq!(fields.get("ticks").map(String::as_str), Some("1"));
     assert!(
         fields
