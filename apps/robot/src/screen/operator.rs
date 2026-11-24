@@ -224,6 +224,11 @@ async fn protect(State(c): State<Console>, mut request: Request, next: Next) -> 
 #[derive(Clone)]
 struct Epoch(String);
 
+enum RunError {
+    Status(StatusCode),
+    Hardware(anyhow::Error),
+}
+
 impl Console {
     async fn active(&self, epoch: &Epoch) -> bool {
         self.screen.panel.read().await.operator_epoch.as_ref() == Some(&epoch.0)
@@ -231,33 +236,44 @@ impl Console {
 
     /// Limit even disconnected callers: permits live with the synchronous
     /// adapter work. Check the epoch at dispatch, not just at HTTP admission.
-    async fn run<T: Send + 'static>(
+    async fn run_raw<T: Send + 'static>(
         &self,
         epoch: &Epoch,
         f: impl FnOnce(&dyn Hardware) -> Result<T> + Send + 'static,
-    ) -> Result<T, StatusCode> {
+    ) -> Result<T, RunError> {
         let slot = self
             .work
             .clone()
             .try_acquire_owned()
-            .map_err(|_| StatusCode::TOO_MANY_REQUESTS)?;
+            .map_err(|_| RunError::Status(StatusCode::TOO_MANY_REQUESTS))?;
         let screen = self.screen.clone();
         let epoch = epoch.clone();
         tokio::task::spawn_blocking(move || {
             let _slot = slot;
             let panel = screen.panel.blocking_read();
             if panel.operator_epoch.as_ref() != Some(&epoch.0) {
-                return Err(StatusCode::FORBIDDEN);
+                return Err(RunError::Status(StatusCode::FORBIDDEN));
             }
             let hardware = screen
                 .hardware
                 .as_deref()
-                .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+                .ok_or(RunError::Status(StatusCode::SERVICE_UNAVAILABLE))?;
             drop(panel);
-            f(hardware).map_err(|_| StatusCode::SERVICE_UNAVAILABLE)
+            f(hardware).map_err(RunError::Hardware)
         })
         .await
-        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?
+        .map_err(|_| RunError::Status(StatusCode::SERVICE_UNAVAILABLE))?
+    }
+
+    async fn run<T: Send + 'static>(
+        &self,
+        epoch: &Epoch,
+        f: impl FnOnce(&dyn Hardware) -> Result<T> + Send + 'static,
+    ) -> Result<T, StatusCode> {
+        self.run_raw(epoch, f).await.map_err(|err| match err {
+            RunError::Status(status) => status,
+            RunError::Hardware(_) => StatusCode::SERVICE_UNAVAILABLE,
+        })
     }
 }
 
@@ -397,6 +413,41 @@ impl CommandForm {
     }
 }
 
+/// Map only known static enrollment failures from `vision::Panel::enroll` and
+/// `vision::gallery::Gallery::add`. Wrapped or unknown errors stay generic so
+/// filesystem paths, `OpenCV` details and other internal state never leave the
+/// process.
+fn enroll_error(error: &anyhow::Error) -> (StatusCode, &'static str) {
+    if error.source().is_some() {
+        return (StatusCode::SERVICE_UNAVAILABLE, "Control unavailable.");
+    }
+    match error.to_string().as_str() {
+        "vision is offline" => (StatusCode::SERVICE_UNAVAILABLE, "Vision is offline."),
+        "recognition is off" => (StatusCode::SERVICE_UNAVAILABLE, "Recognition is off."),
+        "no fresh camera frame" => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "No fresh camera frame available.",
+        ),
+        "show exactly one face at least 40 pixels across" => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Show exactly one face at least 40 pixels across.",
+        ),
+        "enrollment frame expired" => {
+            (StatusCode::CONFLICT, "Enrollment frame expired; try again.")
+        }
+        "no usable face feature" => (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "No usable face feature detected; try again.",
+        ),
+        "gallery full" => (StatusCode::CONFLICT, "Recognition gallery is full."),
+        "person already has eight samples" => (
+            StatusCode::CONFLICT,
+            "Person already has the maximum eight samples.",
+        ),
+        _ => (StatusCode::SERVICE_UNAVAILABLE, "Control unavailable."),
+    }
+}
+
 async fn control(
     State(c): State<Console>,
     axum::Extension(epoch): axum::Extension<Epoch>,
@@ -408,9 +459,14 @@ async fn control(
     let Some(cmd) = form.command() else {
         return StatusCode::BAD_REQUEST.into_response();
     };
-    match c.run(&epoch, move |h| h.control(cmd)).await {
+    let is_enroll = matches!(cmd, Control::Enroll(_));
+    match c.run_raw(&epoch, move |h| h.control(cmd)).await {
         Ok(()) => Redirect::to("/").into_response(),
-        Err(status) => (status, "Control unavailable.").into_response(),
+        Err(RunError::Status(status)) => (status, "Control unavailable.").into_response(),
+        Err(RunError::Hardware(error)) if is_enroll => enroll_error(&error).into_response(),
+        Err(RunError::Hardware(_)) => {
+            (StatusCode::SERVICE_UNAVAILABLE, "Control unavailable.").into_response()
+        }
     }
 }
 
@@ -435,25 +491,44 @@ async fn camera(
     let Ok(slot) = c.viewers.clone().try_acquire_owned() else {
         return StatusCode::TOO_MANY_REQUESTS.into_response();
     };
-    let feed = stream::unfold((c, epoch, slot), |state| async move {
-        loop {
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            let (c, epoch, _) = &state;
-            let jpeg = c.run(epoch, Hardware::jpeg).await.ok()?;
-            if !c.active(epoch).await {
-                return None;
-            }
-            if let Some(jpeg) = jpeg {
-                let part = jpeg_part(&jpeg)?;
-                return Some((Ok::<_, Infallible>(part), state));
-            }
+    let first = match c.run(&epoch, Hardware::jpeg).await {
+        Ok(Some(jpeg)) => jpeg_part(&jpeg),
+        Ok(None) => None,
+        Err(StatusCode::SERVICE_UNAVAILABLE) => {
+            return (StatusCode::SERVICE_UNAVAILABLE, "Camera unavailable.").into_response();
         }
+        Err(status) => return status.into_response(),
+    };
+    if !c.active(&epoch).await {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let Some(first) = first else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "Camera unavailable.").into_response();
+    };
+    let feed = stream::unfold((c, epoch, slot, Some(first)), |mut state| async move {
+        if let Some(part) = state.3.take() {
+            return Some((Ok::<_, Infallible>(part), state));
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let (c, epoch, _, _) = &state;
+        if !c.active(epoch).await {
+            return None;
+        }
+        let jpeg = c.run(epoch, Hardware::jpeg).await.ok()??;
+        if !c.active(epoch).await {
+            return None;
+        }
+        let part = jpeg_part(&jpeg)?;
+        Some((Ok::<_, Infallible>(part), state))
     });
     (
-        [(
-            header::CONTENT_TYPE,
-            "multipart/x-mixed-replace; boundary=buddy-frame",
-        )],
+        [
+            (
+                header::CONTENT_TYPE,
+                "multipart/x-mixed-replace; boundary=buddy-frame",
+            ),
+            (header::CONNECTION, "close"),
+        ],
         Body::from_stream(feed),
     )
         .into_response()
@@ -506,16 +581,41 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tracing_subscriber::prelude::*;
 
-    #[derive(Default)]
+    enum FrameReply {
+        Valid,
+        Offline,
+        Invalid,
+        Error(&'static str),
+    }
+
     struct Mock {
         actions: Mutex<Vec<Control>>,
         recognized: Mutex<Option<String>>,
         seen: Mutex<Vec<Option<(String, String)>>>,
         jpeg_reads: AtomicUsize,
+        frame: Mutex<FrameReply>,
+        control_error: Mutex<Option<Box<dyn Fn() -> anyhow::Error + Send + Sync>>>,
     }
+
+    impl Default for Mock {
+        fn default() -> Self {
+            Self {
+                actions: Mutex::default(),
+                recognized: Mutex::default(),
+                seen: Mutex::default(),
+                jpeg_reads: AtomicUsize::new(0),
+                frame: Mutex::new(FrameReply::Valid),
+                control_error: Mutex::default(),
+            }
+        }
+    }
+
     impl Hardware for Mock {
         fn control(&self, command: Control) -> Result<()> {
             self.actions.lock().unwrap().push(command);
+            if let Some(make_error) = self.control_error.lock().unwrap().as_ref() {
+                return Err(make_error());
+            }
             Ok(())
         }
         fn people(&self) -> Result<Vec<String>> {
@@ -526,7 +626,12 @@ mod tests {
         }
         fn jpeg(&self) -> Result<Option<Vec<u8>>> {
             self.jpeg_reads.fetch_add(1, Ordering::Relaxed);
-            Ok(Some(vec![255, 216, 0, 255, 217]))
+            match *self.frame.lock().unwrap() {
+                FrameReply::Valid => Ok(Some(vec![255, 216, 0, 255, 217])),
+                FrameReply::Offline => Ok(None),
+                FrameReply::Invalid => Ok(Some(b"not-a-jpeg".to_vec())),
+                FrameReply::Error(message) => Err(anyhow::anyhow!(message)),
+            }
         }
         fn wifi_eyes(&self, pair: Option<(&str, &str)>) {
             self.seen
@@ -536,22 +641,44 @@ mod tests {
         }
     }
 
-    async fn fixture(
-        screen: &Screen,
-    ) -> (String, String, tokio::task::JoinHandle<std::io::Result<()>>) {
+    struct Fixture {
+        url: String,
+        auth: String,
+        work: Arc<Semaphore>,
+        viewers: Arc<Semaphore>,
+        server: tokio::task::JoinHandle<std::io::Result<()>>,
+    }
+
+    async fn guarded_fixture(screen: &Screen, limits: guard::Limits) -> Fixture {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let url = format!("http://{addr}");
         let auth = format!("Basic {}", STANDARD.encode("operator:fixture-password"));
+        let work = Arc::new(Semaphore::new(4));
+        let viewers = Arc::new(Semaphore::new(2));
         let router = routes(Console {
             screen: screen.clone(),
             allowed: Arc::new(Allowed::for_address(&super::super::Address::At(addr))),
             authorization: Arc::new(Secret::new(auth.clone())),
-            work: Arc::new(Semaphore::new(4)),
-            viewers: Arc::new(Semaphore::new(2)),
+            work: work.clone(),
+            viewers: viewers.clone(),
         });
+        let listener = guard::guard(listener, limits);
         let server = tokio::spawn(async move { axum::serve(listener, router).await });
-        (url, auth, server)
+        Fixture {
+            url,
+            auth,
+            work,
+            viewers,
+            server,
+        }
+    }
+
+    async fn fixture(
+        screen: &Screen,
+    ) -> (String, String, tokio::task::JoinHandle<std::io::Result<()>>) {
+        let f = guarded_fixture(screen, guard::Limits::PAGE).await;
+        (f.url, f.auth, f.server)
     }
 
     #[tokio::test]
@@ -781,5 +908,359 @@ mod tests {
         }
         assert!(jpeg_part(b"<html>").is_none());
         assert!(jpeg_part(&vec![0; MAX_JPEG + 1]).is_none());
+    }
+
+    #[tokio::test]
+    async fn offline_camera_returns_503_immediately_and_preserves_caps() {
+        let mock = Arc::new(Mock::default());
+        *mock.frame.lock().unwrap() = FrameReply::Offline;
+        let screen = Screen::at(super::super::Address::Off).with_hardware(mock.clone());
+        let fixture = guarded_fixture(&screen, guard::Limits::PAGE).await;
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let get = |path: &str| {
+            client
+                .get(format!("{}{path}", fixture.url))
+                .header(header::AUTHORIZATION, &fixture.auth)
+        };
+
+        // Auth and ownership still gate /camera before touching hardware.
+        assert_eq!(
+            client
+                .get(format!("{}/camera", fixture.url))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            get("/camera").send().await.unwrap().status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(mock.jpeg_reads.load(Ordering::Relaxed), 0);
+
+        screen.set_owned(true).await;
+        assert_eq!(
+            get("/camera")
+                .header("sec-fetch-site", "cross-site")
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(mock.jpeg_reads.load(Ordering::Relaxed), 0);
+
+        // Offline camera returns 503 immediately without polling, releasing the viewer slot.
+        for expected_reads in 1..=3 {
+            let started = std::time::Instant::now();
+            let response = get("/camera").send().await.unwrap();
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+            assert!(
+                started.elapsed() < Duration::from_millis(150),
+                "offline camera must not wait on the 200 ms stream loop"
+            );
+            assert_eq!(response.text().await.unwrap(), "Camera unavailable.");
+            assert_eq!(mock.jpeg_reads.load(Ordering::Relaxed), expected_reads);
+            assert_eq!(fixture.viewers.available_permits(), 2);
+        }
+
+        // Invalid JPEG and hardware errors also return 503 without leaking details.
+        *mock.frame.lock().unwrap() = FrameReply::Invalid;
+        let response = get("/camera").send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.text().await.unwrap(), "Camera unavailable.");
+
+        *mock.frame.lock().unwrap() = FrameReply::Error("/dev/video0: internal camera fault");
+        let response = get("/camera").send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = response.text().await.unwrap();
+        assert_eq!(body, "Camera unavailable.");
+        assert!(!body.contains("/dev/video0") && !body.contains("internal"));
+
+        fixture.server.abort();
+    }
+
+    #[tokio::test]
+    async fn camera_enforces_work_and_viewer_caps_and_closes_when_camera_drops() {
+        let mock = Arc::new(Mock::default());
+        let screen = Screen::at(super::super::Address::Off).with_hardware(mock.clone());
+        screen.set_owned(true).await;
+        let fixture = guarded_fixture(&screen, guard::Limits::PAGE).await;
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let get = |path: &str| {
+            client
+                .get(format!("{}{path}", fixture.url))
+                .header(header::AUTHORIZATION, &fixture.auth)
+        };
+
+        // Work cap returns 429 and releases the viewer slot.
+        let held_work = fixture.work.acquire_many(4).await.unwrap();
+        let reads_before = mock.jpeg_reads.load(Ordering::Relaxed);
+        assert_eq!(
+            get("/camera").send().await.unwrap().status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        assert_eq!(mock.jpeg_reads.load(Ordering::Relaxed), reads_before);
+        assert_eq!(fixture.viewers.available_permits(), 2);
+        drop(held_work);
+
+        // Viewer cap allows two concurrent streams and rejects the third with 429.
+        let mut first = get("/camera?t=1").send().await.unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+        assert!(
+            first
+                .chunk()
+                .await
+                .unwrap()
+                .unwrap()
+                .starts_with(b"--buddy-frame\r\n")
+        );
+        let mut second = get("/camera?t=2").send().await.unwrap();
+        assert_eq!(second.status(), StatusCode::OK);
+        assert!(
+            second
+                .chunk()
+                .await
+                .unwrap()
+                .unwrap()
+                .starts_with(b"--buddy-frame\r\n")
+        );
+        let reads_at_cap = mock.jpeg_reads.load(Ordering::Relaxed);
+        assert_eq!(
+            get("/camera?t=3").send().await.unwrap().status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        assert_eq!(mock.jpeg_reads.load(Ordering::Relaxed), reads_at_cap);
+
+        // Going offline mid-stream closes the stream cleanly instead of polling forever.
+        *mock.frame.lock().unwrap() = FrameReply::Offline;
+        assert!(
+            tokio::time::timeout(Duration::from_secs(2), first.chunk())
+                .await
+                .expect("stream closes when camera goes offline")
+                .unwrap()
+                .is_none()
+        );
+        drop(first);
+        drop(second);
+        fixture.server.abort();
+    }
+
+    #[tokio::test]
+    async fn guarded_camera_and_routes_recover_across_guard_lifetime() {
+        let mock = Arc::new(Mock::default());
+        let screen = Screen::at(super::super::Address::Off).with_hardware(mock.clone());
+        screen.set_owned(true).await;
+        let limits = guard::Limits {
+            max: 16,
+            idle: Duration::from_secs(2),
+            lifetime: Duration::from_millis(350),
+        };
+        let fixture = guarded_fixture(&screen, limits).await;
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let get = |path: &str| {
+            client
+                .get(format!("{}{path}", fixture.url))
+                .header(header::AUTHORIZATION, &fixture.auth)
+        };
+
+        // Guarded static/page/API routes carry local security headers.
+        for path in ["/", "/recognized", "/console.js"] {
+            let response = get(path).send().await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+            assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+            assert_eq!(response.headers()[header::X_FRAME_OPTIONS], "DENY");
+            assert_eq!(
+                response.headers()[header::X_CONTENT_TYPE_OPTIONS],
+                "nosniff"
+            );
+            assert_eq!(
+                response.headers()["cross-origin-resource-policy"],
+                "same-origin"
+            );
+        }
+
+        // Browser console script includes bounded watchdog and cache-busted reconnect.
+        let script = get("/console.js")
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap();
+        assert!(script.contains("WATCHDOG_MS"));
+        assert!(script.contains("/camera?t="));
+        assert!(script.contains("MAX_ERRORS"));
+        assert!(script.contains("visibilitychange"));
+
+        // Guarded SSE stream opens cleanly and carries security headers.
+        let sse = get("/events").send().await.unwrap();
+        assert_eq!(sse.status(), StatusCode::OK);
+        assert_eq!(sse.headers()[header::CACHE_CONTROL], "no-store");
+        drop(sse);
+
+        // Guarded camera stream emits frames, closes at guard lifetime, frees its viewer
+        // slot, and serves a fresh cache-busted reconnect.
+        let mut first = get("/camera?t=100-1").send().await.unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+        assert_eq!(
+            first.headers()[header::CONTENT_TYPE],
+            "multipart/x-mixed-replace; boundary=buddy-frame"
+        );
+        assert_eq!(first.headers()[header::CONNECTION], "close");
+        let chunk = first.chunk().await.unwrap().unwrap();
+        assert!(chunk.starts_with(b"--buddy-frame\r\n"));
+
+        let ended = tokio::time::timeout(Duration::from_secs(2), async {
+            while let Ok(Some(_)) = first.chunk().await {}
+        })
+        .await;
+        assert!(ended.is_ok(), "guard lifetime closes the camera stream");
+        drop(first);
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while fixture.viewers.available_permits() != 2 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("viewer slot released after guard lifetime closes connection");
+
+        let mut reconnected = get("/camera?t=200-2").send().await.unwrap();
+        assert_eq!(reconnected.status(), StatusCode::OK);
+        assert!(
+            reconnected
+                .chunk()
+                .await
+                .unwrap()
+                .unwrap()
+                .starts_with(b"--buddy-frame\r\n")
+        );
+        drop(reconnected);
+        fixture.server.abort();
+    }
+
+    #[tokio::test]
+    async fn enrollment_surfaces_sanitized_precondition_and_offline_errors_without_leaks() {
+        let mock = Arc::new(Mock::default());
+        let screen = Screen::at(super::super::Address::Off).with_hardware(mock.clone());
+        screen.set_owned(true).await;
+        let fixture = guarded_fixture(&screen, guard::Limits::PAGE).await;
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap();
+        let csrf = screen.panel.read().await.operator_epoch.clone().unwrap();
+        let post = |action: &str, name: &str| {
+            client
+                .post(format!("{}/control", fixture.url))
+                .header(header::AUTHORIZATION, &fixture.auth)
+                .header(header::ORIGIN, &fixture.url)
+                .form(&[("action", action), ("name", name), ("csrf", &csrf)])
+        };
+
+        let cases = [
+            (
+                "vision is offline",
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Vision is offline.",
+            ),
+            (
+                "recognition is off",
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Recognition is off.",
+            ),
+            (
+                "no fresh camera frame",
+                StatusCode::SERVICE_UNAVAILABLE,
+                "No fresh camera frame available.",
+            ),
+            (
+                "show exactly one face at least 40 pixels across",
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Show exactly one face at least 40 pixels across.",
+            ),
+            (
+                "enrollment frame expired",
+                StatusCode::CONFLICT,
+                "Enrollment frame expired; try again.",
+            ),
+            (
+                "no usable face feature",
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "No usable face feature detected; try again.",
+            ),
+            (
+                "gallery full",
+                StatusCode::CONFLICT,
+                "Recognition gallery is full.",
+            ),
+            (
+                "person already has eight samples",
+                StatusCode::CONFLICT,
+                "Person already has the maximum eight samples.",
+            ),
+        ];
+        for (raw, expected_status, expected_body) in cases {
+            *mock.control_error.lock().unwrap() = Some(Box::new(move || anyhow::anyhow!(raw)));
+            let response = post("enroll", "Ada").send().await.unwrap();
+            assert_eq!(response.status(), expected_status, "{raw}");
+            assert_eq!(response.text().await.unwrap(), expected_body, "{raw}");
+        }
+
+        // Unrecognized internal errors never leak paths or diagnostics.
+        *mock.control_error.lock().unwrap() = Some(Box::new(|| {
+            anyhow::anyhow!("/var/lib/robot-buddy/faces/.pending: permission denied")
+        }));
+        let response = post("enroll", "Ada").send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = response.text().await.unwrap();
+        assert_eq!(body, "Control unavailable.");
+        assert!(!body.contains("/var/lib") && !body.contains("permission"));
+
+        // Wrapped IO errors stay generic even if an outer context matches a known string.
+        *mock.control_error.lock().unwrap() = Some(Box::new(|| {
+            Err::<(), _>(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "/secret/gallery.sf1",
+            ))
+            .context("vision is offline")
+            .unwrap_err()
+        }));
+        let response = post("enroll", "Ada").send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = response.text().await.unwrap();
+        assert_eq!(body, "Control unavailable.");
+        assert!(!body.contains("/secret"));
+
+        // Non-enrollment controls stay generic and never leak adapter errors.
+        *mock.control_error.lock().unwrap() =
+            Some(Box::new(|| anyhow::anyhow!("vision is offline")));
+        let response = post("gesture", "nod").send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.text().await.unwrap(), "Control unavailable.");
+
+        // Work cap still applies to enrollment control posts.
+        let held_work = fixture.work.acquire_many(4).await.unwrap();
+        let response = post("enroll", "Ada").send().await.unwrap();
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(response.text().await.unwrap(), "Control unavailable.");
+        drop(held_work);
+
+        fixture.server.abort();
     }
 }
