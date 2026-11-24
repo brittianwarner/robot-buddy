@@ -1,0 +1,6 @@
+{
+  "expected_revision": 1,
+  "prompt": "You are a helpful desk robot.",
+  "reason": "Shorter answers",
+  "type": "set_system_prompt"
+}

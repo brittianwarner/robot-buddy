@@ -1,0 +1,12 @@
+{
+  "kind": "turn.completed",
+  "payload": {
+    "text": "Hi there.",
+    "usage": {
+      "input_tokens": 3,
+      "output_tokens": 2
+    }
+  },
+  "sequence": 7,
+  "turn_id": "0195f0a2-7c1e-7d2b-9a40-3f1c2b8e9d10"
+}

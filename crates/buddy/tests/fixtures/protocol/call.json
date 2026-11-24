@@ -1,0 +1,8 @@
+{
+  "command": {
+    "request_id": "req-1",
+    "text": "Hello",
+    "type": "submit"
+  },
+  "session": "header.payload.signature"
+}

@@ -1,0 +1,7 @@
+{
+  "expected_prompt_revision": 3,
+  "expected_voice_revision": 4,
+  "name": "Captain",
+  "type": "activate_persona",
+  "version": 2
+}

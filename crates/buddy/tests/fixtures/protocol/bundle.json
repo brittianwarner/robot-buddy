@@ -1,0 +1,11 @@
+{
+  "actor_id": "actor-bot",
+  "bot_id": "bot-1",
+  "conversation_actor_id": "actor-conversation",
+  "endpoint": "https://engine.example.test",
+  "expires": 1790000000,
+  "gateway_token": "gateway-token",
+  "memory_actor_id": "actor-memory",
+  "namespace": "default",
+  "session": "header.payload.signature"
+}

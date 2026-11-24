@@ -1,0 +1,96 @@
+#!/usr/bin/env bun
+// Runs the actor integration suite against an isolated engine and proves nothing outlives it.
+//
+// Ports: BUDDY_TEST_ENGINE_PORT (default 16420; the engine also takes +1 and +10) and
+// BUDDY_TEST_MODEL_PORT (default 19091). Every credential here is a test-only literal.
+// Extra arguments go to the test binary, e.g. `bun run test:integration -- speech`.
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const enginePort = Number(process.env.BUDDY_TEST_ENGINE_PORT ?? 16420);
+const modelPort = Number(process.env.BUDDY_TEST_MODEL_PORT ?? 19091);
+const stateDir = process.env.BUDDY_TEST_STATE_DIR ?? join(tmpdir(), "robot-buddy-it");
+const ports = [enginePort, enginePort + 1, enginePort + 10, modelPort];
+
+const env = {
+  ...process.env,
+  BUDDY_TEST_ENGINE_PORT: String(enginePort),
+  BUDDY_TEST_MODEL_PORT: String(modelPort),
+  BUDDY_TEST_STATE_DIR: stateDir,
+  BUDDY_SIGNING_KEY: "integration-test-signing-key-not-for-production",
+  AI_PROVIDER: "openai_compatible",
+  AI_BASE_URL: `http://127.0.0.1:${modelPort}/v1`,
+  AI_MODEL: "fixture",
+  // Web search is routed into the mock, which accepts the CONNECT and never answers, so
+  // this fake key never leaves the machine. It gives the restart test a tool in flight.
+  BRAVE_SEARCH_API_KEY: "integration-test-search-key-not-real",
+  HTTPS_PROXY: `http://127.0.0.1:${modelPort}`,
+  https_proxy: `http://127.0.0.1:${modelPort}`,
+  NO_PROXY: "127.0.0.1,localhost",
+  no_proxy: "127.0.0.1,localhost",
+  RIVET_ENGINE_BINARY_PATH: process.env.RIVET_ENGINE_BINARY_PATH ?? "",
+};
+delete env.HTTP_PROXY;
+delete env.http_proxy;
+delete env.ALL_PROXY;
+delete env.all_proxy;
+if (!env.RIVET_ENGINE_BINARY_PATH) delete env.RIVET_ENGINE_BINARY_PATH;
+
+function listeners(port) {
+  const out = spawnSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], {
+    encoding: "utf8",
+  });
+  return out.stdout.split("\n").filter(Boolean);
+}
+
+// Listeners that predate the run are not ours; the harness reports them and refuses to start.
+const before = new Set(ports.flatMap((port) => listeners(port).map((pid) => `${port}:${pid}`)));
+
+const args = [
+  "test",
+  "-p",
+  "robot-buddy",
+  "--test",
+  "actors",
+  "--",
+  "--ignored",
+  "--nocapture",
+  ...process.argv.slice(2),
+];
+const started = Date.now();
+const child = spawn("cargo", args, { env, stdio: "inherit" });
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => child.kill(signal));
+}
+const code = await new Promise((resolve) => child.on("exit", (c, s) => resolve(c ?? (s ? 1 : 0))));
+console.log(`integration: cargo exited ${code} after ${((Date.now() - started) / 1000).toFixed(1)} s`);
+
+// The test binary's watchdog stops the engine when the binary exits, then removes the run
+// directory; give it time for both.
+const runDirs = () => (existsSync(stateDir) ? readdirSync(stateDir).filter((d) => d.startsWith("run-")) : []);
+const deadline = Date.now() + 20_000;
+let survivors = [];
+for (;;) {
+  survivors = ports
+    .flatMap((port) => listeners(port).map((pid) => ({ port, pid })))
+    .filter(({ port, pid }) => !before.has(`${port}:${pid}`));
+  if ((survivors.length === 0 && runDirs().length === 0) || Date.now() > deadline) break;
+  await Bun.sleep(250);
+}
+let leaked = false;
+if (survivors.length > 0) {
+  leaked = true;
+  for (const { port, pid } of survivors) {
+    const cmd = spawnSync("ps", ["-o", "command=", "-p", pid], { encoding: "utf8" }).stdout.trim();
+    console.error(`integration: LEAK port ${port} still has listener pid ${pid}: ${cmd}`);
+  }
+}
+const runs = runDirs();
+if (runs.length > 0) {
+  leaked = true;
+  console.error(`integration: LEAK run directories left in ${stateDir}: ${runs.join(", ")}`);
+}
+if (!leaked) console.log(`integration: no listener on ${ports.join(", ")}; no run directory left`);
+process.exit(code !== 0 ? code : leaked ? 1 : 0);

@@ -1,32 +1,8 @@
 // Opt-in: isolated test server and provisioned test identity only.
-import { chromium } from 'playwright';
 import assert from 'node:assert/strict';
-const url=process.env.BUDDY_TEST_SERVER_URL;
-const token=process.env.BUDDY_LAB_TOKEN;
-const identity=process.env.BUDDY_TEST_IDENTITY_FILE;
-assert(url&&token&&identity,'Set BUDDY_TEST_SERVER_URL, BUDDY_LAB_TOKEN, BUDDY_TEST_IDENTITY_FILE');
-const browser=await chromium.launch({headless:true});
+import { openLab } from './lib/lab.mjs';
+const { browser, context, page, errors, csrf, bot, url } = await openLab();
 try {
- const context=await browser.newContext({viewport:{width:1440,height:1000}});
- const page=await context.newPage();
- const errors=[];page.on('pageerror',e=>errors.push(e.message));
- assert.equal((await context.request.get(url+'/lab/api/state')).status(),400);
- assert.equal((await context.request.post(url+'/lab/api/login',{headers:{origin:'https://attacker.invalid'},data:{token}})).status(),400);
- await page.goto(url+'/lab');
- await page.locator('#operator-token').fill(token);
- await page.locator('#login-form button').click();
- await page.locator('#workspace').waitFor({state:'visible'});
- const csrf=await page.evaluate(async()=> (await (await fetch('/lab/api/state')).json()).csrf);
- assert.equal((await context.request.post(url+'/lab/api/action',{headers:{origin:url},data:{target:'bot',command:{type:'revoke'}}})).status(),400);
- await page.locator('#identity-file').setInputFiles(identity);
- await page.locator('#enroll').click();
- await page.waitForFunction(()=>document.querySelector('#bot-id').textContent!=='—');
- const bot=await page.locator('#bot-id').textContent();
- assert.equal((await context.request.post(url+'/lab/api/action',{headers:{origin:url,'x-buddy-csrf':csrf},data:{target:'bot',command:{type:'revoke'}}})).status(),400);
-
- await page.locator('#enroll').click();
- await page.waitForTimeout(1000);
- assert.equal(await page.locator('#bot-id').textContent(),bot);
  if(process.env.BUDDY_TEST_CLAIM==='1' && (await page.locator('#owner').textContent())!=='Registered') {
   await page.locator('#claim').click();
   await page.locator('#claim-qr').waitFor({state:'visible'});
@@ -38,7 +14,11 @@ try {
   await page.waitForFunction(()=>document.querySelector('#owner').textContent==='Registered');
   await claim.close();
  }
- await page.waitForFunction(()=>document.querySelector('#voice-choice').options.length===3);
+ // The curated catalog has 21 premade speakers (Will is the default for new bots).
+ await page.waitForFunction(()=>document.querySelector('#voice-choice').options.length===21);
+ const names=await page.locator('#voice-choice option').allTextContents();
+ assert(names.includes('Will')&&names.includes('Sarah'),'catalog lists Will and Sarah');
+ for(const legacy of ['Adrian','Delia','Sheila'])assert(!names.includes(legacy),legacy+' is a retired Fish name');
  assert((await page.locator('#active-prompt').textContent()).includes('Buddy'));
  await page.locator('#inspect-persona').click();
  await page.locator('#persona-dialog').waitFor({state:'visible'});
@@ -58,12 +38,12 @@ try {
   console.log('PASS: live agent created and activated named character+voice profile, then restored Buddy version 1');
  }
  if(process.env.BUDDY_TEST_SETTINGS==='1') {
-  await page.locator('#message').fill('Please use Delia as your voice, keeping your delivery style unchanged. Set your timezone to America/New_York and keep your location label unknown. Save both settings using your tools.');
+  await page.locator('#message').fill('Please use Sarah as your voice, keeping your delivery style unchanged. Set your timezone to America/New_York and keep your location label unknown. Save both settings using your tools.');
   await page.locator('#send').click();
-  await page.waitForFunction(()=>document.querySelector('#saved-voice').textContent.startsWith('Delia') && document.querySelector('#robot-context').textContent.includes('America/New_York'),null,{timeout:90000});
+  await page.waitForFunction(()=>document.querySelector('#saved-voice').textContent.startsWith('Sarah') && document.querySelector('#robot-context').textContent.includes('America/New_York'),null,{timeout:90000});
   await page.waitForFunction(()=>!document.querySelector('#send').disabled,null,{timeout:90000});
   await page.reload();
-  await page.waitForFunction(()=>document.querySelector('#saved-voice').textContent.startsWith('Delia') && document.querySelector('#robot-context').textContent.includes('America/New_York'));
+  await page.waitForFunction(()=>document.querySelector('#saved-voice').textContent.startsWith('Sarah') && document.querySelector('#robot-context').textContent.includes('America/New_York'));
  }
  if(process.env.BUDDY_TEST_RULES==='1') {
   await page.locator('#message').fill('Add a speech rule that emphasizes the exact word blue. Preserve all my other voice settings.');
