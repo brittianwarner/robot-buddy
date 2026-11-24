@@ -2601,7 +2601,8 @@ pub mod tests {
         c.peripherals.piper = Some(OfflineVoice::for_test(
             22050,
             Arc::new(Scripted {
-                synth: "printf '1234'".into(),
+                // Drain stdin first: exiting unread races Piper's write into EPIPE.
+                synth: "cat >/dev/null; printf '1234'".into(),
                 player: "cat >/dev/null".into(),
             }),
         ));
@@ -2626,24 +2627,33 @@ pub mod tests {
             c.peripherals.piper = Some(OfflineVoice::for_test(
                 22050,
                 Arc::new(Scripted {
-                    synth: "printf '1234'".into(),
-                    player: format!("echo $$ > '{}'; exec sleep 30", pid_file.display()),
+                    synth: "cat >/dev/null; printf '1234'".into(),
+                    // Publish the pid atomically (rename), then become the sleeper.
+                    player: format!(
+                        "echo $$ > '{0}.tmp' && mv '{0}.tmp' '{0}' && exec sleep 30",
+                        pid_file.display()
+                    ),
                 }),
             ));
             c.go_offline().await;
             assert!(listen_rx.borrow().busy, "{mode}: busy during announcement");
-            let deadline = Instant::now() + Duration::from_secs(5);
-            let pid: i32 = loop {
-                if let Ok(text) = std::fs::read_to_string(&pid_file)
-                    && let Ok(pid) = text.trim().parse::<i32>()
-                {
-                    break pid;
+            // Readiness handshake: the player runs iff its pid file exists. Racing the
+            // announcement's end makes a failed render report itself, not time out.
+            let pid: i32 = tokio::select! {
+                biased;
+                () = c.next_offline_voice() => {
+                    panic!("{mode}: offline announcement ended before its player started")
                 }
-                assert!(
-                    Instant::now() < deadline,
-                    "{mode}: offline player pid missing"
-                );
-                tokio::time::sleep(Duration::from_millis(5)).await;
+                pid = async {
+                    loop {
+                        if let Ok(text) = std::fs::read_to_string(&pid_file)
+                            && let Ok(pid) = text.trim().parse::<i32>()
+                        {
+                            break pid;
+                        }
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                    }
+                } => pid,
             };
             if mode == "wake" {
                 c.control(Control::Wake).await;

@@ -448,11 +448,13 @@ mod tests {
     #[tokio::test]
     async fn failed_partial_and_oversized_renders_never_start_playback() {
         // Any attempt to open the mock player with this rate panics.
+        // Each script drains the line first so it fails for its own reason, not
+        // because an unread stdin turned Piper's write into EPIPE.
         for script in [
-            "printf 12; exit 1",
-            "printf 1",
-            "exit 0",
-            "head -c 128002 /dev/zero",
+            "cat >/dev/null; printf 12; exit 1",
+            "cat >/dev/null; printf 1",
+            "cat >/dev/null; exit 0",
+            "cat >/dev/null; head -c 128002 /dev/zero",
         ] {
             assert!(render(&Mock(script), 8000).await.is_err());
         }
@@ -615,6 +617,26 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// Readiness handshake: a fixture child is running iff its pid file exists.
+    /// Race that against the announcement ending, so a render that fails early
+    /// reports itself instead of tripping a wall-clock deadline on a loaded host.
+    async fn ready_pid(ann: &mut Announcement, pid_file: &Path, child: &str) -> i32 {
+        tokio::select! {
+            biased;
+            () = ann.finished() => panic!("announcement ended before the {child} started"),
+            pid = async {
+                loop {
+                    if let Ok(text) = std::fs::read_to_string(pid_file)
+                        && let Ok(pid) = text.trim().parse::<i32>()
+                    {
+                        break pid;
+                    }
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            } => pid,
+        }
+    }
+
     #[tokio::test]
     async fn stop_cancels_and_reaps_synth_and_player_before_returning() {
         use std::sync::{
@@ -648,22 +670,17 @@ mod tests {
         let voice = OfflineVoice::for_test(
             22050,
             Arc::new(Scripted {
-                synth: format!("echo $$ > '{}'; exec sleep 30", synth_pid_file.display()),
+                // Publish the pid atomically (rename), then become the sleeper.
+                synth: format!(
+                    "echo $$ > '{0}.tmp' && mv '{0}.tmp' '{0}' && exec sleep 30",
+                    synth_pid_file.display()
+                ),
                 player: "exit 0".into(),
                 player_called: player_called.clone(),
             }),
         );
-        let ann = voice.start();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let synth_pid: i32 = loop {
-            if let Ok(text) = std::fs::read_to_string(&synth_pid_file)
-                && let Ok(pid) = text.trim().parse::<i32>()
-            {
-                break pid;
-            }
-            assert!(Instant::now() < deadline, "synth pid missing");
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        };
+        let mut ann = voice.start();
+        let synth_pid = ready_pid(&mut ann, &synth_pid_file, "synth").await;
         ann.stop().await;
         let status = std::process::Command::new("kill")
             .args(["-0", &synth_pid.to_string()])
@@ -678,22 +695,16 @@ mod tests {
         let voice = OfflineVoice::for_test(
             22050,
             Arc::new(Scripted {
-                synth: "printf '1234'".into(),
-                player: format!("echo $$ > '{}'; exec sleep 30", player_pid_file.display()),
+                synth: "cat >/dev/null; printf '1234'".into(),
+                player: format!(
+                    "echo $$ > '{0}.tmp' && mv '{0}.tmp' '{0}' && exec sleep 30",
+                    player_pid_file.display()
+                ),
                 player_called: Arc::new(AtomicBool::new(false)),
             }),
         );
-        let ann = voice.start();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let player_pid: i32 = loop {
-            if let Ok(text) = std::fs::read_to_string(&player_pid_file)
-                && let Ok(pid) = text.trim().parse::<i32>()
-            {
-                break pid;
-            }
-            assert!(Instant::now() < deadline, "player pid missing");
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        };
+        let mut ann = voice.start();
+        let player_pid = ready_pid(&mut ann, &player_pid_file, "player").await;
         ann.stop().await;
         let status = std::process::Command::new("kill")
             .args(["-0", &player_pid.to_string()])

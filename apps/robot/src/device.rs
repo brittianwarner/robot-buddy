@@ -2005,7 +2005,9 @@ mod tests {
         opts.peripherals.piper = Some(crate::piper::OfflineVoice::for_test(
             22050,
             Arc::new(ScriptedVoice {
-                synth: "printf '1234'".into(),
+                // Drain the line first: a synth that exits unread races Piper's
+                // stdin write into EPIPE, and the announcement fails before playback.
+                synth: "cat >/dev/null; printf '1234'".into(),
                 player: "cat >/dev/null; sleep 0.05".into(),
             }),
         ));
@@ -2036,8 +2038,12 @@ mod tests {
         opts.peripherals.piper = Some(crate::piper::OfflineVoice::for_test(
             22050,
             Arc::new(ScriptedVoice {
-                synth: "printf '1234'".into(),
-                player: format!("echo $$ > '{}'; exec sleep 30", pid_file.display()),
+                synth: "cat >/dev/null; printf '1234'".into(),
+                // Publish the pid atomically (rename), then become the sleeper.
+                player: format!(
+                    "echo $$ > '{0}.tmp' && mv '{0}.tmp' '{0}' && exec sleep 30",
+                    pid_file.display()
+                ),
             }),
         ));
         run_with!(rig, opts, async {
@@ -2048,14 +2054,19 @@ mod tests {
                 listen_rx.borrow().busy
             })
             .await;
-            let deadline = Instant::now() + SOON;
+            // Readiness handshake: the player started iff its pid file exists. The
+            // device clears busy when the announcement ends, so an announcement that
+            // fails before playback reports itself instead of tripping a deadline.
             let pid: i32 = loop {
                 if let Ok(text) = std::fs::read_to_string(&pid_file)
                     && let Ok(pid) = text.trim().parse::<i32>()
                 {
                     break pid;
                 }
-                assert!(Instant::now() < deadline, "offline player pid missing");
+                assert!(
+                    listen_rx.borrow().busy,
+                    "offline announcement ended before its player started"
+                );
                 tokio::time::sleep(Duration::from_millis(5)).await;
             };
             // Reconnect: go_online cancels and reaps offline player before returning.
