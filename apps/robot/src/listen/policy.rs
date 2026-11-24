@@ -5,21 +5,41 @@ use std::time::{Duration, Instant};
 const FOLLOW: Duration = Duration::from_secs(4);
 const ECHO_TAIL: Duration = Duration::from_millis(350);
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 pub(super) struct Policy {
     window: Option<(Instant, Instant)>,
     pub face_deadline: Option<Instant>,
     stopped: bool,
+    acoustic_window: bool,
+}
+
+fn is_sep(c: char) -> bool {
+    c.is_whitespace() || ",.!?:;-–—…\"'“”‘’".contains(c)
+}
+
+fn trim_lead(text: &str) -> &str {
+    text.trim_start_matches(is_sep)
 }
 
 fn token(text: &str) -> (&str, &str) {
-    let end = text
-        .find(|c: char| !c.is_alphanumeric())
-        .unwrap_or(text.len());
-    (
-        &text[..end],
-        text[end..].trim_start_matches(|c: char| c.is_whitespace() || ",.!?:;-".contains(c)),
-    )
+    let text = trim_lead(text);
+    let mut end = text.len();
+    for (idx, ch) in text.char_indices() {
+        if ch.is_alphanumeric() {
+            continue;
+        }
+        if matches!(ch, '\'' | '’')
+            && text[idx + ch.len_utf8()..]
+                .chars()
+                .next()
+                .is_some_and(char::is_alphanumeric)
+        {
+            continue;
+        }
+        end = idx;
+        break;
+    }
+    (&text[..end], trim_lead(&text[end..]))
 }
 
 /// Prefix only: hearing a third party mention Pip in conversation isn't a command.
@@ -30,6 +50,137 @@ fn addressed(text: &str, busy: bool) -> Option<&str> {
         return name.eq_ignore_ascii_case("pip").then_some(body);
     }
     (!busy && first.eq_ignore_ascii_case("pip")).then_some(rest)
+}
+
+fn strip_possessive(word: &str) -> &str {
+    word.strip_suffix("'s")
+        .or_else(|| word.strip_suffix("’s"))
+        .or_else(|| word.strip_suffix("'S"))
+        .or_else(|| word.strip_suffix("’S"))
+        .unwrap_or(word)
+}
+
+fn is_bare_pip_variant(word: &str) -> bool {
+    let w = strip_possessive(word).to_ascii_lowercase();
+    matches!(
+        w.as_str(),
+        "pip"
+            | "pipp"
+            | "pips"
+            | "pippa"
+            | "pippy"
+            | "pippin"
+            | "pipi"
+            | "peep"
+            | "peeps"
+            | "pep"
+            | "pepp"
+            | "peps"
+            | "bip"
+            | "bipp"
+            | "bips"
+            | "bib"
+            | "bep"
+            | "pib"
+            | "piff"
+            | "kip"
+            | "fip"
+            | "yip"
+    )
+}
+
+fn is_greeted_pip_variant(word: &str) -> bool {
+    if is_bare_pip_variant(word) {
+        return true;
+    }
+    let w = strip_possessive(word).to_ascii_lowercase();
+    matches!(
+        w.as_str(),
+        "beep"
+            | "pit"
+            | "pitt"
+            | "pic"
+            | "pig"
+            | "pete"
+            | "pup"
+            | "pop"
+            | "tip"
+            | "dip"
+            | "hip"
+            | "sip"
+            | "rip"
+            | "lip"
+            | "nip"
+            | "zip"
+            | "vip"
+    )
+}
+
+/// After neural wake already fired, strip Whisper's common mishearings of "Hey Pip".
+fn acoustic_addressed(text: &str) -> Option<&str> {
+    let (first, rest) = token(text);
+    if first.eq_ignore_ascii_case("hey")
+        || first.eq_ignore_ascii_case("hi")
+        || first.eq_ignore_ascii_case("hay")
+    {
+        let (name, body) = token(rest);
+        return is_greeted_pip_variant(name).then_some(body);
+    }
+    is_bare_pip_variant(first).then_some(rest)
+}
+
+fn is_non_speech_artifact(words: &str) -> bool {
+    words.starts_with(['[', '(', '*'])
+        || words.chars().any(|c| matches!(c, '♪' | '♫' | '♬' | '♩'))
+        || (!words.is_empty() && !words.chars().any(char::is_alphanumeric))
+}
+
+fn normalize_artifact(text: &str) -> String {
+    let trimmed = text.trim_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '\'');
+    trimmed
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase()
+}
+
+/// Known whisper.cpp silence/outro/caption hallucinations; checked only on unaddressed clips
+/// so legitimate addressed speech ("Hey Pip, thank you") is never blacklisted.
+fn is_unaddressed_silence_artifact(text: &str) -> bool {
+    let norm = normalize_artifact(text);
+    matches!(
+        norm.as_str(),
+        "blank_audio"
+            | "blank audio"
+            | "no_speech"
+            | "no speech"
+            | "you"
+            | "thank you"
+            | "thanks"
+            | "thank you very much"
+            | "thanks for watching"
+            | "thank you for watching"
+            | "thanks for watching everyone"
+            | "thank you for watching everyone"
+            | "thanks for watching this video"
+            | "thank you for watching this video"
+            | "thanks for listening"
+            | "thank you for listening"
+            | "please subscribe"
+            | "like and subscribe"
+            | "please like and subscribe"
+            | "don't forget to subscribe"
+            | "subscribe to my channel"
+            | "see you next time"
+            | "see you in the next video"
+            | "bye"
+            | "bye-bye"
+            | "bye bye"
+            | "the end"
+    ) || norm.starts_with("subtitles by ")
+        || norm.starts_with("captions by ")
+        || norm.starts_with("transcribed by ")
+        || norm.contains("amara.org")
 }
 
 fn code(text: &str) -> Option<String> {
@@ -65,6 +216,7 @@ impl Policy {
             at + FOLLOW,
         ));
         self.face_deadline = Some(at + FOLLOW);
+        self.acoustic_window = true;
     }
 
     pub fn acoustic_clip(&self, onset: Instant) -> bool {
@@ -84,6 +236,7 @@ impl Policy {
             return;
         }
         self.window = None;
+        self.acoustic_window = false;
         if state.busy || state.muted || state.confirming || old.confirming || old.muted {
             self.face_deadline = None;
             self.stopped = false;
@@ -106,8 +259,17 @@ impl Policy {
         {
             return vec![];
         }
-        let body = addressed(text, state.busy);
-        let words = body.unwrap_or(text);
+        let clean = trim_lead(text);
+        if clean.is_empty() {
+            return vec![];
+        }
+        let in_window = !state.busy && self.window.is_some_and(|(a, b)| (a..=b).contains(&started));
+        let body = addressed(clean, state.busy).or_else(|| {
+            (in_window && self.acoustic_window)
+                .then(|| acoustic_addressed(clean))
+                .flatten()
+        });
+        let words = body.unwrap_or(clean);
         let (first, tail) = token(words);
         let confirm = first.eq_ignore_ascii_case("confirm");
         if state.confirming {
@@ -119,21 +281,23 @@ impl Policy {
         if confirm && code(tail).is_some() {
             return vec![];
         } // explicit claim command is never dialogue
-        let in_window = !state.busy && self.window.is_some_and(|(a, b)| (a..=b).contains(&started));
         if body.is_none() && !in_window {
             return vec![];
         }
-        if words.starts_with(['[', '(', '*'])
-            || (!words.is_empty() && !words.chars().any(char::is_alphanumeric))
+        if is_non_speech_artifact(words)
+            || (body.is_none() && is_unaddressed_silence_artifact(words))
         {
             return vec![];
         }
         let mut commands = Vec::new();
-        let intent = words.trim_end_matches(['.', '!', '?']).to_ascii_lowercase();
+        let intent = words
+            .trim_end_matches(|c: char| ".!?\"'”’".contains(c))
+            .to_ascii_lowercase();
         if intent == "go to sleep" {
             self.stopped = true;
             self.window = None;
             self.face_deadline = None;
+            self.acoustic_window = false;
             return vec![Control::Sleep];
         }
         let stop = matches!(
@@ -146,6 +310,7 @@ impl Policy {
         self.stopped = stop;
         self.window = None;
         self.face_deadline = None;
+        self.acoustic_window = false;
         if stop {
             commands.push(Control::Listening(false));
         } else if words.is_empty() {
@@ -266,6 +431,135 @@ mod tests {
         assert_eq!(
             p.heard("Pip, 123456", idle, now, now),
             [Control::Wake, Control::Say("123456".into())]
+        );
+    }
+
+    #[test]
+    fn leading_punctuation_and_misheard_name_work_after_acoustic_wake() {
+        let now = Instant::now();
+        let idle = State::default();
+        let busy = State { busy: true, ..idle };
+
+        // Leading punctuation works for direct transcript addressing too.
+        let mut p = Policy::default();
+        assert_eq!(
+            p.heard("- Hey Pip, what time is it?", idle, now, now),
+            [Control::Wake, Control::Say("what time is it?".into())]
+        );
+        assert_eq!(
+            p.heard("...Pip, go to sleep.", idle, now, now),
+            [Control::Sleep]
+        );
+        // Without acoustic wake, misheard names never wake Pip.
+        for stray in [
+            "Hey, Bip, what time is it?",
+            "Hey, Pep.",
+            "Kip, go to sleep.",
+            "Pip's favorite color",
+        ] {
+            assert!(p.heard(stray, idle, now, now).is_empty(), "{stray}");
+        }
+
+        // After acoustic wake, leading punctuation and misheard wake names strip cleanly.
+        p.acoustic_wake(now);
+        assert_eq!(
+            p.heard("- Hey, Bip, what time is it?", idle, now, now),
+            [Control::Wake, Control::Say("what time is it?".into())]
+        );
+
+        // Misheard wake-only clip holds the follow-up window instead of sending a bogus turn.
+        p.acoustic_wake(now);
+        assert_eq!(p.heard("— Hey, Pep.", idle, now, now), [Control::Wake]);
+        assert!(p.face_deadline.is_some());
+        assert_eq!(
+            p.heard(
+                "what about tomorrow?",
+                idle,
+                now,
+                now + Duration::from_secs(1)
+            ),
+            [Control::Say("what about tomorrow?".into())]
+        );
+
+        // Bare misheard name + sleep/stop works after acoustic wake (including post-barge-in).
+        p.acoustic_wake(now);
+        p.changed(busy, idle, now);
+        assert_eq!(
+            p.heard("...Bip, stop talking!", idle, now, now),
+            [Control::Wake, Control::Listening(false)]
+        );
+        p.acoustic_wake(now);
+        assert_eq!(
+            p.heard("Hey, Pip's, go to sleep.", idle, now, now),
+            [Control::Sleep]
+        );
+
+        // Ordinary English starters after acoustic wake are not stripped as bare names.
+        p.acoustic_wake(now);
+        assert_eq!(
+            p.heard("Pick a number", idle, now, now),
+            [Control::Say("Pick a number".into())]
+        );
+    }
+
+    #[test]
+    fn silence_and_song_artifacts_are_ignored_without_blocking_addressed_speech() {
+        let now = Instant::now();
+        let idle = State::default();
+        let mut p = Policy::default();
+        p.acoustic_wake(now);
+
+        for artifact in [
+            "- [BLANK_AUDIO]",
+            "...(upbeat music)",
+            "*music*",
+            "♪",
+            "♪ Music ♪",
+            "♫ La la la ♫",
+            "...",
+            "Thank you.",
+            "Thanks for watching!",
+            "Thank you for watching.",
+            "You.",
+            "Subtitles by the Amara.org community",
+            "Please subscribe.",
+            "Bye.",
+        ] {
+            assert!(p.heard(artifact, idle, now, now).is_empty(), "{artifact}");
+        }
+        // Artifacts leave the open wake window intact for the actual utterance.
+        assert_eq!(
+            p.heard("what time is it?", idle, now, now),
+            [Control::Say("what time is it?".into())]
+        );
+
+        // Legitimate addressed human speech is never blacklisted.
+        for (input, expected) in [
+            ("Hey Pip, thank you!", "thank you!"),
+            ("Pip, thanks for watching.", "thanks for watching."),
+            ("Hey Pip, you.", "you."),
+            ("- Pip, bye!", "bye!"),
+            ("Hey Pip, sing a song.", "sing a song."),
+        ] {
+            assert_eq!(
+                p.heard(input, idle, now, now),
+                [Control::Wake, Control::Say(expected.into())],
+                "{input}"
+            );
+        }
+
+        // Addressed speech after a misheard acoustic wake is also preserved.
+        p.acoustic_wake(now);
+        assert_eq!(
+            p.heard("Hey, Bip, thank you!", idle, now, now),
+            [Control::Wake, Control::Say("thank you!".into())]
+        );
+
+        // Longer unaddressed follow-up sentences containing those words still pass.
+        p.acoustic_wake(now);
+        assert_eq!(
+            p.heard("Thank you, what about tomorrow?", idle, now, now),
+            [Control::Say("Thank you, what about tomorrow?".into())]
         );
     }
 }
