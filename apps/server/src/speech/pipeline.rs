@@ -4,6 +4,10 @@
 //! guard and at most two upstream syntheses: the sentence playing and the next one.
 //! Audio leaves through a bounded channel, so a slow or vanished listener never makes
 //! the task buffer without limit, and the task stops even if the body is never polled.
+//!
+//! Every actor call re-authorizes the session. A successful chunk read therefore counts
+//! as an authorization check: the guard only calls when no read has proved access for
+//! `check_every`, and it starts once chunk 0 has been read.
 use super::admission::Lease;
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use axum::body::Bytes;
@@ -17,7 +21,7 @@ use serde_json::Value;
 use std::{collections::VecDeque, future::Future, sync::Arc, time::Duration};
 use tokio::{
     sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot, watch},
-    time::{Instant, MissedTickBehavior},
+    time::Instant,
 };
 
 /// One committed sentence and the voice pinned for its turn.
@@ -35,8 +39,10 @@ pub enum Chunk {
 /// Committed speech for one turn.
 pub trait ChunkSource: Send + Sync + 'static {
     /// Looks up chunk `index`. An error means the turn stopped or access was revoked.
+    /// `Ready` and `Pending` answers come from an authorized actor call.
     fn chunk(&self, index: u32) -> impl Future<Output = Result<Chunk>> + Send;
-    /// Re-authorizes the session and confirms the turn may still be spoken.
+    /// Re-authorizes the session and confirms the turn may still be spoken. Reads turn
+    /// status only.
     fn check(&self) -> impl Future<Output = Result<()>> + Send;
     /// Resolves when a new chunk may have been committed. The pipeline also polls.
     fn changed(&self) -> impl Future<Output = ()> + Send;
@@ -49,7 +55,14 @@ pub struct Synthesis {
 
 /// One paid text-to-speech request per sentence. Never retried automatically.
 pub trait Synthesizer: Send + Sync + 'static {
-    fn synthesize(&self, spoken: &Spoken) -> impl Future<Output = Result<Synthesis>> + Send;
+    /// The turn's pinned voice, decoded once per stream.
+    type Voice: Send + Sync;
+    fn voice(&self, pinned: &Value) -> Result<Self::Voice>;
+    fn synthesize(
+        &self,
+        voice: &Self::Voice,
+        text: &str,
+    ) -> impl Future<Output = Result<Synthesis>> + Send;
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -127,6 +140,9 @@ pub struct Job<S, T> {
 
 /// Receiving half of the stream. A stopped stream ends with an error, never a clean
 /// end of body, so clients cannot mistake a cut stream for a finished one.
+///
+/// A stop wins over queued audio: once the task fails (replaced, revoked, cut off) the
+/// next item is the error and queued PCM is discarded. A finished stream drains.
 pub struct AudioBody {
     rx: mpsc::Receiver<Bytes>,
     outcome: oneshot::Receiver<Result<()>>,
@@ -134,13 +150,30 @@ pub struct AudioBody {
 
 impl AudioBody {
     pub fn into_stream(self) -> impl Stream<Item = std::io::Result<Bytes>> + Send + 'static {
-        stream::unfold(Some(self), |state| async move {
-            let mut body = state?;
-            if let Some(bytes) = body.rx.recv().await {
-                return Some((Ok(bytes), Some(body)));
+        stream::unfold(Some((self, false)), |state| async move {
+            let (mut body, finished) = state?;
+            if finished {
+                // The task ended cleanly; what is queued is the end of the answer.
+                return body
+                    .rx
+                    .recv()
+                    .await
+                    .map(|bytes| (Ok(bytes), Some((body, true))));
             }
-            match body.outcome.await {
-                Ok(Ok(())) => None,
+            let outcome = tokio::select! {
+                biased;
+                outcome = &mut body.outcome => outcome,
+                bytes = body.rx.recv() => match bytes {
+                    Some(bytes) => return Some((Ok(bytes), Some((body, false)))),
+                    None => (&mut body.outcome).await,
+                },
+            };
+            match outcome {
+                Ok(Ok(())) => body
+                    .rx
+                    .recv()
+                    .await
+                    .map(|bytes| (Ok(bytes), Some((body, true)))),
                 Ok(Err(error)) => Some((Err(std::io::Error::other(error.to_string())), None)),
                 Err(_) => Some((Err(std::io::Error::other("speech stream stopped")), None)),
             }
@@ -179,22 +212,23 @@ async fn run<S: ChunkSource, T: Synthesizer>(
     tx: &mpsc::Sender<Bytes>,
     head: &mut Option<HeadSender>,
 ) -> Result<()> {
+    // When an authorized call last went out. Nothing is forwarded before chunk 0's read.
+    let authorized = watch::channel(None).0;
     let ctx = Ctx {
         source: &job.source,
         synth: &*job.synth,
         upstream: &job.upstream,
+        authorized: &authorized,
         limits: job.limits,
     };
     let deadline = Instant::now() + job.limits.deadline;
-    // Nothing is forwarded until the first check succeeds.
-    let (authorized_tx, authorized_until) = watch::channel(Instant::now());
     tokio::select! {
         biased;
         () = job.lease.stopped() => bail!("speech stream replaced"),
         () = tx.closed() => bail!("listener disconnected"),
         () = tokio::time::sleep_until(deadline) => bail!("speech deadline exceeded"),
-        result = ctx.guard(authorized_tx) => result,
-        result = ctx.speak(tx, head, authorized_until) => result,
+        result = ctx.guard() => result,
+        result = ctx.speak(tx, head) => result,
     }
 }
 
@@ -202,6 +236,8 @@ struct Ctx<'a, S, T> {
     source: &'a S,
     synth: &'a T,
     upstream: &'a Arc<Semaphore>,
+    /// Issue time of the latest actor call that proved access.
+    authorized: &'a watch::Sender<Option<Instant>>,
     limits: Limits,
 }
 
@@ -212,6 +248,9 @@ impl<S, T> Clone for Ctx<'_, S, T> {
 }
 impl<S, T> Copy for Ctx<'_, S, T> {}
 
+/// The turn's voice, decoded by the first sentence and reused by the rest.
+type Voice<T> = Arc<<T as Synthesizer>::Voice>;
+
 /// A synthesis in flight, holding one global upstream permit.
 struct Upstream {
     format: PcmFormat,
@@ -220,36 +259,57 @@ struct Upstream {
 }
 
 impl<S: ChunkSource, T: Synthesizer> Ctx<'_, S, T> {
-    /// Re-checks authorization off the audio path and extends `authorized_until`.
-    /// A failed or timed-out check stops the stream.
-    async fn guard(self, authorized_until: watch::Sender<Instant>) -> Result<()> {
-        let mut tick = tokio::time::interval(self.limits.check_every);
-        tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    /// Records an authorized call issued at `issued`. Older proofs never win.
+    fn authorized_at(self, issued: Instant) {
+        self.authorized.send_if_modified(|last| {
+            let newer = last.is_none_or(|at| issued > at);
+            if newer {
+                *last = Some(issued);
+            }
+            newer
+        });
+    }
+
+    /// Re-checks authorization off the audio path once no read has done so for
+    /// `check_every`. Starts after chunk 0's read. A failed or timed-out check stops
+    /// the stream.
+    async fn guard(self) -> Result<()> {
+        let mut seen = self.authorized.subscribe();
         loop {
-            tick.tick().await;
+            let last = *seen.borrow_and_update();
+            let due = last.map(|at| at + self.limits.check_every);
+            if due.is_none_or(|due| Instant::now() < due) {
+                let wait = due.map_or_else(
+                    || futures_util::future::Either::Left(std::future::pending()),
+                    |due| futures_util::future::Either::Right(tokio::time::sleep_until(due)),
+                );
+                tokio::select! {
+                    () = wait => {}
+                    changed = seen.changed() => {
+                        changed.map_err(|_| anyhow!("speech authorization stopped"))?;
+                    }
+                }
+                continue;
+            }
             let issued = Instant::now();
             tokio::time::timeout(self.limits.check_timeout, self.source.check())
                 .await
                 .context("speech authorization timed out")?
                 .context("speech authorization stopped")?;
-            authorized_until.send_replace(issued + self.limits.authorized_for);
+            self.authorized_at(issued);
         }
     }
 
-    async fn speak(
-        self,
-        tx: &mpsc::Sender<Bytes>,
-        head: &mut Option<HeadSender>,
-        authorized_until: watch::Receiver<Instant>,
-    ) -> Result<()> {
+    async fn speak(self, tx: &mpsc::Sender<Bytes>, head: &mut Option<HeadSender>) -> Result<()> {
         let spoken = self.wait_chunk(0).await?.context("no spoken chunks")?;
-        let first = self.open(&spoken).await?;
+        let voice = Arc::new(self.synth.voice(&spoken.voice)?);
+        let first = self.open(&voice, &spoken).await?;
         let value = Head::new(&spoken, first.format)?;
         head.take()
             .context("speech head already sent")?
             .send(Ok(value))
             .map_err(|_| anyhow!("listener disconnected"))?;
-        self.forward(tx, first, authorized_until).await
+        self.forward(tx, first, voice).await
     }
 
     /// Waits for chunk `index`; `None` when the turn has no more speech.
@@ -258,23 +318,30 @@ impl<S: ChunkSource, T: Synthesizer> Ctx<'_, S, T> {
             return Ok(None);
         }
         loop {
+            let issued = Instant::now();
             let chunk = tokio::time::timeout(self.limits.actor_timeout, self.source.chunk(index))
                 .await
                 .context("speech actor deadline")??;
             match chunk {
-                Chunk::Ready(spoken) => return Ok(Some(spoken)),
+                Chunk::Ready(spoken) => {
+                    self.authorized_at(issued);
+                    return Ok(Some(spoken));
+                }
                 Chunk::Done => return Ok(None),
-                Chunk::Pending => tokio::select! {
-                    () = self.source.changed() => {}
-                    () = tokio::time::sleep(self.limits.poll) => {}
-                },
+                Chunk::Pending => {
+                    self.authorized_at(issued);
+                    tokio::select! {
+                        () = self.source.changed() => {}
+                        () = tokio::time::sleep(self.limits.poll) => {}
+                    }
+                }
             }
         }
     }
 
-    async fn open(self, spoken: &Spoken) -> Result<Upstream> {
+    async fn open(self, voice: &T::Voice, spoken: &Spoken) -> Result<Upstream> {
         let permit = self.upstream.clone().acquire_owned().await?;
-        let synthesis = self.synth.synthesize(spoken).await?;
+        let synthesis = self.synth.synthesize(voice, &spoken.text).await?;
         Ok(Upstream {
             format: synthesis.format,
             audio: synthesis.audio,
@@ -284,11 +351,18 @@ impl<S: ChunkSource, T: Synthesizer> Ctx<'_, S, T> {
 
     /// Finds and starts the next sentence. The outer error (lookup) stops the stream
     /// at once; the inner error (synthesis) waits until the current sentence ends.
-    async fn look(self, index: u32) -> Result<Option<Result<Upstream>>> {
+    async fn look(self, voice: Voice<T>, index: u32) -> Result<Option<Result<Upstream>>> {
         let Some(spoken) = self.wait_chunk(index).await? else {
             return Ok(None);
         };
-        Ok(Some(self.open(&spoken).await))
+        Ok(Some(self.open(&voice, &spoken).await))
+    }
+
+    /// Whether audio may be forwarded now: within `authorized_for` of the last proof.
+    fn authorized_now(self) -> bool {
+        self.authorized
+            .borrow()
+            .is_some_and(|at| Instant::now() < at + self.limits.authorized_for)
     }
 
     fn count(self, total: usize, bytes: usize) -> Result<usize> {
@@ -301,8 +375,9 @@ impl<S: ChunkSource, T: Synthesizer> Ctx<'_, S, T> {
         self,
         tx: &mpsc::Sender<Bytes>,
         first: Upstream,
-        mut authorized_until: watch::Receiver<Instant>,
+        voice: Voice<T>,
     ) -> Result<()> {
+        let mut authorization = self.authorized.subscribe();
         let format = first.format;
         let (piece, budget) = (self.limits.piece_bytes, self.limits.prefetch_budget);
         let mut total = 0;
@@ -328,22 +403,23 @@ impl<S: ChunkSource, T: Synthesizer> Ctx<'_, S, T> {
                 }
             }
             if matches!(ahead, Ahead::Idle) && (self.limits.lookahead || playing.eof) {
-                ahead = Ahead::Looking(Box::pin(self.look(index + 1)));
+                ahead = Ahead::Looking(Box::pin(self.look(voice.clone(), index + 1)));
             }
-            let authorized = Instant::now() < *authorized_until.borrow_and_update();
+            authorization.mark_unchanged();
+            let authorized = self.authorized_now();
             let queued = !playing.outbox.is_empty();
             tokio::select! {
                 biased;
                 permit = tx.reserve(), if queued && authorized => {
                     let permit = permit.map_err(|_| anyhow!("listener disconnected"))?;
                     // The client may have been slow; authorization can lapse meanwhile.
-                    if Instant::now() < *authorized_until.borrow()
+                    if self.authorized_now()
                         && let Some(bytes) = playing.outbox.pop_front()
                     {
                         permit.send(bytes);
                     }
                 }
-                changed = authorized_until.changed(), if queued && !authorized => {
+                changed = authorization.changed(), if queued && !authorized => {
                     changed.map_err(|_| anyhow!("speech authorization stopped"))?;
                 }
                 item = playing.upstream.audio.next(), if !queued && !playing.eof => {

@@ -3,6 +3,10 @@
 //! `POST /v1/speech` takes a turn ID only. A spawned pipeline task reads committed
 //! sentences from the Conversation actor, synthesizes them one sentence ahead and
 //! forwards one ordered PCM stream through a bounded channel.
+//!
+//! The caller is authenticated from headers before the body is read. The body read has
+//! a short deadline. Only an authenticated request that took a stream slot gets the long
+//! speech head deadline.
 mod admission;
 mod pipeline;
 mod provider;
@@ -12,12 +16,13 @@ mod tests;
 
 use super::{
     App,
+    limit::{Admitted, SPEECH_HEAD_DEADLINE},
     web::{Kind, Reject, Web, require},
 };
 use admission::Admission;
 use anyhow::{Context, Result, ensure};
 use axum::{
-    Json,
+    Extension,
     body::Body,
     extract::State,
     http::{HeaderMap, HeaderValue, header},
@@ -27,13 +32,16 @@ use pipeline::{Head, Job, Limits};
 use provider::OpenRouter;
 use robot_buddy::{auth, protocol::SpeechRequest};
 use source::ActorSource;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 use tokio::sync::Semaphore;
 
 /// Concurrent speech streams per process.
 const STREAMS: usize = 4;
 /// Upstream synthesis requests per stream: the sentence playing and one prefetched.
 const REQUESTS_PER_STREAM: usize = 2;
+/// A speech body is a turn ID and a flag; it is read after authentication, briefly.
+pub const BODY_DEADLINE: Duration = Duration::from_secs(5);
+const BODY_LIMIT: usize = 1024;
 
 pub struct Speech {
     pub model: String,
@@ -99,12 +107,13 @@ fn speech_key(custom_base: bool) -> Result<auth::Secret<String>> {
         .context("TTS_API_KEY or OpenRouter AI_API_KEY required")
 }
 
-/// `POST /v1/speech`. A bad or missing session is 401, unconfigured speech 503, a full
-/// stream cap 429 and anything else 400.
+/// `POST /v1/speech`. A bad or missing session is 401 before any body byte is read,
+/// unconfigured speech 503, a full stream cap 429 and anything else 400.
 pub async fn device(
     State(app): State<Arc<App>>,
+    admitted: Option<Extension<Admitted>>,
     headers: HeaderMap,
-    Json(body): Json<SpeechRequest>,
+    body: Body,
 ) -> Web<Response> {
     let bearer = headers
         .get(header::AUTHORIZATION)
@@ -116,12 +125,30 @@ pub async fn device(
     session
         .validate(&session.bot_id, Some("device"))
         .reject(Kind::Unauthorized)?;
-    stream(&app, &session.bot_id, bearer, body).await
+    let body = read(body).await?;
+    let admitted = admitted.map(|Extension(admitted)| admitted);
+    stream(&app, admitted.as_ref(), &session.bot_id, bearer, body).await
+}
+
+/// Reads an already-authenticated speech body: at most 1 KiB within 5 s, else 400.
+pub async fn read(body: Body) -> Web<SpeechRequest> {
+    let bytes = tokio::time::timeout(BODY_DEADLINE, axum::body::to_bytes(body, BODY_LIMIT))
+        .await
+        .reject(Kind::BadRequest)?
+        .reject(Kind::BadRequest)?;
+    serde_json::from_slice(&bytes).reject(Kind::BadRequest)
 }
 
 /// Starts one speech stream. The newest request for a bot replaces any older stream.
 /// Unconfigured speech is 503 and a full stream cap 429; every other failure is 400.
-pub async fn stream(app: &App, bot: &str, session: &str, body: SpeechRequest) -> Web<Response> {
+/// The caller is already authenticated; holding a stream slot earns the long deadline.
+pub async fn stream(
+    app: &App,
+    admitted: Option<&Admitted>,
+    bot: &str,
+    session: &str,
+    body: SpeechRequest,
+) -> Web<Response> {
     require(
         !body.turn_id.is_empty() && body.turn_id.len() <= 128,
         Kind::BadRequest,
@@ -132,6 +159,9 @@ pub async fn stream(app: &App, bot: &str, session: &str, body: SpeechRequest) ->
         .lease(bot)
         .await
         .reject(Kind::TooManyRequests)?;
+    if let Some(admitted) = admitted {
+        admitted.extend(SPEECH_HEAD_DEADLINE);
+    }
     let source = ActorSource::open(&app.client, bot, session, &body.turn_id, body.stream).await?;
     let (head, audio) = pipeline::spawn(Job {
         source,

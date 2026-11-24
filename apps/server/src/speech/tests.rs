@@ -48,11 +48,25 @@ struct Script {
     events: bool,
 }
 
+/// Actor calls a stream made. Each one re-authorizes the session against Bot.
+#[derive(Default)]
+struct Calls {
+    chunk: AtomicUsize,
+    check: AtomicUsize,
+}
+
+impl Calls {
+    fn total(&self) -> usize {
+        self.chunk.load(Ordering::SeqCst) + self.check.load(Ordering::SeqCst)
+    }
+}
+
 struct FakeSource {
     start: Instant,
     script: Script,
     wake: Arc<Notify>,
     notifier: Option<JoinHandle<()>>,
+    calls: Arc<Calls>,
 }
 
 impl FakeSource {
@@ -73,6 +87,7 @@ impl FakeSource {
             script,
             wake,
             notifier,
+            calls: Arc::default(),
         }
     }
 
@@ -101,6 +116,7 @@ fn voice() -> serde_json::Value {
 
 impl ChunkSource for FakeSource {
     async fn chunk(&self, index: u32) -> Result<Chunk> {
+        self.calls.chunk.fetch_add(1, Ordering::SeqCst);
         tokio::time::sleep(self.script.read_latency).await;
         if self.revoked() {
             bail!("speech turn stopped");
@@ -117,6 +133,7 @@ impl ChunkSource for FakeSource {
     }
 
     async fn check(&self) -> Result<()> {
+        self.calls.check.fetch_add(1, Ordering::SeqCst);
         if let Some(at) = self.script.check_hangs_at
             && self.start.elapsed() >= at
         {
@@ -149,6 +166,8 @@ struct FakeSynth {
     started: AtomicUsize,
     active: Arc<AtomicUsize>,
     max_active: AtomicUsize,
+    /// Pinned voices decoded.
+    voices: AtomicUsize,
 }
 
 impl FakeSynth {
@@ -165,8 +184,15 @@ impl FakeSynth {
 }
 
 impl Synthesizer for FakeSynth {
+    type Voice = ();
+
+    fn voice(&self, _: &serde_json::Value) -> Result<()> {
+        self.voices.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
     /// TTFB, then PCM at exactly real-time rate in 20 ms frames.
-    async fn synthesize(&self, _: &Spoken) -> Result<Synthesis> {
+    async fn synthesize(&self, (): &(), _: &str) -> Result<Synthesis> {
         self.started.fetch_add(1, Ordering::SeqCst);
         let now = self.active.fetch_add(1, Ordering::SeqCst) + 1;
         self.max_active.fetch_max(now, Ordering::SeqCst);
@@ -415,6 +441,65 @@ async fn eval_newest_request_wins() {
     assert!(admission.idle());
 }
 
+/// Eval (g): actor calls per stream. Every call re-authorizes against Bot, so this is
+/// also the auth RPC count. Paused time; events on, like a live subscription.
+#[tokio::test(start_paused = true)]
+async fn eval_actor_calls_per_stream() {
+    let cases = [
+        (
+            "one sentence",
+            Script {
+                commits: vec![ms(400)],
+                done_at: ms(400),
+                read_latency: ms(15),
+                events: true,
+                ..Script::default()
+            },
+            ms(2000),
+            4,
+        ),
+        ("five sentences", five_sentences(), ms(1000), 5),
+        (
+            "10 s tool turn",
+            Script {
+                commits: vec![ms(10_000)],
+                done_at: ms(10_000),
+                read_latency: ms(15),
+                events: true,
+                ..Script::default()
+            },
+            ms(2000),
+            // Reads authorize the wait for chunk 0; the guard starts after it.
+            4,
+        ),
+    ];
+    for (name, script, sentence, max_checks) in cases {
+        let admission = Admission::new(4);
+        let synth = FakeSynth::new(ms(300), sentence);
+        let begin = Instant::now();
+        let source = FakeSource::new(script);
+        let calls = source.calls.clone();
+        let (_, body) = start(&admission, "bot", source, &synth, Limits::default())
+            .await
+            .unwrap();
+        let heard = listen(body, begin).await;
+        assert_eq!(heard.error, None, "{name}");
+        println!(
+            "actor calls ({name}): {} chunk reads + {} checks = {} auth RPCs over {:?}, \
+             first byte {:?}",
+            calls.chunk.load(Ordering::SeqCst),
+            calls.check.load(Ordering::SeqCst),
+            calls.total(),
+            heard.last,
+            heard.first.unwrap(),
+        );
+        assert!(
+            calls.check.load(Ordering::SeqCst) <= max_checks,
+            "{name}: guard checks"
+        );
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn capacity_stays_bounded_across_bots() {
     let admission = Admission::new(2);
@@ -507,6 +592,73 @@ async fn eval_stalled_reader_released_at_deadline() {
     drop(body);
 }
 
+/// A3: a reader that stalls behind full backpressure, then resumes after its stream was
+/// replaced, gets the stop first. The queued PCM of the old turn is never played.
+#[tokio::test(start_paused = true)]
+async fn replaced_backpressured_body_yields_the_stop_first() {
+    let admission = Admission::new(4);
+    let synth = FakeSynth::new(ms(100), ms(5000));
+    let script = Script {
+        commits: vec![ms(0)],
+        read_latency: ms(5),
+        ..Script::default()
+    };
+    let source = FakeSource::new(script.clone());
+    let (_, stalled) = start(&admission, "bot", source, &synth, Limits::default())
+        .await
+        .unwrap();
+    // Eight 20 ms frames fill the queue; the task then waits on the reader.
+    tokio::time::sleep(ms(1000)).await;
+    let source = FakeSource::new(script);
+    let (_, replacement) = start(&admission, "bot", source, &synth, Limits::default())
+        .await
+        .unwrap();
+    until(|| synth.active() == 1).await;
+    let mut audio = Box::pin(stalled.into_stream());
+    let first = audio.next().await.expect("a terminal item");
+    let error = first.expect_err("queued PCM must not outrank the stop");
+    assert!(error.to_string().contains("replaced"), "{error}");
+    assert!(audio.next().await.is_none(), "nothing after the stop");
+    drop(replacement);
+    until(|| admission.idle() && synth.active() == 0).await;
+}
+
+/// A3: a stream that finished while its reader was slow still delivers every byte.
+#[tokio::test(start_paused = true)]
+async fn finished_body_drains_after_the_task_ends() {
+    let admission = Admission::new(4);
+    let synth = FakeSynth::new(ms(100), ms(100));
+    let script = Script {
+        commits: vec![ms(0)],
+        read_latency: ms(5),
+        ..Script::default()
+    };
+    let source = FakeSource::new(script);
+    let (_, body) = start(&admission, "bot", source, &synth, Limits::default())
+        .await
+        .unwrap();
+    // Five frames fit the queue, so the task completes before anything is read.
+    until(|| admission.idle() && synth.active() == 0).await;
+    let heard = listen(body, Instant::now()).await;
+    assert_eq!(heard.error, None);
+    assert_eq!(heard.bytes, 5 * FRAME_BYTES);
+}
+
+/// The pinned voice is decoded once per stream, not once per sentence.
+#[tokio::test(start_paused = true)]
+async fn voice_is_decoded_once_per_stream() {
+    let admission = Admission::new(4);
+    let synth = FakeSynth::new(ms(100), ms(200));
+    let source = FakeSource::new(five_sentences());
+    let (_, body) = start(&admission, "bot", source, &synth, Limits::default())
+        .await
+        .unwrap();
+    let heard = listen(body, Instant::now()).await;
+    assert_eq!(heard.error, None);
+    assert_eq!(synth.started.load(Ordering::SeqCst), 5);
+    assert_eq!(synth.voices.load(Ordering::SeqCst), 1);
+}
+
 #[test]
 fn base_url_policy() {
     assert_eq!(
@@ -551,10 +703,6 @@ async fn fake_provider() -> String {
 #[tokio::test]
 async fn provider_error_body_is_bounded_and_not_echoed() {
     let base = fake_provider().await;
-    let spoken = Spoken {
-        text: "Hello.".into(),
-        voice: voice(),
-    };
     let model = robot_buddy::voice::SPEECH_MODEL.to_owned();
     let bad = OpenRouter::new(
         Secret::new("test-key".into()),
@@ -562,8 +710,9 @@ async fn provider_error_body_is_bounded_and_not_echoed() {
         &format!("{base}/bad"),
     )
     .unwrap();
+    let config = bad.voice(&voice()).unwrap();
     let begun = Instant::now();
-    let error = match bad.synthesize(&spoken).await {
+    let error = match bad.synthesize(&config, "Hello.").await {
         Ok(_) => panic!("rejected request must fail"),
         Err(error) => format!("{error:#}"),
     };
@@ -574,7 +723,7 @@ async fn provider_error_body_is_bounded_and_not_echoed() {
     );
 
     let ok = OpenRouter::new(Secret::new("test-key".into()), model, &format!("{base}/ok")).unwrap();
-    let synthesis = ok.synthesize(&spoken).await.unwrap();
+    let synthesis = ok.synthesize(&config, "Hello.").await.unwrap();
     assert_eq!(synthesis.format.sample_rate, 24_000);
     let bytes: usize = synthesis
         .audio
@@ -585,12 +734,8 @@ async fn provider_error_body_is_bounded_and_not_echoed() {
 
     // A sentence that is only model markup never reaches the provider (here it
     // would get HTTP 400) and yields no audio.
-    let markup = Spoken {
-        text: "[laughs]".into(),
-        voice: voice(),
-    };
     let silent = bad
-        .synthesize(&markup)
+        .synthesize(&config, "[laughs]")
         .await
         .expect("no request for markup");
     assert_eq!(synthesis_len(silent).await, 0);
@@ -622,4 +767,18 @@ fn response_keeps_audio_contract_headers() {
     assert_eq!(header("x-audio-voice-id"), "will");
     assert_eq!(header("x-audio-config-revision"), "3");
     assert_eq!(header("cache-control"), "no-store");
+}
+
+/// Network check, run by hand: the provider answers this crate's reqwest over HTTP/2.
+/// `cargo test -p robot-buddy-server provider_negotiates_http2 -- --ignored`
+#[tokio::test]
+#[ignore = "reaches openrouter.ai"]
+async fn provider_negotiates_http2() {
+    let http = reqwest::Client::builder().build().unwrap();
+    let response = http
+        .get(format!("{}/models", super::provider::DEFAULT_BASE_URL))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.version(), reqwest::Version::HTTP_2);
 }

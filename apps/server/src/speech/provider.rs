@@ -1,14 +1,18 @@
 //! `OpenRouter` speech transport (`elevenlabs/eleven-v4-turbo`, PCM).
-use super::pipeline::{Spoken, Synthesis, Synthesizer};
+use super::pipeline::{Synthesis, Synthesizer};
 use anyhow::{Context, Result, bail, ensure};
 use axum::http::header;
 use futures_util::StreamExt;
 use robot_buddy::{audio::PcmFormat, auth::Secret, voice::VoiceConfig};
+use serde::Deserialize;
 use std::time::Duration;
 
 pub const DEFAULT_BASE_URL: &str = "https://openrouter.ai/api/v1";
 /// Provider error bodies are read this far and discarded, never logged.
 const ERROR_BODY_LIMIT: usize = 1024;
+/// A provider that sends nothing for this long is treated as stalled: no response head,
+/// or no PCM between two reads. Resets on every read.
+pub const READ_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Validates `TTS_BASE_URL`: HTTPS, or plain HTTP to localhost for fixtures.
 pub fn base_url(raw: Option<&str>) -> Result<String> {
@@ -38,9 +42,21 @@ pub struct OpenRouter {
 
 impl OpenRouter {
     pub fn new(key: Secret<String>, model: String, base_url: &str) -> Result<Self> {
+        Self::with_read_timeout(key, model, base_url, READ_TIMEOUT)
+    }
+
+    /// HTTP/2 is negotiated by ALPN on HTTPS, so the playing sentence and the prefetched
+    /// one share a connection. Plain-HTTP fixtures stay on HTTP/1.1.
+    pub fn with_read_timeout(
+        key: Secret<String>,
+        model: String,
+        base_url: &str,
+        read_timeout: Duration,
+    ) -> Result<Self> {
         Ok(Self {
             http: reqwest::Client::builder()
                 .connect_timeout(Duration::from_secs(10))
+                .read_timeout(read_timeout)
                 .timeout(Duration::from_secs(90))
                 .redirect(reqwest::redirect::Policy::none())
                 .build()?,
@@ -52,9 +68,17 @@ impl OpenRouter {
 }
 
 impl Synthesizer for OpenRouter {
-    async fn synthesize(&self, spoken: &Spoken) -> Result<Synthesis> {
-        let config: VoiceConfig = serde_json::from_value(spoken.voice["config"].clone())?;
-        let payload = config.speech_body(&self.model, &spoken.text)?;
+    type Voice = VoiceConfig;
+
+    /// Decodes the pinned voice once per stream.
+    fn voice(&self, pinned: &serde_json::Value) -> Result<VoiceConfig> {
+        let config = VoiceConfig::deserialize(&pinned["config"])?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    async fn synthesize(&self, config: &VoiceConfig, text: &str) -> Result<Synthesis> {
+        let payload = config.speech_body(&self.model, text)?;
         if payload["input"].as_str().is_none_or(str::is_empty) {
             // The sentence was only model markup (say "[laughs]"): nothing to speak,
             // so no paid request. The format is the provider's own default.

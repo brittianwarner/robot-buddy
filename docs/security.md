@@ -31,7 +31,8 @@ Threat model and controls for the server, the actors and the robot's local pages
 | `GET /claim` sets a signed, `HttpOnly`, `SameSite=Strict` cookie bound to the bot, a digest of the claim token and a random CSRF value. The form returns the CSRF value. `/login` checks all three and clears the cookie. | The same attack from a page that can forge `Origin` (none today), and replays of an old form. | same |
 | The claim page uses `Referrer-Policy: same-origin`. | `no-referrer` makes browsers send `Origin: null` on the form POST. `same-origin` keeps the claim URL from other origins. | `http_tests::open_claim` helper |
 | OAuth `state` and OIDC `nonce` are separate random values. Both compare in constant time. | Using one leaked value for both checks. | `http_tests::login_redirects_with_independent_state_and_nonce`, `oidc::tests::validates_signature_and_login_binding` |
-| ID tokens: RS256/ES256 only, `kid` required, JWK `use` must be `sig` and JWK `alg` must match when present, `nbf` checked, 30 s leeway. | Encryption keys or mismatched algorithms; tokens used early. | `oidc::tests::rejects_encryption_keys_and_mismatched_alg` |
+| ID tokens: RS256/ES256 only, `kid` required; when present, JWK `use` must be `sig`, JWK `key_ops` must include `verify` and JWK `alg` must match. `nbf` checked, 30 s leeway. | Encryption keys, keys restricted to other operations, mismatched algorithms; tokens used early. | `oidc::tests::rejects_encryption_keys_and_mismatched_alg` |
+| A login transaction (cookie, `state`) lives 5 minutes and is spent once. The callback spends it after the `state` check and before the token exchange, so a failed exchange needs a fresh sign-in. The spent set is process-local and capped at 4096 live entries; when full, the callback answers 429 rather than forget an entry. `/auth/callback` is rate-limited like `/login`. | Replaying one login cookie to make the server call the IdP repeatedly. | `http_tests::login_redirects_with_independent_state_and_nonce`, `http_tests::the_callback_is_rate_limited_per_client`, `oidc::tests::a_login_transaction_is_spent_once_and_the_ledger_is_bounded` |
 | Issuer keys are cached for 10 minutes. An unknown `kid` refetches once, at most every 30 s. | Fetching JWKS per login; forged `kid`s turning the server into a request amplifier. | `oidc::tests::caches_keys_and_refetches_once_for_unknown_kid` |
 | The token request omits `client_secret` when none is configured. | Sending an empty secret, which some providers reject. | `oidc::tests::token_form_omits_an_empty_secret` |
 | The six-digit code is uniform from the OS generator. Five wrong codes clear the pending claim, its code and its QR token. | Guessing the code by a direct Rivet caller. The code is also shown to the device session, so this is defense in depth. | `actor::tests::five_wrong_codes_invalidate_the_pending_claim` |
@@ -50,9 +51,11 @@ Residual risk: a person who opens an attacker's claim link and chooses to sign i
 
 | Control | Defends against | Test |
 |---|---|---|
-| Token bucket per client IP and route on `/v1/challenge`, `/v1/enroll`, `/login`, `/lab/api/login`: a burst of 10, then one request per 6 s. At most 4096 clients are tracked; idle buckets go first. | Credential guessing and sign-in floods. | `limit::tests::*`, `http_tests::credential_endpoints_are_rate_limited_per_client` |
+| Token bucket per client IP and route on `/v1/challenge`, `/v1/enroll`, `/login`, `/auth/callback`, `/lab/api/login`: a burst of 10, then one request per 6 s. At most 4096 clients are tracked; idle buckets go first. | Credential guessing and sign-in floods. | `limit::tests::*`, `http_tests::credential_endpoints_are_rate_limited_per_client` |
 | The client IP is the socket peer. `X-Forwarded-For` is read only when the peer is listed in `BUDDY_TRUSTED_PROXY`, and then only its rightmost untrusted entry. | Spoofed forwarding headers. | `limit::tests::forwarded_for_is_used_only_from_trusted_proxies` |
-| 128 requests in flight, 30 s to the response head. Speech routes get 330 s, above the pipeline's own 300 s deadline. A permit is held until the head is sent; a streaming PCM body does not hold one. Speech streams have their own cap. | Unbounded work queues; slow handlers. | `http_tests::speech_routes_are_exempt_from_the_header_deadline` |
+| 128 requests in flight, 30 s to the response head, for every route. A permit is held until the head is sent; a streaming PCM body does not hold one. | Unbounded work queues; slow handlers. | `http_tests::only_an_extended_request_outlives_the_header_deadline` |
+| Speech authenticates from headers (device bearer; lab cookie, `Origin` and CSRF) before reading the body, then reads at most 1 KiB within 5 s. Only after it takes one of the four speech stream slots does it return its shared permit and get 330 s for the head, above the pipeline's own 300 s deadline. | Slow, incomplete speech bodies holding the shared pool and starving enrollment, sign-in and health checks. | `http_tests::slow_unauthenticated_speech_bodies_cannot_delay_enrollment_or_health`, `http_tests::an_authenticated_speech_body_gets_a_short_read_deadline` |
+| `/health` is liveness and touches nothing else; `/ready` checks the engine and answers 503 without detail when it is down. The container health check uses `/ready`. | Liveness probes and connection warm-ups loading the engine. | `http_tests::missing_configuration_is_503_and_disabled_lab_is_404` |
 | Typed errors: 400 invalid input, 401 bad or missing credentials, 403 origin/CSRF/allowlist, 404 disabled lab, 429 limits, 502 engine or identity provider, 503 not configured. Bodies are fixed text; causes are dropped unlogged. | Leaking internal error text, URLs or tokens. | `web::tests::server_errors_hide_details`, `http_tests::missing_configuration_is_503_and_disabled_lab_is_404` |
 | Cookies read across every `Cookie` header. Cookie clears keep `Secure` on HTTPS. | Missed cookies on HTTP/2; insecure clearing headers. | `web::tests::*` |
 
@@ -62,6 +65,7 @@ Residual risk: a person who opens an attacker's claim link and chooses to sign i
 |---|---|---|
 | The operator token and the guess are each MACed under the signing key, with the token as the message, and compared in constant time. | `token` and `token\0` colliding when the token was the HMAC key. | `lab::tests::lab_token_rejects_nul_padding`, `http_tests::lab_login_and_csrf_statuses` |
 | Mutations need `Origin` and the session's CSRF header, compared in constant time. Actions pass an allowlist. | Cross-site requests; admin actions from the browser. | `http_tests::lab_login_and_csrf_statuses` |
+| A failed poll or session check clears the watched turn. Catch-up events after reconnect apply silently; Replay still speaks on request. | Speaking a reply that completed during an outage. | `bun apps/server/tests/lab-reconnect.mjs` (browser, not in CI) |
 
 ### Actor bounds
 
@@ -82,6 +86,7 @@ Direct Rivet callers skip the server's body limit, so actors check their own inp
 |---|---|---|
 | The engine config (admin token, S3 keys) is written to `$XDG_RUNTIME_DIR` or the temp directory, never `/data`. The file is new, `0600`, uniquely named and removed on shutdown. A config left in `/data` by an older release is deleted at start. | Secrets in volume backups. | `http_tests::engine_config_is_private_ephemeral_and_removed` |
 | The engine stops with a direct `SIGTERM`; the image no longer ships `procps`. | Spawning `kill(1)`; a smaller image. | build only |
+| `RIVET_ENDPOINT`, which carries the engine admin token, must be HTTPS. Plain HTTP is accepted only to loopback (`127.0.0.0/8`, `::1`, `localhost`) or to the single host named by `RIVET_ENDPOINT_PLAINTEXT_HOST`, for a private Docker-network service. No credentials or fragment. | The admin token crossing a network in plaintext. | `http_tests::the_engine_endpoint_needs_tls_off_loopback` |
 
 `compose.yaml` and `compose.local.yaml` mount a `tmpfs` on `/tmp`, so the engine config never touches disk. Do the same in any other production runtime.
 
@@ -99,5 +104,5 @@ Direct Rivet callers skip the server's body limit, so actors check their own inp
 ## Not covered
 
 - No live browser, IdP, hardware or container run validates these controls. The tests above are unit and router tests.
-- The rate limiter is per process. It does not share state across replicas.
+- The rate limiter and the spent-login set are per process. They do not share state across replicas.
 - A cloned device credential cannot be told apart from the original.

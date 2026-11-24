@@ -31,7 +31,11 @@ const READ_CHUNK_SQL: &str = r"
 const SPEECH_VOICE_SQL: &str = "SELECT voice FROM speech_turns WHERE turn_id = ?";
 const TURN_STATUS_SQL: &str = "SELECT status FROM turns WHERE id = ?";
 /// Chunks one turn may speak, and the largest chunk the splitter can produce.
+/// `SpeechChunk` at index `MAX_CHUNKS` is the speech service's status probe: no chunk
+/// can exist there, so it reads turn status only.
 const MAX_CHUNKS: u32 = 64;
+// apps/server/src/speech/source.rs probes this index.
+const _: () = assert!(MAX_CHUNKS == 64);
 const MAX_CHUNK_BYTES: usize = crate::sentences::HARD_LIMIT + 4;
 
 /// Inserts one event inside a transaction. Zero rows means the turn stopped running.
@@ -142,6 +146,9 @@ impl Conversation {
         Ok(())
     }
 
+    /// Chunk `index` of a turn, `pending` until it is committed, `done` after the
+    /// last one. A queued turn is pending: the robot asks for speech as soon as Submit
+    /// returns, which can be before drain claims the turn.
     pub(super) async fn speech_chunk(
         &self,
         ctx: &Ctx<Self>,
@@ -152,13 +159,15 @@ impl Conversation {
             !id.is_empty() && id.len() <= 128 && index <= MAX_CHUNKS,
             "invalid speech cursor"
         );
+        if index == MAX_CHUNKS {
+            let rows = ctx.sql().query(TURN_STATUS_SQL, params(&[id])).await?.rows;
+            let status = string(rows.first().context("turn missing")?, 0)?;
+            return Ok(json!({ "state": absent_chunk(&status)? }));
+        }
         let read = |tx: SqliteTransaction| async move {
             let rows = tx.execute(TURN_STATUS_SQL, params(&[id])).await?.rows;
             let status = string(rows.first().context("turn missing")?, 0)?;
-            ensure!(
-                ["running", "completed"].contains(&status.as_str()),
-                "speech turn stopped"
-            );
+            let absent = absent_chunk(&status)?;
             let cursor = Some(vec![P::Text(id.into()), P::Integer(i64::from(index))]);
             let rows = tx.execute(READ_CHUNK_SQL, cursor).await?.rows;
             if let Some(row) = rows.first() {
@@ -171,16 +180,21 @@ impl Conversation {
                     "voice": voice,
                 }));
             }
-            let state = if status == "completed" {
-                "done"
-            } else {
-                "pending"
-            };
-            Ok(json!({ "state": state }))
+            Ok(json!({ "state": absent }))
         };
         ctx.sql()
             .transaction(read, named("conversation.speech_chunk"))
             .await
+    }
+}
+
+/// What a speech read answers for a chunk that is not stored, by turn status. A turn
+/// that stopped (cancelled, failed, interrupted) is an error: its speech ends.
+fn absent_chunk(status: &str) -> Result<&'static str> {
+    match status {
+        "queued" | "running" => Ok("pending"),
+        "completed" => Ok("done"),
+        _ => Err(anyhow::anyhow!("speech turn stopped")),
     }
 }
 
@@ -220,6 +234,16 @@ mod tests {
         db.query_row(SPEECH_VOICE_SQL, [id], |row| row.get(0))
             .optional()
             .unwrap()
+    }
+
+    #[test]
+    fn early_speech_waits_for_a_queued_turn_and_stops_with_the_turn() {
+        assert_eq!(absent_chunk("queued").unwrap(), "pending");
+        assert_eq!(absent_chunk("running").unwrap(), "pending");
+        assert_eq!(absent_chunk("completed").unwrap(), "done");
+        for stopped in ["cancelled", "failed", "interrupted", ""] {
+            assert!(absent_chunk(stopped).is_err(), "{stopped}");
+        }
     }
 
     #[test]

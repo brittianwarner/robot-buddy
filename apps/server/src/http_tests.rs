@@ -1,12 +1,7 @@
 //! Router tests driven with `tower::ServiceExt::oneshot`. No engine, registry or network:
 //! the Rivet client points at a closed port and is never reached by these routes.
 use super::*;
-use axum::{
-    Extension,
-    body::Body,
-    extract::ConnectInfo,
-    http::{Method, Request},
-};
+use axum::{Extension, body::Body, extract::ConnectInfo, http::Request};
 use tower::ServiceExt;
 
 const PUBLIC: &str = "https://buddy.example";
@@ -29,6 +24,7 @@ fn app(oidc: bool, lab: bool) -> Arc<App> {
         lab_token: lab.then(|| Secret::new(LAB_TOKEN.into())),
         speech: None,
         limiter: limit::RateLimiter::new(Vec::new()),
+        logins: oidc::UsedLogins::default(),
     })
 }
 
@@ -223,6 +219,47 @@ async fn login_redirects_with_independent_state_and_nonce() {
         .body(Body::empty())
         .unwrap();
     assert_eq!(send(&router, split).await.status, StatusCode::FORBIDDEN);
+    assert!(
+        cookies
+            .iter()
+            .any(|c| c.starts_with("buddy_login=") && c.contains("Max-Age=300")),
+        "a login transaction is short-lived"
+    );
+
+    // The matching state spends the transaction before the exchange. The exchange fails
+    // here (no token endpoint), and the same cookie cannot try again.
+    let status = send(&router, callback(&query["state"], Some(&login)))
+        .await
+        .status;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    let status = send(&router, callback(&query["state"], Some(&login)))
+        .await
+        .status;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "a spent login is not replayable"
+    );
+}
+
+#[tokio::test]
+async fn the_callback_is_rate_limited_per_client() {
+    let app = app(true, false);
+    let router = service(&app, [192, 0, 2, 77]);
+    let callback = || {
+        Request::get("/auth/callback?code=c&state=s")
+            .body(Body::empty())
+            .unwrap()
+    };
+    for _ in 0..10 {
+        assert_eq!(
+            send(&router, callback()).await.status,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    let reply = send(&router, callback()).await;
+    assert_eq!(reply.status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(reply.headers.contains_key(header::RETRY_AFTER));
 }
 
 #[tokio::test]
@@ -237,12 +274,15 @@ async fn missing_configuration_is_503_and_disabled_lab_is_404() {
     assert_eq!(reply.status, StatusCode::NOT_FOUND);
     let reply = send(&router, lab_login(LAB_TOKEN, Some(PUBLIC))).await;
     assert_eq!(reply.status, StatusCode::NOT_FOUND);
-    // The engine is unreachable: health reports 503 without internal detail.
+    // The engine is unreachable: liveness still answers, readiness reports 503 without
+    // internal detail.
     let reply = send(
         &router,
         Request::get("/health").body(Body::empty()).unwrap(),
     )
     .await;
+    assert_eq!(reply.status, StatusCode::OK);
+    let reply = send(&router, Request::get("/ready").body(Body::empty()).unwrap()).await;
     assert_eq!(reply.status, StatusCode::SERVICE_UNAVAILABLE);
     assert!(!reply.body.contains("127.0.0.1"));
 }
@@ -358,34 +398,156 @@ async fn credential_endpoints_are_rate_limited_per_client() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn speech_routes_are_exempt_from_the_header_deadline() {
+async fn only_an_extended_request_outlives_the_header_deadline() {
     async fn slow() -> StatusCode {
         tokio::time::sleep(Duration::from_mins(2)).await;
         StatusCode::OK
     }
+    async fn admitted(Extension(admitted): Extension<limit::Admitted>) -> StatusCode {
+        admitted.extend(limit::SPEECH_HEAD_DEADLINE);
+        slow().await
+    }
     let router = Router::new()
         .route("/v1/speech", post(slow))
-        .route("/lab/api/speech", post(slow))
-        .route("/v1/enroll", post(slow))
+        .route("/admitted", post(admitted))
         .layer(axum::middleware::from_fn(limit::limit_requests));
-    let request = |path: &str| {
-        Request::builder()
-            .method(Method::POST)
-            .uri(path)
-            .body(Body::empty())
-            .unwrap()
-    };
+    let request = |path: &str| Request::post(path).body(Body::empty()).unwrap();
+    // The path earns nothing: an unadmitted speech request gets the 30 s deadline.
     assert_eq!(
-        send(&router, request("/v1/enroll")).await.status,
+        send(&router, request("/v1/speech")).await.status,
         StatusCode::GATEWAY_TIMEOUT
     );
-    for path in ["/v1/speech", "/lab/api/speech"] {
-        assert_eq!(
-            send(&router, request(path)).await.status,
-            StatusCode::OK,
-            "{path}"
+    assert_eq!(
+        send(&router, request("/admitted")).await.status,
+        StatusCode::OK
+    );
+}
+
+/// A request body that sends nothing, ever.
+fn stalled() -> Body {
+    Body::from_stream(futures_util::stream::pending::<
+        Result<Vec<u8>, std::io::Error>,
+    >())
+}
+
+fn stalled_speech(path: &str, headers: &[(header::HeaderName, String)]) -> Request<Body> {
+    let mut request = Request::post(path).header(header::CONTENT_TYPE, "application/json");
+    for (name, value) in headers {
+        request = request.header(name, value);
+    }
+    request.body(stalled()).unwrap()
+}
+
+#[tokio::test(start_paused = true)]
+async fn slow_unauthenticated_speech_bodies_cannot_delay_enrollment_or_health() {
+    let app = app(false, true);
+    let router = service(&app, [192, 0, 2, 1]);
+    let started = tokio::time::Instant::now();
+    // As many stalled bodies as the shared pool has permits, on both speech routes.
+    let stalled: Vec<_> = (0..limit::IN_FLIGHT)
+        .map(|i| {
+            let path = if i % 2 == 0 {
+                "/v1/speech"
+            } else {
+                "/lab/api/speech"
+            };
+            let router = router.clone();
+            tokio::spawn(async move { send(&router, stalled_speech(path, &[])).await.status })
+        })
+        .collect();
+    tokio::task::yield_now().await;
+    let health = send(
+        &router,
+        Request::get("/health").body(Body::empty()).unwrap(),
+    )
+    .await;
+    assert_eq!(health.status, StatusCode::OK);
+    // Enrollment is admitted: it fails on its own merits, not 429 or 504.
+    let enroll = send(
+        &router,
+        Request::post("/v1/enroll")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from("{}"))
+            .unwrap(),
+    )
+    .await;
+    assert!(
+        enroll.status.is_client_error() && enroll.status != StatusCode::TOO_MANY_REQUESTS,
+        "{}",
+        enroll.status
+    );
+    for task in stalled {
+        let status = task.await.unwrap();
+        assert!(
+            [
+                StatusCode::UNAUTHORIZED,
+                StatusCode::FORBIDDEN,
+                StatusCode::NOT_FOUND
+            ]
+            .contains(&status),
+            "{status}"
         );
     }
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "no body was awaited"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_authenticated_speech_body_gets_a_short_read_deadline() {
+    let app = app(false, false);
+    let router = service(&app, [192, 0, 2, 1]);
+    let device = app.session("bot-1", "device").unwrap();
+    let started = tokio::time::Instant::now();
+    let reply = send(
+        &router,
+        stalled_speech(
+            "/v1/speech",
+            &[(header::AUTHORIZATION, format!("Bearer {device}"))],
+        ),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+    assert_eq!(started.elapsed(), speech::BODY_DEADLINE);
+    // An admin session is not a speaker: rejected before the body.
+    let admin = app.session("bot-1", "admin").unwrap();
+    let started = tokio::time::Instant::now();
+    let reply = send(
+        &router,
+        stalled_speech(
+            "/v1/speech",
+            &[(header::AUTHORIZATION, format!("Bearer {admin}"))],
+        ),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+    assert!(started.elapsed() < Duration::from_secs(1));
+}
+
+#[test]
+fn the_engine_endpoint_needs_tls_off_loopback() {
+    for ok in [
+        "https://rivet.example",
+        "http://127.0.0.1:6420",
+        "http://[::1]:6420",
+        "http://localhost:6420",
+    ] {
+        assert!(engine_url(ok, None).is_ok(), "{ok}");
+    }
+    for bad in [
+        "http://rivet.example",
+        "http://10.0.0.5:6420",
+        "http://engine:6420",
+        "https://user:pass@rivet.example",
+        "https://rivet.example#x",
+        "ws://127.0.0.1:6420",
+    ] {
+        assert!(engine_url(bad, None).is_err(), "{bad}");
+    }
+    // The explicit exception names exactly one host.
+    assert!(engine_url("http://engine:6420", Some("engine")).is_ok());
+    assert!(engine_url("http://engine.evil:6420", Some("engine")).is_err());
 }
 
 #[test]

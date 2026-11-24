@@ -14,6 +14,11 @@ use serde_json::{Value, json};
 use std::{sync::Arc, time::Duration};
 use tokio::sync::Notify;
 
+/// `SpeechChunk` at this index is a status probe. A turn commits chunks 0..64, so the
+/// actor answers 64 from turn status alone, without reading text or the pinned voice.
+/// An actor from before the probe reads an absent chunk and gives the same answer.
+const STATUS_PROBE: u32 = 64;
+
 /// One typed actor handle per stream. Streaming requests also hold an event
 /// connection that wakes the chunk wait on `speech.ready` and `turn.*` for this turn.
 pub struct ActorSource {
@@ -141,7 +146,7 @@ impl ChunkSource for ActorSource {
     async fn check(&self) -> Result<()> {
         self.call(Command::SpeechChunk {
             turn_id: self.turn_id.clone(),
-            index: 0,
+            index: STATUS_PROBE,
         })
         .await
         .map(drop)

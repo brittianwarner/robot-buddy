@@ -21,7 +21,7 @@ use rivetkit::{
 use robot_buddy::{
     Bot,
     auth::{self, Certificate, Challenge, Secret, Session},
-    protocol::{Bundle, Call, Command, EnrollmentRequest, SpeechRequest},
+    protocol::{Bundle, Call, Command, EnrollmentRequest},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -44,6 +44,7 @@ struct App {
     lab_token: Option<Secret<String>>,
     speech: Option<Arc<speech::Speech>>,
     limiter: limit::RateLimiter,
+    logins: oidc::UsedLogins,
 }
 fn env(name: &str) -> Result<String> {
     std::env::var(name).with_context(|| format!("{name} required"))
@@ -60,6 +61,29 @@ fn safe_url(raw: &str) -> Result<()> {
                 && u.scheme() == "http"
                 && matches!(u.host_str(), Some("localhost" | "127.0.0.1"))),
         "HTTPS required"
+    );
+    Ok(())
+}
+/// `RIVET_ENDPOINT` carries the engine admin token, so it must be HTTPS. Plaintext is
+/// allowed only to loopback, or to the one host named by `RIVET_ENDPOINT_PLAINTEXT_HOST`
+/// (a private Docker-network service name, for example).
+fn engine_url(raw: &str, plaintext_host: Option<&str>) -> Result<()> {
+    let u = url::Url::parse(raw)?;
+    ensure!(
+        u.username().is_empty() && u.password().is_none() && u.fragment().is_none(),
+        "RIVET_ENDPOINT contains credentials or fragment"
+    );
+    let loopback = match u.host() {
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        Some(url::Host::Domain(host)) => {
+            host == "localhost" || plaintext_host.is_some_and(|named| named == host)
+        }
+        None => false,
+    };
+    ensure!(
+        u.scheme() == "https" || (u.scheme() == "http" && loopback),
+        "RIVET_ENDPOINT requires HTTPS unless it is loopback or RIVET_ENDPOINT_PLAINTEXT_HOST"
     );
     Ok(())
 }
@@ -103,6 +127,8 @@ impl App {
     async fn from_env() -> Result<Self> {
         let key = robot_buddy::config::signing_key()?;
         let engine = env("RIVET_ENDPOINT")?;
+        let plaintext_host = std::env::var("RIVET_ENDPOINT_PLAINTEXT_HOST").ok();
+        engine_url(&engine, plaintext_host.as_deref().filter(|h| !h.is_empty()))?;
         let admin = Secret::new(env("RIVET_TOKEN")?);
         ensure!(
             admin.expose().len() >= 32,
@@ -150,6 +176,7 @@ impl App {
             namespace,
             oidc,
             limiter: limit::RateLimiter::new(limit::RateLimiter::trusted_from_env()?),
+            logins: oidc::UsedLogins::default(),
         })
     }
 }
@@ -159,6 +186,7 @@ fn router(app: Arc<App>) -> Router {
     Router::new()
         .merge(lab::routes())
         .route("/health", get(health))
+        .route("/ready", get(ready))
         .route("/v1/challenge", post(challenge))
         .route("/v1/enroll", post(enroll))
         .route("/v1/speech", post(speech::device))
@@ -238,7 +266,13 @@ fn terminate(child: &tokio::process::Child) {
         let _ = signal::kill(Pid::from_raw(id), signal::Signal::SIGTERM);
     }
 }
-async fn health(State(app): State<Arc<App>>) -> Web<Json<Value>> {
+/// Liveness: the process answers HTTP. It touches nothing else, so the robot can use it
+/// to warm its speech connection without loading the engine.
+async fn health() -> Json<Value> {
+    Json(json!({"status":"ok"}))
+}
+/// Readiness: the Rivet engine answers. 503 without internal detail when it does not.
+async fn ready(State(app): State<Arc<App>>) -> Web<Json<Value>> {
     app.http
         .get(format!("{}/health", app.engine))
         .send()
@@ -409,6 +443,8 @@ fn page(body: &str) -> Response {
     r
 }
 const CLAIM_TTL: i64 = 600;
+/// Lifetime of one sign-in transaction (login cookie, OAuth `state`), spent once.
+const LOGIN_TTL: i64 = 300;
 /// Binds `GET /claim` to `POST /login`: the signed value names the claim it was issued
 /// for, and its CSRF value must come back in the form.
 #[derive(Serialize, Deserialize)]
@@ -434,7 +470,7 @@ fn login_cookie(app: &App) -> CookieSpec {
         name: "buddy_login",
         path: "/auth/callback",
         same_site: "Lax",
-        max_age: CLAIM_TTL,
+        max_age: LOGIN_TTL,
         secure: app.secure_cookies(),
     }
 }
@@ -527,7 +563,7 @@ async fn login(
         state: auth::random(),
         nonce: auth::random(),
         verifier: format!("{}{}", auth::random(), auth::random()),
-        expires: auth::now() + CLAIM_TTL,
+        expires: auth::now() + LOGIN_TTL,
     };
     let mut url = url::Url::parse(&oidc.authorize).reject(Kind::Internal)?;
     url.query_pairs_mut().extend_pairs([
@@ -574,6 +610,12 @@ async fn callback(
         Kind::Forbidden,
     )?;
     let oidc = app.oidc.as_ref().reject(Kind::Unavailable)?;
+    // Spent before the exchange: whatever happens next, this cookie cannot be replayed.
+    match app.logins.spend(&state.state, state.expires, auth::now()) {
+        oidc::Spend::Fresh => {}
+        oidc::Spend::Replayed => return Err(web::ApiError(Kind::Unauthorized)),
+        oidc::Spend::Full => return Err(web::ApiError(Kind::TooManyRequests)),
+    }
     let redirect = app.callback_url();
     let token: Value = async {
         let form = oidc.token_form(&q.code, &state.verifier, &redirect);

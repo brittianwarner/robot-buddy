@@ -15,5 +15,5 @@ USER buddy
 ENV BUDDY_ENGINE_BINARY=/usr/local/bin/rivet-engine BUDDY_DATA_DIR=/data RIVET_ENDPOINT=http://127.0.0.1:6420 RIVETKIT_ENGINE_SPAWN=never RIVET_NAMESPACE=default RIVET_POOL=default RUST_LOG=info
 VOLUME ["/data"]
 EXPOSE 8080 6420
-HEALTHCHECK --interval=15s --timeout=5s --start-period=45s CMD curl -fsS http://127.0.0.1:8080/health || exit 1
+HEALTHCHECK --interval=15s --timeout=5s --start-period=45s CMD curl -fsS http://127.0.0.1:8080/ready || exit 1
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/robot-buddy-server"]

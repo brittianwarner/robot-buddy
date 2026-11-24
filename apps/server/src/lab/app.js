@@ -239,6 +239,7 @@ async function poll() {
     render();
     $("connection").textContent = "Connected · durable replay";
   } catch (e) {
+    window.BuddyVoice?.disconnected();
     $("connection").textContent = "Reconnecting…";
   } finally {
     polling = false;
@@ -443,7 +444,10 @@ setInterval(() => {
 setInterval(poll, 1000);
 setInterval(() => {
   if (csrf && !document.hidden)
-    state().catch(() => ($("connection").textContent = "Session unavailable"));
+    state().catch(() => {
+      window.BuddyVoice?.disconnected();
+      $("connection").textContent = "Session unavailable";
+    });
 }, 5000);
 
 $("inspect-persona").onclick = async () => {

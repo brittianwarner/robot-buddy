@@ -2,8 +2,8 @@
 use super::{
     App, Arc, Bot, Call, Command, Context, Deserialize, Duration, EnrollmentRequest, GetOptions,
     HeaderMap, HeaderValue, IntoResponse, Json, Kind, Reject, Response, Result, Router, Serialize,
-    SpeechRequest, State, StatusCode, TypedClientExt, Value, Web, auth, cookie, get, header, json,
-    post, require, same_origin, web,
+    State, StatusCode, TypedClientExt, Value, Web, auth, cookie, get, header, json, post, require,
+    same_origin, web,
 };
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -310,17 +310,21 @@ async fn device_call(app: &App, bot: &str, target: &str, command: Command) -> Re
         .context("actor request timed out")?
 }
 
+/// Cookie, Origin and CSRF are checked from headers before the body is read.
 async fn speech(
     State(app): State<Arc<App>>,
+    admitted: Option<axum::Extension<super::limit::Admitted>>,
     headers: HeaderMap,
-    Json(body): Json<SpeechRequest>,
+    body: axum::body::Body,
 ) -> Web<Response> {
     let s = session(&app, &headers, true)?;
     let bot = s.bot.reject(Kind::BadRequest)?;
     require(app.speech.is_some(), Kind::Unavailable)?;
+    let body = super::speech::read(body).await?;
     let device = app.session(&bot, "device").reject(Kind::Internal)?;
+    let admitted = admitted.map(|axum::Extension(admitted)| admitted);
     // Speech maps its own errors: 429 at the stream cap, 400 for an unknown turn.
-    super::speech::stream(&app, &bot, &device, body).await
+    super::speech::stream(&app, admitted.as_ref(), &bot, &device, body).await
 }
 
 async fn voice_js(State(app): State<Arc<App>>) -> Response {

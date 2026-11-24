@@ -215,6 +215,9 @@ window.BuddyVoice = (() => {
       watched.clear();
       watched.add(id);
     },
+    // A lost connection ends automatic playback: a reply that completes while
+    // disconnected is not spoken when catch-up events arrive. Replay still works.
+    disconnected: () => watched.clear(),
     get busy() {
       return busy;
     },

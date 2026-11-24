@@ -1,11 +1,13 @@
 //! Strict `OpenID` Connect ID-token validation against the configured issuer's keys.
 use super::{
-    Arc, Context, Deserialize, Duration, LoginState, Result, Value, auth, ensure, env, safe_url,
+    Arc, Context, Deserialize, Duration, LOGIN_TTL, LoginState, Result, Value, auth, ensure, env,
+    safe_url,
 };
 use jsonwebtoken::{
     Algorithm, DecodingKey, Validation, decode, decode_header,
-    jwk::{Jwk, JwkSet, KeyAlgorithm, PublicKeyUse},
+    jwk::{Jwk, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse},
 };
+use std::collections::HashMap;
 use tokio::{sync::Mutex, time::Instant};
 
 /// How long fetched issuer keys are trusted before a refetch.
@@ -144,13 +146,62 @@ fn key_matches(jwk: &Jwk, alg: Algorithm) -> bool {
         .public_key_use
         .as_ref()
         .is_none_or(|u| matches!(u, PublicKeyUse::Signature));
+    // RFC 7517 4.3: when present, `key_ops` must allow verification.
+    let verifies = jwk
+        .common
+        .key_operations
+        .as_ref()
+        .is_none_or(|ops| ops.contains(&KeyOperations::Verify));
     let compatible = jwk.common.key_algorithm.is_none_or(|a| {
         matches!(
             (a, alg),
             (KeyAlgorithm::RS256, Algorithm::RS256) | (KeyAlgorithm::ES256, Algorithm::ES256)
         )
     });
-    usable && compatible
+    usable && verifies && compatible
+}
+
+/// Login transactions already presented at the callback, so each signed login cookie is
+/// spent once: a failed or repeated exchange needs a fresh sign-in. Process-local, which
+/// matches the single server instance. Bounded: expired entries go first; when every
+/// entry is still live the callback is refused (429) instead of forgetting one, since
+/// forgetting would allow a replay.
+#[derive(Default)]
+pub struct UsedLogins(std::sync::Mutex<HashMap<String, i64>>);
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Spend {
+    Fresh,
+    Replayed,
+    Full,
+}
+
+impl UsedLogins {
+    const MAX: usize = 4096;
+
+    /// Marks the transaction named by `state` spent until `expires`, atomically.
+    pub fn spend(&self, state: &str, expires: i64, now: i64) -> Spend {
+        self.spend_bounded(state, expires, now, Self::MAX)
+    }
+
+    fn spend_bounded(&self, state: &str, expires: i64, now: i64, max: usize) -> Spend {
+        let mut used = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let key = auth::digest(state);
+        if used.contains_key(&key) {
+            return Spend::Replayed;
+        }
+        if used.len() >= max {
+            used.retain(|_, until| *until > now);
+            if used.len() >= max {
+                return Spend::Full;
+            }
+        }
+        used.insert(key, expires);
+        Spend::Fresh
+    }
 }
 
 #[derive(Clone, Deserialize)]
@@ -193,7 +244,7 @@ pub(super) async fn validate(
         "ID token subject/nonce mismatch"
     );
     ensure!(
-        claims.iat <= auth::now() + 30 && claims.iat >= state.expires - 660,
+        claims.iat <= auth::now() + 30 && claims.iat >= state.expires - LOGIN_TTL - 60,
         "ID token issued outside login window"
     );
     if claims.aud.as_array().is_some_and(|v| v.len() > 1) || claims.azp.is_some() {
@@ -270,7 +321,7 @@ pub(crate) mod tests {
             state: "state".into(),
             nonce: "nonce".into(),
             verifier: String::new(),
-            expires: auth::now() + 600,
+            expires: auth::now() + LOGIN_TTL,
         }
     }
 
@@ -370,6 +421,16 @@ pub(crate) mod tests {
             );
             server.abort();
         }
+        // `key_ops` must include `verify` when present.
+        for (ops, accepted) in [(json!(["sign"]), false), (json!(["verify"]), true)] {
+            let mut keys: Value = serde_json::from_str(FIXTURE)?;
+            keys["keys"][0]["key_ops"] = ops.clone();
+            let (url, _, server) = jwks_server(keys).await?;
+            let provider = provider(url, JwksCache::default());
+            let result = validate(&http, &provider, &login_state(), &token, "owner").await;
+            assert_eq!(result.is_ok(), accepted, "JWK key_ops={ops}");
+            server.abort();
+        }
         // Keys without `use`/`alg` remain acceptable.
         let mut keys: Value = serde_json::from_str(FIXTURE)?;
         let key = keys["keys"][0].as_object_mut().context("key")?;
@@ -433,5 +494,18 @@ pub(crate) mod tests {
         provider.client_secret = Some(auth::Secret::new("s3cret".into()));
         let form = provider.token_form("code", "verifier", "https://b/auth/callback");
         assert!(form.contains(&("client_secret", "s3cret")));
+    }
+
+    #[test]
+    fn a_login_transaction_is_spent_once_and_the_ledger_is_bounded() {
+        let used = UsedLogins::default();
+        assert_eq!(used.spend_bounded("a", 100, 0, 2), Spend::Fresh);
+        assert_eq!(used.spend_bounded("a", 100, 50, 2), Spend::Replayed);
+        assert_eq!(used.spend_bounded("b", 10, 0, 2), Spend::Fresh);
+        // Full of live entries: refuse rather than forget one.
+        assert_eq!(used.spend_bounded("c", 100, 5, 2), Spend::Full);
+        // "b" expired: it makes room, and "a" stays spent.
+        assert_eq!(used.spend_bounded("c", 100, 11, 2), Spend::Fresh);
+        assert_eq!(used.spend_bounded("a", 100, 12, 2), Spend::Replayed);
     }
 }
