@@ -5,16 +5,52 @@ ARM64 with the pinned Rust 1.100.0 toolchain (`rust-toolchain.toml`). It runs
 on both supported Pi OS bases, with default features and with the full Pip
 features (`pi-vision` + `onnx-wake`).
 
-## Verdict (qualifying source eb639ad)
+## Verdict: GREEN at 82e8d5b
+
+Both OS gates passed in a single run at
+`82e8d5b51a02f98ccec2ecc1b2134efe10264184` (it includes `c5d7c08` and
+`0f0bc60`). Nothing was retried. The log has no `... FAILED` lines.
+
+- Run on 2026-11-24, 15:20–15:45 ET, with `CARGO_JOBS=2 infra/run-arm64-matrix.sh both`, from a clean detached worktree at that SHA (0 modified files). Docker had no soak running at the same time.
+- Workspace tree hash `ff96746044b3773bc72c912bcf195b869e52f22444672241747f021869b6b75f`, matching on the host and in both containers.
+- Toolchain on both OSes: `rustc 1.100.0 (0ef1bc386 2026-11-09)`, `cargo 1.100.0 (3acc79c0c 2026-11-05)`, `clippy 0.1.100 (0ef1bc3860 2026-11-09)`. OpenCV 4.10.0.
+- Run log sha256: `1c0172e7e4e4ca2d778a16c15734205a70a65d1292fd39f7502eb65c1865ef84` (kept outside the repo; not committed).
+
+| Phase | Trixie (Debian 13, OpenCV prefix `/usr`) | Bookworm (Debian 12, OpenCV prefix `/opt/robot-buddy/opencv-4.10`) |
+| --- | --- | --- |
+| `[FMT]` `cargo fmt --check` | pass | pass |
+| `[DEFAULT]` clippy `-D warnings` | pass | pass |
+| `[DEFAULT]` `cargo test --workspace` | pass (robot bin 252 passed) | pass (robot bin 252 passed) |
+| `[DEFAULT]` `cargo test -p robot-buddy --no-default-features` | pass | pass |
+| `[FULL]` clippy `--all-features -D warnings` | pass | pass |
+| `[FULL]` `cargo test --workspace --all-features` | pass (robot bin 254 passed, 2 ignored) | pass (robot bin 254 passed, 2 ignored) |
+| `[FULL]` release build (`pi-vision,onnx-wake`) | pass | pass |
+| `[ARTIFACT]` AArch64 PIE ELF, stripped | pass | pass |
+| `[ARTIFACT]` `ldd`: no `not found`, OpenCV linked | pass (`/lib/aarch64-linux-gnu/*.so.410`) | pass (all 8 OpenCV libraries under `/opt/robot-buddy/opencv-4.10/lib/`) |
+| `[ARTIFACT]` `setup-card` as `nobody` | pass (`65534:65534:600`) | pass (`65534:65534:600`) |
+| `[STRESS]` 20 runs × `--test-threads=8`, no retries | 20/20 | 20/20 |
+| Gate wall time | 802.7 s | 680.9 s |
+
+Full-Pip release ELF (`robot-buddy-robot --features pi-vision,onnx-wake`):
+
+| OS | SHA-256 | GNU BuildID |
+| --- | --- | --- |
+| Trixie | `015c483aa55bd4117e08af40d341093c8532b896a7231094a4feac9fead3c886` | `d1e4a958fdb6efe4c56b61d4309a58cabd45b5e7` |
+| Bookworm | `f2efc47f08ff4dfc7a24fd136b1eaa8ab9b66d069760235c0fe8d06bec826b14` | `ab9308590c285643338a76c78cfcfe000653cd37` |
+
+- **No default-feature release ELF is built.** The gate builds release only with the full Pip features. Default features are covered by the clippy and test rows above.
+- **Neither ELF matches the soak's robot ELF at 82e8d5b** (sha256 `be7cae4e…2768b`, BuildID `c15c88b7594bd0919c5a0bf78609c2b01c6162e9`). That is expected. The matrix uses its own build recipe: `arm64-matrix.Dockerfile`, a `/src/target` cache mount, `-j2`, and on Bookworm a self-built private OpenCV. It does not use the soak's deployment-image recipe. The release coordinator accepted this as a recipe difference. Byte-identity against the soak ELF has to be checked with the deployment recipe, not with this matrix.
+- The Bookworm controller test that failed on eb639ad (below) passed here inside the FULL suite.
+
+## Superseded: eb639ad run
+
+**Superseded by the 82e8d5b run above.** The eb639ad run is kept as
+intermediate evidence only.
 
 | OS | Result | First failure |
 | --- | --- | --- |
-| Trixie (Debian 13, packaged OpenCV 4.10.0) | **PASSED** (every phase, including STRESS 20/20) | none |
-| Bookworm (Debian 12, private OpenCV 4.10.0) | **FAILED** at `[FULL] cargo test --workspace --all-features` | `controller::tests::offline_announcement_participates_in_busy_and_reaps_before_wake_or_reconnect` |
-
-So the matrix is **not fully green yet**. The Bookworm failure was not retried.
-The gate stops at its first failure, so Bookworm's full-feature release build,
-ARTIFACT, and STRESS phases did not run in this qualifying run.
+| Trixie (Debian 13, packaged OpenCV 4.10.0) | PASSED (every phase, including STRESS 20/20) | none |
+| Bookworm (Debian 12, private OpenCV 4.10.0) | FAILED at `[FULL] cargo test --workspace --all-features`, not retried. **Superseded.** | `controller::tests::offline_announcement_participates_in_busy_and_reaps_before_wake_or_reconnect` |
 
 ## Tooling
 
@@ -60,7 +96,7 @@ Nothing else in the gate changed.
   This is a source-level argument, not an ELF comparison.
 - Later commits (`aad1a85`, `a70271c`, `6500385`) change only `docs/` and `tests/pip-e2e/`. They do not touch the workspace tree.
 
-## Qualifying run results
+## eb639ad run results (superseded)
 
 Log: [`evidence/arm64-matrix/qualifying-eb639ad.log`](evidence/arm64-matrix/qualifying-eb639ad.log)
 (sha256 `6db8fb66ef2e4f84754bfc8834f536e275a3bdd7e4839911bc77d40cd881fa86`).
@@ -79,7 +115,7 @@ Started 2026-11-24 at about 14:08 ET with `CARGO_JOBS=2 infra/run-arm64-matrix.s
 - STRESS: **20/20 passed** (`3 passed; 0 failed` each run, `--test-threads=8`, no retries).
 - `=== ARM64 Matrix Gate PASSED: trixie (SOURCE_SHA=eb639ad… TREE_HASH=5e357f0a…) ===`
 
-### Bookworm: FAILED in FULL tests (609.7 s)
+### Bookworm: FAILED in FULL tests (609.7 s), superseded by 82e8d5b
 
 - `Debian GNU/Linux 12 (bookworm)`, `rustc 1.100.0`, opencv4 4.10.0 with prefix `/opt/robot-buddy/opencv-4.10`.
 - FMT ok. DEFAULT: clippy ok, workspace tests ok (robot bin 251 passed), `--no-default-features` ok. FULL clippy ok.
