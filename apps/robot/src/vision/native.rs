@@ -1,5 +1,7 @@
 //! `OpenCV` owns the published `YuNet` postprocessing and five-landmark `SFace` alignment.
-use super::{Config, Detected, Engine, Feature, Frame, HEIGHT, WIDTH};
+use super::{
+    Config, Detected, Engine, Feature, Frame, HEIGHT, JpegEncoder, WIDTH, select_largest_box,
+};
 use anyhow::{Result, ensure};
 use opencv::{
     core::{self, Mat, Ptr, Size, Vector},
@@ -11,6 +13,15 @@ use opencv::{
 pub(super) struct OpenCv {
     detector: Ptr<FaceDetectorYN>,
     recognizer: Option<Ptr<FaceRecognizerSF>>,
+}
+
+/// Stateless I420-to-JPEG encoder kept outside the detector/recognizer mutex.
+pub(super) struct OpenCvJpeg;
+
+impl JpegEncoder for OpenCvJpeg {
+    fn encode(&self, frame: &Frame) -> Result<Vec<u8>> {
+        encode_jpeg(frame)
+    }
 }
 
 impl OpenCv {
@@ -63,29 +74,31 @@ impl Engine for OpenCv {
         let image = bgr(frame)?;
         let mut faces = Mat::default();
         self.detector.detect(&image, &mut faces)?;
-        let count = usize::try_from(faces.rows())?;
-        let mut largest = None;
-        let mut best = 0;
-        let mut area = 0.0;
-        for row in 0..faces.rows() {
-            let rect = [
-                *faces.at_2d(row, 0)?,
-                *faces.at_2d(row, 1)?,
-                *faces.at_2d(row, 2)?,
-                *faces.at_2d(row, 3)?,
-            ];
-            ensure!(
-                rect.iter().all(|v: &f32| v.is_finite()) && rect[2] > 0.0 && rect[3] > 0.0,
-                "invalid face bounds"
-            );
-            if rect[2] * rect[3] > area {
-                area = rect[2] * rect[3];
-                best = row;
-                largest = Some(rect);
-            }
+        let rows = usize::try_from(faces.rows())?;
+        if rows > 0 {
+            ensure!(faces.cols() >= 4, "unexpected face detector columns");
         }
-        let feature =
-            if let (true, Some(rec)) = (extract && largest.is_some(), self.recognizer.as_mut()) {
+        let mut raw_boxes: Vec<[f32; 4]> = Vec::with_capacity(rows);
+        for row in 0..faces.rows() {
+            raw_boxes.push([
+                *faces.at_2d::<f32>(row, 0)?,
+                *faces.at_2d::<f32>(row, 1)?,
+                *faces.at_2d::<f32>(row, 2)?,
+                *faces.at_2d::<f32>(row, 3)?,
+            ]);
+        }
+        let (count, selected) = select_largest_box(raw_boxes);
+        let (best, largest) = if let Some((index, rect)) = selected {
+            (i32::try_from(index)?, Some(rect))
+        } else {
+            (0, None)
+        };
+        let feature = if let (true, Some(rec)) =
+            (extract && largest.is_some(), self.recognizer.as_mut())
+        {
+            let landmarks_ok = faces.cols() >= 14
+                && (4..14).all(|col| faces.at_2d::<f32>(best, col).is_ok_and(|v| v.is_finite()));
+            if landmarks_ok {
                 let mut aligned = Mat::default();
                 rec.align_crop(&image, &faces.row(best)?, &mut aligned)?;
                 let mut values = Mat::default();
@@ -93,16 +106,15 @@ impl Engine for OpenCv {
                 Some(Feature::new(values.data_typed::<f32>()?)?)
             } else {
                 None
-            };
+            }
+        } else {
+            None
+        };
         Ok(Detected {
             count,
             largest,
             feature,
         })
-    }
-
-    fn jpeg(&self, frame: &Frame) -> Result<Vec<u8>> {
-        encode_jpeg(frame)
     }
 }
 

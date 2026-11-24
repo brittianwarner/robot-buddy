@@ -44,10 +44,31 @@ pub(super) fn key(name: &str) -> Result<String> {
     Ok(name)
 }
 
+struct DirLock(File);
+
+impl DirLock {
+    fn acquire(file: File) -> Result<Self> {
+        file.try_lock().context("gallery already in use")?;
+        Ok(Self(file))
+    }
+
+    fn sync_all(&self) -> std::io::Result<()> {
+        self.0.sync_all()
+    }
+}
+
+impl Drop for DirLock {
+    fn drop(&mut self) {
+        // Explicit LOCK_UN releases the open-file-description flock immediately
+        // even if a concurrently forked child process has not yet called exec().
+        let _ = self.0.unlock();
+    }
+}
+
 pub(super) struct Gallery {
     path: PathBuf,
     // Exclusive process ownership prevents competing robot processes from losing updates.
-    directory: File,
+    directory: DirLock,
     rows: BTreeMap<String, Vec<Feature>>,
 }
 
@@ -68,7 +89,7 @@ impl Gallery {
             meta.uid() == uid && meta.mode() & 0o777 == 0o700,
             "gallery must be service-owned and mode 0700"
         );
-        directory.try_lock().context("gallery already in use")?;
+        let directory = DirLock::acquire(directory)?;
         let mut rows = BTreeMap::new();
         for entry in fs::read_dir(path)? {
             let file = entry?.path();
@@ -142,7 +163,11 @@ impl Gallery {
             .map(|(_, name)| name.clone())
     }
 
-    pub(super) fn add(&mut self, name: &str, feature: Feature) -> Result<()> {
+    pub(super) fn contains(&self, name: &str) -> Result<bool> {
+        Ok(self.rows.contains_key(&key(name)?))
+    }
+
+    pub(super) fn check_add(&self, name: &str) -> Result<String> {
         let name = key(name)?;
         let old = self.rows.get(&name);
         ensure!(
@@ -153,6 +178,12 @@ impl Gallery {
             old.is_none_or(|rows| rows.len() < MAX_SAMPLES),
             "person already has eight samples"
         );
+        Ok(name)
+    }
+
+    pub(super) fn add(&mut self, name: &str, feature: Feature) -> Result<()> {
+        let name = self.check_add(name)?;
+        let old = self.rows.get(&name);
         let temp = self.path.join(".pending");
         let mut out = OpenOptions::new()
             .write(true)
