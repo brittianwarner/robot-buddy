@@ -147,7 +147,7 @@ docker compose ps
 curl --fail http://127.0.0.1:8080/ready
 ```
 
-- **Ports.** `compose.yaml` binds 8080 (registration) and 6420 (Rivet HTTP and WebSocket) to localhost only. Put your own TLS reverse proxy in front. It must pass WebSockets through and must not log credentials or query strings. The image has no certificate manager and no identity provider.
+- **Ports.** `compose.yaml` binds 8080 (registration) and 6420 (Rivet HTTP and WebSocket) to localhost only. Put your own TLS reverse proxy in front, with a public-CA certificate for two names you control ([Caddy example](DEPLOYMENT.md#tls-in-front-of-the-server)). It must pass WebSockets through and must not log credentials or query strings. The image has no certificate manager and no identity provider.
 - **Local model.** Set `AI_PROVIDER=openai_compatible` and `AI_BASE_URL`, for example `http://host.docker.internal:11434/v1`. Plain HTTP to a host other than loopback also needs `AI_ALLOW_PLAINTEXT_MODEL=1`. Use that only on a trusted private network. `AI_REASONING_EFFORT` works only with OpenRouter.
 - **Loopback-only testing.** Set `BUDDY_PUBLIC_URL=http://127.0.0.1:8080`, `BUDDY_PUBLIC_RIVET_URL=http://127.0.0.1:6420` and `BUDDY_ALLOW_INSECURE_LOCAL=true`. Every other URL must be HTTPS.
 - **External engine.** If `RIVET_ENDPOINT` points at an engine elsewhere, it must be HTTPS. The one exception is plain HTTP to the host named in `RIVET_ENDPOINT_PLAINTEXT_HOST`, such as a private Docker-network service name.

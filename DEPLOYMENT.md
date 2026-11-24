@@ -28,7 +28,7 @@ Nothing from butty is copied into this repository ([NOTICE.md](NOTICE.md)).
 
 This is the only question that needs Brittian. Everything else in this guide comes from this repository, your butty checkout, or your own Pip.
 
-- **Run your own backend (simplest for bring-up).** You need nothing from Brittian. Run `init` fresh in §1, point two HTTPS names you control at a TLS proxy in front of `:8080` (`BUDDY_PUBLIC_URL`) and `:6420` (`BUDDY_PUBLIC_RIVET_URL`), and set up OIDC (below).
+- **Run your own backend (simplest for bring-up).** You need nothing from Brittian. You need a domain and a public-CA certificate for two names ([TLS in front of the server](#tls-in-front-of-the-server) has a Caddy recipe). Run `init` fresh in §1, point the two HTTPS names at a TLS proxy in front of `:8080` (`BUDDY_PUBLIC_URL`) and `:6420` (`BUDDY_PUBLIC_RIVET_URL`), and set up OIDC (below).
 - **Reuse Brittian's running backend.** Ask Brittian for access to the host that runs the container, its `secrets/secrets.env`, the issuer key used to provision robots, the `/data` volume, DNS and TLS for the two public origins, and the OIDC app already registered for it. Do not run `init` against that deployment: it would replace its secrets.
 
 **Set up OIDC owner sign-in before bring-up.** The server starts with `OIDC_ISSUER` empty (`apps/server/src/config.rs`), and Pip still enrolls and connects. But then nobody can claim the robot, and an unclaimed Pip does not talk or open its operator panel:
@@ -139,7 +139,30 @@ docker compose ps
 curl --fail http://127.0.0.1:8080/ready
 ```
 
-Route the registration origin to `127.0.0.1:8080`, and the Rivet origin (including WebSocket upgrades) to `127.0.0.1:6420` through your TLS proxy. Do not log claim URLs, request credentials or query strings. [compose.yaml](compose.yaml) mounts a named volume at `/data`. One running engine per volume; stop it for a consistent backup and keep the matching secrets. Use the [backend guide](docs/architecture/backend.md) for restore or S3 setup. The local Compose lab and `--simulate` are development paths, not the hardware deployment.
+Route the registration origin to `127.0.0.1:8080`, and the Rivet origin (including WebSocket upgrades) to `127.0.0.1:6420` through your TLS proxy ([TLS in front of the server](#tls-in-front-of-the-server)). Do not log claim URLs, request credentials or query strings. [compose.yaml](compose.yaml) mounts a named volume at `/data`. One running engine per volume; stop it for a consistent backup and keep the matching secrets. Use the [backend guide](docs/architecture/backend.md) for restore or S3 setup. The local Compose lab and `--simulate` are development paths, not the hardware deployment.
+
+### TLS in front of the server
+
+Pip talks to the server only over HTTPS and WSS. On the robot, `BUDDY_SERVER_URL` and the Rivet endpoint the server hands back at enrollment must be `https://` or `wss://`; plain HTTP is accepted only to `localhost` or `127.0.0.1` under `--simulate` (`safe_url` in `apps/robot/src/config.rs`). The server likewise refuses a non-HTTPS `BUDDY_PUBLIC_URL` or `BUDDY_PUBLIC_RIVET_URL` unless `BUDDY_ALLOW_INSECURE_LOCAL=true` and the host is loopback (`apps/server/src/config.rs`).
+
+The robot's HTTPS client (reqwest with rustls) and its Rivet WebSocket client (`rivetkit-client` 3.1.1 over `tokio-tungstenite` with rustls) both trust the bundled Mozilla root set (`webpki-roots`) and the Pi's system trust store (`rustls-native-certs`); `rivetkit-client` turns on both sets (`cargo tree -p robot-buddy-robot -e features -i rustls-native-certs`). The owner's phone also opens `BUDDY_PUBLIC_URL` to claim. So:
+
+- **Use a domain you control and certificates from a public CA.** Point two DNS names at the server host, one for `BUDDY_PUBLIC_URL` and one for `BUDDY_PUBLIC_RIVET_URL`. Nothing needs to be installed on the Pi or the phone.
+- A private CA also works for the robot if you add it to the Pi's store (copy it into `/usr/local/share/ca-certificates/`, then `update-ca-certificates`; the [deployment rehearsal](tests/pip-deploy-qa/rehearsal.mjs) does this), but every phone used to claim must trust it too.
+
+[compose.yaml](compose.yaml) publishes the server on `127.0.0.1:8080` and the Rivet engine on `127.0.0.1:6420`. A Caddy reverse proxy on the same host is the shortest recipe. Caddy gets public certificates by itself once both names resolve to the host and ports 80 and 443 reach it, and `reverse_proxy` passes WebSocket upgrades through. `/etc/caddy/Caddyfile`, with your own names:
+
+```caddyfile
+buddy.example.com {
+	reverse_proxy 127.0.0.1:8080
+}
+
+rivet.buddy.example.com {
+	reverse_proxy 127.0.0.1:6420
+}
+```
+
+Then set `BUDDY_PUBLIC_URL=https://buddy.example.com` and `BUDDY_PUBLIC_RIVET_URL=https://rivet.buddy.example.com` in `.env`, run `docker compose up -d`, and check `curl --fail https://buddy.example.com/ready` from another machine. Caddy keeps no access log unless you add a `log` directive. Leave it out: claim URLs carry a token in the query string. Caddy sends `X-Forwarded-For`; the server's per-client rate limits use it only from addresses listed in `BUDDY_TRUSTED_PROXY` (the proxy's address as the server sees it, see [.env.example](.env.example)). Left empty, every request through the proxy shares one rate-limit bucket.
 
 ## 2. Build the Linux ARM64 binary
 
