@@ -1,8 +1,7 @@
 //! The setup hotspot's name and password, generated once per robot and kept in a
-//! 0600 file in the service's state directory. The robot has no display of its
-//! own, so `robot-buddy-robot setup-card`, run once at provisioning as the
-//! service account, prints them with a QR code for a printed card. The loopback
-//! panel shows the same QR when a kiosk is attached.
+//! 0600 file in the service's state directory. `robot-buddy-robot setup-card`,
+//! run once at provisioning as the service account, prints a QR for a setup
+//! card. During setup the physical eyes and loopback kiosk can show that QR.
 //!
 //! The password is a possession token like a router's sticker: whoever holds
 //! the card can join the setup network while it is up. Deleting the file

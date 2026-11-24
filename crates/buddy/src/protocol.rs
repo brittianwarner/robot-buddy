@@ -9,6 +9,9 @@
 use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
+mod expression;
+pub use expression::{Emotion, ExpressionCue, FACE_EXPRESS, Gesture};
+
 /// Deserialize `T` and fail on any field `T` would have ignored, naming its
 /// path. Use with `#[serde(deserialize_with = "strict")]` on write inputs.
 pub fn strict<'de, D, T>(deserializer: D) -> Result<T, D::Error>

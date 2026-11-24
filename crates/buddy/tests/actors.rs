@@ -1412,7 +1412,11 @@ async fn restart_interrupts_streams_and_fails_closed_on_unresolved_tools() -> Re
 
     // Stopped inside the effect: the new process resumes the ready checkpoint, finds the
     // intent without a receipt and fails closed instead of running the effect again.
-    let done = tool.events.wait_terminal(&tool.turn, WAIT).await?;
+    tool.events.wait_terminal(&tool.turn, WAIT).await?;
+    // The new registry can emit its second start before the client resubscribes.
+    // A terminal push is not evidence that this socket saw the entire sequence.
+    tool.events.pull().await?;
+    let done = tool.events.of_turn(&tool.turn);
     assert_eq!(
         kinds(&done),
         [
@@ -1446,7 +1450,65 @@ async fn restart_interrupts_streams_and_fails_closed_on_unresolved_tools() -> Re
 // Wire fixtures captured from the actor
 // ---------------------------------------------------------------------------------------
 
-/// Every output event kind the actor emits, captured from real turns. Each event is checked
+/// A mock Rig turn on the real actor: a second express call cannot move twice; only
+/// live subscribers receive the cue and ordinary speech stays plain dialogue.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "needs the isolated engine; run bun run test:integration"]
+async fn expression_push_is_typed_and_replay_is_inert() -> Result<()> {
+    use robot_buddy::protocol::FACE_EXPRESS;
+    const ASK: &str = "Golden fixture expression turn";
+    let (h, _shared) = start().await;
+    h.mock.script(ASK, |r| {
+        if r.spoken {
+            sse::text("Hello!")
+        } else if r.tool_results < 2 {
+            let args = json!({"emotion":"happy","intensity":0.75,"gesture":"nod"});
+            sse::tool(
+                if r.tool_results == 0 {
+                    "offer"
+                } else {
+                    "again"
+                },
+                "express",
+                &args,
+            )
+        } else {
+            sse::text("READY")
+        }
+    });
+    let b = TestBot::enroll(h).await?;
+    let mut events = b.events().await?;
+    let turn = b.submit("golden-expression", ASK).await?;
+    let done = events.wait_terminal(&turn, WAIT).await?;
+    assert_eq!(end_kind(&done), Some("turn.completed"));
+    let mut cues = done.iter().filter(|s| s.event.kind == FACE_EXPRESS);
+    let sequence = cues.next().context("expression marker")?.event.sequence;
+    assert!(cues.next().is_none(), "second call offered another cue");
+    assert_eq!(
+        done.iter()
+            .filter(|s| s.event.kind == "tool.completed")
+            .count(),
+        2,
+        "both tool calls finished"
+    );
+    let pushed = events.wait_pushed(sequence, WAIT).await?;
+    golden_event("face_express", &pushed)?;
+    let page = events.replayed(sequence - 1).await?;
+    let replayed = page.first().context("missing replay marker")?;
+    assert_eq!(
+        (replayed.sequence, &replayed.turn_id, replayed.kind.as_str()),
+        (sequence, &turn, FACE_EXPRESS)
+    );
+    assert_eq!(replayed.payload, json!({}));
+    assert!(replayed.expression().is_none());
+    assert_eq!(
+        b.conv(Command::SpokenAnswer { turn_id: turn }).await?["text"],
+        "Hello!"
+    );
+    Ok(())
+}
+
+/// Replayable output event kinds, captured from real turns. Each event is checked
 /// twice: the pushed copy must equal the replayed copy, and both must equal the fixture in
 /// `fixtures/protocol/` once sequence and turn ID are normalized. `turn.interrupted` is
 /// captured by the restart test. `BUDDY_UPDATE_GOLDEN=1` rewrites the fixtures.
@@ -1696,8 +1758,7 @@ fn check_hits(state: &Value) -> Result<()> {
     let ids = |query: &str| -> Vec<i64> {
         hits[query]
             .as_array()
-            .map(|a| a.iter().filter_map(turn_number).collect())
-            .unwrap_or_default()
+            .map_or_default(|a| a.iter().filter_map(turn_number).collect())
     };
     ensure!(
         ids("marker123") == [123],

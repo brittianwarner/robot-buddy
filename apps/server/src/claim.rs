@@ -9,8 +9,8 @@ use super::{App, Command, Secret, config::origin_of, limit::Client, oidc, web};
 use axum::{
     Extension,
     body::Body,
-    extract::{Query, State},
-    http::{HeaderMap, HeaderValue, header},
+    extract::{Query, State, rejection::QueryRejection},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Redirect, Response},
 };
 use robot_buddy::auth;
@@ -174,7 +174,11 @@ fn page_csp(form_action: &str) -> String {
     )
 }
 
-pub async fn claim(State(app): State<Arc<App>>, Query(q): Query<ClaimQuery>) -> Web<Response> {
+pub async fn claim(
+    State(app): State<Arc<App>>,
+    query: Result<Query<ClaimQuery>, QueryRejection>,
+) -> Web<Response> {
+    let Query(q) = query.reject(Kind::BadRequest)?;
     require(valid_claim(&q.bot, &q.token), Kind::BadRequest)?;
     let Some(oidc) = app.oidc.as_ref() else {
         return Ok(page(
@@ -199,9 +203,18 @@ pub async fn claim(State(app): State<Arc<App>>, Query(q): Query<ClaimQuery>) -> 
         escape(&q.token),
         escape(&form.csrf)
     ));
-    // Browsers apply form-action to the login POST's redirect chain too.
+    // Browsers apply form-action to every hop of the login POST's redirect chain,
+    // including federated SSO or separate IdP login origins. Allow HTTPS hops so
+    // multi-origin IdP flows work while still blocking plaintext, data: and
+    // javascript: form targets; loopback HTTP is added only when local insecure
+    // discovery configured a non-HTTPS authorization endpoint.
     let authorize_origin = origin_of(&oidc.authorize).reject(Kind::Internal)?;
-    let csp = page_csp(&format!("'self' {authorize_origin}"));
+    let form_action = if authorize_origin.starts_with("https://") {
+        "'self' https:"
+    } else {
+        "'self' https: http://127.0.0.1:* http://localhost:*"
+    };
+    let csp = page_csp(form_action);
     let signed = auth::sign(app.key.expose(), "claim-form", &form).reject(Kind::Internal)?;
     let headers = response.headers_mut();
     headers.insert(
@@ -284,26 +297,62 @@ pub async fn login(
 
 #[derive(Deserialize)]
 pub struct Callback {
-    code: String,
-    state: String,
+    #[serde(default)]
+    code: Option<String>,
+    #[serde(default)]
+    state: Option<String>,
+    #[serde(default)]
+    error: Option<String>,
 }
 
 pub async fn callback(
     State(app): State<Arc<App>>,
     headers: HeaderMap,
-    Query(q): Query<Callback>,
+    query: Result<Query<Callback>, QueryRejection>,
 ) -> Web<Response> {
+    let Query(q) = query.reject(Kind::BadRequest)?;
     let id = cookie(&headers, "buddy_login").reject(Kind::Unauthorized)?;
     let oidc = app.oidc.as_ref().reject(Kind::Unavailable)?;
+    let state = q
+        .state
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .reject(Kind::BadRequest)?;
+    if q.error.as_deref().is_some_and(|e| !e.is_empty()) {
+        // Verify and spend the sign-in so a forged error callback cannot cancel
+        // the owner's in-flight login, while a real IdP error finishes cleanly
+        // without echoing untrusted query parameters.
+        match app.logins.take(id, state, auth::now()) {
+            (Take::Found, Some(_)) => {}
+            (Take::Mismatch, _) => return Err(ApiError(Kind::Forbidden)),
+            _ => return Err(ApiError(Kind::Unauthorized)),
+        }
+        tracing::warn!("sign-in refused by identity provider");
+        let mut response = page(
+            "<p>Sign-in was cancelled or could not be completed. \
+             Return to your robot's claim link to try again.</p>",
+        );
+        *response.status_mut() = StatusCode::BAD_REQUEST;
+        response.headers_mut().insert(
+            header::SET_COOKIE,
+            login_cookie(&app).clear().reject(Kind::Internal)?,
+        );
+        return Ok(response);
+    }
+    let code = q
+        .code
+        .as_deref()
+        .filter(|c| !c.is_empty())
+        .reject(Kind::BadRequest)?;
     // Spent before the exchange: whatever happens next, this sign-in cannot be replayed.
-    let login = match app.logins.take(id, &q.state, auth::now()) {
+    let login = match app.logins.take(id, state, auth::now()) {
         (Take::Found, Some(login)) => login,
         (Take::Mismatch, _) => return Err(ApiError(Kind::Forbidden)),
         _ => return Err(ApiError(Kind::Unauthorized)),
     };
     let redirect = app.callback_url();
     let token: Value = async {
-        let form = oidc.token_form(&q.code, login.verifier.expose(), &redirect);
+        let form = oidc.token_form(code, login.verifier.expose(), &redirect);
         oidc::json(app.http.post(&oidc.token).form(&form).send().await?).await
     }
     .await

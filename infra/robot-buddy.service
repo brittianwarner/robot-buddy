@@ -9,7 +9,9 @@
 #   install -d -m 0750 -o root -g robot-buddy /etc/robot-buddy
 #   install -m 0600 -o robot-buddy -g robot-buddy device.identity.json /etc/robot-buddy/
 #   install -m 0600 device.env.example /etc/robot-buddy/device.env   # then edit it
-#   install -m 0644 robot-buddy-nm.rules /etc/polkit-1/rules.d/50-robot-buddy-nm.rules
+#   # Inspect /etc/polkit-1/{rules.d,localauthority} first so priority 40 does not
+#   # overturn a stricter site policy; remove legacy 50-robot-buddy-nm.rules on upgrade.
+#   install -m 0644 robot-buddy-nm.rules /etc/polkit-1/rules.d/40-robot-buddy-nm.rules
 #   install -m 0644 robot-buddy.service /etc/systemd/system/
 #   install -d -m 0700 -o robot-buddy -g robot-buddy /var/lib/robot-buddy
 #   runuser -u robot-buddy -- /usr/local/bin/robot-buddy-robot setup-card  # print it
@@ -104,7 +106,11 @@ ProtectProc=invisible
 # over AF_UNIX.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 SystemCallArchitectures=native
-SystemCallFilter=@system-service ~@privileged @chown
+# Allow @system-service, strip @privileged, then re-allow @chown only so the
+# service can assign /run/robot-buddy/control.sock to its pip-control group.
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged
+SystemCallFilter=@chown
 SystemCallErrorNumber=EPERM
 # Not set, on purpose: PrivateDevices/DevicePolicy=closed (ALSA and the
 # hotplugged CDC-ACM face need /dev/snd and /dev/ttyACM*), ProcSubset=pid

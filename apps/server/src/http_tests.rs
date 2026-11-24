@@ -277,6 +277,152 @@ async fn login_redirects_with_independent_state_and_nonce() {
 }
 
 #[tokio::test]
+async fn claim_csp_allows_multi_origin_https_idp_redirects() {
+    let app = app(true, false);
+    let router = service(&app, [192, 0, 2, 10]);
+    let reply = send(
+        &router,
+        Request::get("/claim?bot=bot-1&token=claim-token")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert_eq!(
+        reply.headers[header::CONTENT_SECURITY_POLICY],
+        "default-src 'none'; form-action 'self' https:; frame-ancestors 'none'; base-uri 'none'"
+    );
+
+    // Missing query parameters return the fixed BadRequest message, not raw parser text.
+    let missing = send(&router, Request::get("/claim").body(Body::empty()).unwrap()).await;
+    assert_eq!(missing.status, StatusCode::BAD_REQUEST);
+    assert!(!missing.body.contains("deserialize"));
+
+    // Local insecure discovery (http://127.0.0.1) permits loopback HTTP hops alongside https:.
+    drop(router);
+    let mut local = Arc::into_inner(app).unwrap();
+    local.public_url = "http://127.0.0.1:8080".into();
+    local.public_origin = "http://127.0.0.1:8080".into();
+    local.oidc.as_mut().unwrap().authorize = "http://127.0.0.1:9001/authorize".into();
+    let local = Arc::new(local);
+    let reply = send(
+        &service(&local, [192, 0, 2, 11]),
+        Request::get("/claim?bot=bot-1&token=claim-token")
+            .body(Body::empty())
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK);
+    assert_eq!(
+        reply.headers[header::CONTENT_SECURITY_POLICY],
+        "default-src 'none'; form-action 'self' https: http://127.0.0.1:* http://localhost:*; \
+         frame-ancestors 'none'; base-uri 'none'"
+    );
+}
+
+fn callback_get(uri: &str, cookie: Option<&str>) -> Request<Body> {
+    let mut req = Request::get(uri);
+    if let Some(cookie) = cookie {
+        req = req.header(header::COOKIE, cookie);
+    }
+    req.body(Body::empty()).unwrap()
+}
+
+#[tokio::test]
+async fn callback_handles_oidc_errors_and_malformed_queries() {
+    let app = app(true, false);
+    let router = service(&app, [192, 0, 2, 20]);
+    let (claim_cookie, csrf) = open_claim(&router, "claim-token").await;
+    let form = format!("bot=bot-1&token=claim-token&csrf={csrf}");
+    let redirect = send(
+        &router,
+        login_request(&form, Some(PUBLIC), Some(&claim_cookie)),
+    )
+    .await;
+    assert_eq!(redirect.status, StatusCode::SEE_OTHER);
+    let location = url::Url::parse(redirect.headers[header::LOCATION].to_str().unwrap()).unwrap();
+    let query: std::collections::HashMap<_, _> = location.query_pairs().into_owned().collect();
+    let state = &query["state"];
+    let login = cookie_pair(&redirect.headers, "buddy_login");
+
+    // Missing cookie on an IdP error callback is 401; forged state is 403 and keeps the login.
+    let no_cookie = callback_get(
+        &format!("/auth/callback?error=access_denied&state={state}"),
+        None,
+    );
+    assert_eq!(
+        send(&router, no_cookie).await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    let forged = send(
+        &router,
+        callback_get(
+            "/auth/callback?error=access_denied&error_description=%3Cb%3Eforged%3C/b%3E&state=wrong",
+            Some(&login),
+        ),
+    )
+    .await;
+    assert_eq!(forged.status, StatusCode::FORBIDDEN);
+    assert!(set_cookies(&forged.headers).is_empty());
+
+    // Missing state or missing code without error returns fixed 400 text and keeps the sign-in.
+    for uri in [
+        "/auth/callback?error=access_denied".to_owned(),
+        format!("/auth/callback?state={state}"),
+        "/auth/callback".to_owned(),
+    ] {
+        let reply = send(&router, callback_get(&uri, Some(&login))).await;
+        assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{uri}");
+        assert!(!reply.body.contains("deserialize"), "{uri}: {}", reply.body);
+    }
+
+    // A real IdP error callback spends the sign-in, clears the cookie, and renders static HTML.
+    let err_uri = format!(
+        "/auth/callback?error=access_denied&error_description=User+denied+%3Cb%3Exss%3C/b%3E&state={state}"
+    );
+    let denied = send(&router, callback_get(&err_uri, Some(&login))).await;
+    assert_eq!(denied.status, StatusCode::BAD_REQUEST);
+    assert!(
+        denied
+            .body
+            .contains("Sign-in was cancelled or could not be completed.")
+    );
+    for untrusted in ["access_denied", "User denied", "<b>xss</b>", state.as_str()] {
+        assert!(
+            !denied.body.contains(untrusted),
+            "error page must not echo {untrusted}"
+        );
+    }
+    assert!(
+        set_cookies(&denied.headers)
+            .iter()
+            .any(|c| c.starts_with("buddy_login=;") && c.contains("Max-Age=0; Secure")),
+        "login cookie cleared on IdP error"
+    );
+
+    // Replaying the same cookie + state (error or code) fails; unconfigured OIDC is 503.
+    for uri in [
+        format!("/auth/callback?error=access_denied&state={state}"),
+        format!("/auth/callback?code=c&state={state}"),
+    ] {
+        assert_eq!(
+            send(&router, callback_get(&uri, Some(&login))).await.status,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    let no_oidc = self::app(false, false);
+    let reply = send(
+        &service(&no_oidc, [192, 0, 2, 21]),
+        callback_get(
+            "/auth/callback?error=access_denied&state=s",
+            Some("buddy_login=abc"),
+        ),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
 async fn the_callback_is_rate_limited_per_client() {
     let app = app(true, false);
     let router = service(&app, [192, 0, 2, 77]);

@@ -62,6 +62,9 @@ pub struct Link {
 }
 
 impl Connector for Link {
+    async fn panel_owned(&self, owned: bool) {
+        self.screen.set_owned(owned).await;
+    }
     type Remote = Conversation;
     type Speaker = Playback;
 

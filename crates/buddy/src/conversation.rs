@@ -1,6 +1,7 @@
 //! Conversation transcript and Rig run ownership, independent of device identity and memory.
 mod context;
 mod delivery;
+mod expression;
 mod harness;
 pub mod history;
 mod persona;

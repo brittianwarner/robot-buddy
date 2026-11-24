@@ -1,0 +1,71 @@
+# syntax=docker/dockerfile:1
+# Fresh Pi-like ARM64 Debian Trixie systemd guest for deployment rehearsal (tests/pip-deploy-qa).
+#
+# Builds the REAL release `robot-buddy-robot --features pi-vision,onnx-wake` binary using
+# the exact Trixie ARM64 toolchain and BuildKit caches as `infra/pi-build.Dockerfile`,
+# then stages ONLY the binary and `infra/` deployment files into `/opt/qa-staging/`.
+#
+# Intentionally does NOT pre-create the `robot-buddy` user, `pip-control` group,
+# `/etc/robot-buddy`, `/var/lib/robot-buddy`, unit file, polkit rule, or drop-in:
+# the rehearsal script executes every `DEPLOYMENT.md` step live against booted PID 1 systemd.
+
+FROM rust:1.100.0-slim-trixie@sha256:3b199fd6db7d709274df56565b8f4003f9e30d7bfcff9d53148c86053b7855e2 AS build-robot
+ARG TARGETARCH
+RUN test "$TARGETARCH" = arm64 \
+    && apt-get update && apt-get install -y --no-install-recommends \
+       clang libclang-dev libopencv-dev cmake pkg-config \
+    && rm -rf /var/lib/apt/lists/* \
+    && pkg-config --atleast-version=4.8 opencv4
+WORKDIR /src
+COPY Cargo.toml Cargo.lock ./
+COPY .cargo/config.toml .cargo/config.toml
+COPY apps/server/Cargo.toml apps/server/Cargo.toml
+RUN mkdir -p apps/server/src && touch apps/server/src/main.rs
+COPY apps/robot apps/robot
+COPY crates/buddy crates/buddy
+RUN --mount=type=cache,id=pi-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=pi-cargo-target,target=/src/target,sharing=locked \
+    cargo build --locked --release --target aarch64-unknown-linux-gnu -j 2 \
+      --package robot-buddy-robot --features pi-vision,onnx-wake \
+    && cp target/aarch64-unknown-linux-gnu/release/robot-buddy-robot /robot-buddy-robot
+
+FROM debian:trixie-slim@sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0 AS runtime
+ARG TARGETARCH
+ENV DEBIAN_FRONTEND=noninteractive
+# Install packages matching DEPLOYMENT.md §3 (plus systemd/dbus/binutils for the
+# live systemd guest and distinct-ELF upgrade rehearsal). Note: `rpicam-apps` is a
+# Raspberry Pi OS archive package absent from stock Debian Trixie; recorded explicitly.
+RUN test "$TARGETARCH" = arm64 \
+    && apt-get update && apt-get install -y --no-install-recommends \
+       systemd \
+       systemd-sysv \
+       dbus \
+       network-manager \
+       polkitd \
+       alsa-utils \
+       socat \
+       ca-certificates \
+       curl \
+       procps \
+       file \
+       libopencv-core410 \
+       libopencv-imgproc410 \
+       libopencv-imgcodecs410 \
+       libopencv-dnn410 \
+       libopencv-objdetect410 \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /opt/qa-staging-candidate/infra /opt/qa-staging-prior/infra
+
+COPY --from=build-robot /robot-buddy-robot /opt/qa-staging-candidate/robot-buddy-robot
+COPY infra/robot-buddy.service /opt/qa-staging-candidate/infra/robot-buddy.service
+COPY infra/robot-buddy-nm.rules /opt/qa-staging-candidate/infra/robot-buddy-nm.rules
+COPY infra/robot-buddy-pip.conf /opt/qa-staging-candidate/infra/robot-buddy-pip.conf
+COPY infra/device.env.example /opt/qa-staging-candidate/infra/device.env.example
+
+# Mask getty/systemd-udev units that are irrelevant in an isolated container guest.
+RUN systemctl mask getty@.service systemd-udevd.service systemd-udev-trigger.service >/dev/null 2>&1 || true
+
+STOPSIGNAL SIGRTMIN+3
+# Remount the container's OWN private cgroup v2 namespace RW (`--cgroupns=private`,
+# zero host mounts) and exec real systemd as PID 1.
+CMD ["/bin/sh", "-c", "mount -o remount,rw /sys/fs/cgroup && exec /lib/systemd/systemd --log-level=info"]

@@ -4,7 +4,7 @@ The wire contract is `crates/buddy/src/protocol.rs`; [implemented backend](backe
 
 ## Implemented: Linux device client (`apps/robot`)
 
-Target hardware is the "Pip" robot: Raspberry Pi 5 (8 GB, Raspberry Pi OS Bookworm, aarch64), ESP32-S3 face board on USB serial, microphone ring array with a local wake word and speech-to-text, and a MAX98357A I2S amplifier played through ALSA. None of this was tested on that hardware. Validation so far is unit tests and local fakes (see "Validation").
+Target hardware is the "Pip" robot: Raspberry Pi 5 (Raspberry Pi OS Bookworm or Trixie, aarch64), ESP32-S3 face board on USB serial, three STS3215 neck servos, an OV5647 camera, a USB reSpeaker microphone with local wake word and speech-to-text, and a MAX98357A I2S amplifier played through ALSA. None of this was tested on that hardware. Validation so far is unit tests, local fakes, and ARM64 containers with virtual peripherals (see "Validation" and [CHANGELOG.md](../../CHANGELOG.md#validation-status)).
 
 | Module | Role |
 |---|---|
@@ -15,6 +15,9 @@ Target hardware is the "Pip" robot: Raspberry Pi 5 (8 GB, Raspberry Pi OS Bookwo
 | `cache.rs` | Durable cache and its single ordered writer |
 | `input.rs` | Control input on stdin and the control socket |
 | `face.rs` | ESP32 face bridge |
+| `hardware.rs`, `motion/` | Process-owned peripherals, STS3215 calibration and 50 Hz neck worker |
+| `listen/`, `vision/` | Local microphone, endpointing, transcription, camera tracking and optional on-device face gallery |
+| `piper.rs` | Optional fixed offline announcement through separate Piper and ALSA processes |
 | `audio.rs` | `/v1/speech` playback through `aplay` |
 | `screen.rs` | Loopback HTML panel, 127.0.0.1:8090 unless `BUDDY_SCREEN_ADDR` says otherwise (QR codes, owner confirmation) |
 | `wifi.rs` | SoftAP setup through NetworkManager |
@@ -33,6 +36,7 @@ One line per command, at most 8 KiB. Longer lines are discarded through their ne
 | any line not starting with `{` | A finalized utterance (backward compatible) |
 | `{"say":"<utterance>"}` | A finalized utterance |
 | `{"wake":true}` | Wake word: stop playback now, cancel the live turn, face shows listening |
+| `{"sleep":true}` | Interrupt the turn and lower the neck/close the eyes until addressed. Five quiet minutes produce a lighter resting pose. |
 | `{"listening":true}` / `{"listening":false}` | Show or clear listening without an utterance |
 | `{"mute":true}` / `{"mute":false}` | Mute stops playback, shows the muted LED and suppresses automatic speech |
 | `{"confirm":"123456"}` | Spoken six-digit owner-claim confirmation for headless onboarding |
@@ -45,7 +49,7 @@ Every utterance replaces the turn in progress. The cancel of the old turn goes o
 
 A submit with no answer (timeout, dropped socket) is uncertain: the robot replaces the connection and resubmits the same request ID, which the server deduplicates. Only a newly acknowledged turn speaks; a duplicate acknowledgement does not. If the server refuses the submit as busy (`user/busy`, with the open turn's ID as metadata), that refusal proves no open turn carries this request ID (the server deduplicates before it checks for an open turn). The server keeps at most one open turn, so the robot cancels the one it names, whatever its text, and submits once more. A second busy refusal, or any other refusal, drops the utterance and shows Sorry. A server from before the typed refusal answers busy with an internal error, which reads as a plain refusal. An acknowledgement for an utterance that was since replaced is cancelled without speaking.
 
-Offline, mute and wake still apply at once. An utterance with no connection shows Sorry for 1.5 s and is not queued. An utterance waiting to be sent (not owned yet, or still reconnecting) carries its wall-clock creation time and expires after 60 s with Sorry; one loaded from the cache that is older, has no time, or is dated in the future is dropped at start. Wake clears a waiting utterance.
+Offline, mute and wake still apply at once. An utterance arriving while offline, unowned, or during registration is refused at once (shows Sorry for 1.5 s) and is **not** recorded as pending for later submission (fail-closed). An utterance accepted while online and owned that is still waiting to be sent (for example across a reconnect or pending cancel) carries its wall-clock creation time and expires after 60 s with Sorry; one loaded from the cache that is older, has no time, or is dated in the future is dropped at start. Wake clears a waiting utterance.
 
 ### Events and the cursor
 
@@ -69,20 +73,22 @@ On SIGTERM or SIGINT the robot stops the speaker, closes the connection (200 ms 
 
 ### ESP32 face
 
-Set `BUDDY_FACE_SERIAL=/dev/ttyACM0` to enable it. The robot opens the device for writing (it never creates the path) and writes one compact JSON object per line: `{"led":"<led>"}`, `{"e":"<expression>","i":<0..1>}` and `{"look":[x,y]}`. The program sets the line itself on every open, since a re-enumerated CDC-ACM port comes back at the kernel defaults (9600, cooked, echo): raw (`cfmakeraw`), 115200 baud, `CLOCAL` and `CREAD`, without `HUPCL`. It opens the device `O_WRONLY | O_NOCTTY | O_NONBLOCK`. Use the stable `/dev/serial/by-id/` path.
+Set `BUDDY_FACE_SERIAL` to the board's stable `/dev/serial/by-id/` path. The client opens it read-write, nonblocking, raw 115200 with `CLOCAL` and `CREAD`, without `HUPCL`. Each re-open reapplies these settings. It drains `hello`, `hb` and `err` lines without logging raw board data. The firmware also accepts gaze, blink, ear wiggle, two eye QR codes and ping. Fixing the drain does not establish that an unread port caused animation stutter; that still needs a board comparison.
 
 | State | When | LED | Expression |
 |---|---|---|---|
 | Offline | Not connected | `idle` | `sleepy` 0.5 |
 | Idle | Connected, nothing to do | `idle` | `neutral` 0.5 |
-| Listening | After `wake` until an utterance or `listening:false` | `listening` | `listening` 0.8, look `[0,0]` |
+| Listening | After `wake` until an utterance or `listening:false` | `listening` | `curious` 0.8, look `[0,0]` |
 | Thinking | After submit until the first PCM byte | `thinking` | `thinking` 0.6 |
 | Speaking | First PCM byte written until the player exits | `speaking` | `happy` 0.7, look `[0,0]` |
 | Muted | Muted | `muted` | `neutral` 0.3 |
 | Confirming | Claim confirmation window open (does not hide listening/speaking/muted) | `listening` | `happy` 0.8, look `[0,0]` |
 | Sorry | 1.5 s after a failed or interrupted turn | `idle` | `sad` 0.6 |
+| Resting | Connected and idle after 5 quiet minutes (no live turn, pending utterance, claim confirmation, mute, or listening) | `idle` | `sleepy` 0.9 |
+| Asleep | After `{"sleep":true}` until addressed (`wake`, `say`, or `listening:true`) | `idle` | `asleep` 1.0 |
 
-Expressions used: neutral, happy, thinking, listening, sad, sleepy. Changes go out at once; the current state is re-sent every 1.5 s, inside the ESP32's 5 s fallback. Writes run on their own task with a 500 ms deadline. Only the latest state is kept. If the device disappears (USB re-enumeration), the writer reopens it every second.
+An in-order `face.express` push for the robot's own live turn may override the expression and initiate a bounded gesture. It does not control the chest LED. Replay and duplicate events never initiate movement. The steady face is refreshed every 1.5 s, inside the ESP32's 5 s fallback. QR changes (along with current mood and gaze) are sent once per change, on reconnect, or when the board sends `hello` after a reboot on the same USB link; gestures are short-lived impulses and are never part of the heartbeat or replayed on `hello`. Writes have a 500 ms deadline.
 
 ### Reconnect, credential rotation and Wi-Fi
 
@@ -107,11 +113,15 @@ There is no Wi-Fi gate at start: input is served at once. After three unhealthy 
 | `BUDDY_CONTROL_SOCKET`, `BUDDY_CONTROL_GROUP` | off (unit sets `/run/robot-buddy/control.sock`), `pip-control` | Control input socket (mode 0660) or FIFO, and socket group |
 | `BUDDY_SCREEN_ADDR` | `127.0.0.1:8090` | Panel address; loopback `ip:port` only, `off` or empty disables it, anything else fails at start |
 
+Hardware variables (`BUDDY_LISTEN_*`, `ORT_DYLIB_PATH`, `BUDDY_SERVO_*`, `BUDDY_VISION_*`, `BUDDY_OPERATOR_*`, `BUDDY_PIPER_*`) are listed in [`device.env.example`](../../infra/device.env.example) and explained in [DEPLOYMENT.md](../../DEPLOYMENT.md).
+
 ### Building for the Pi 5
 
-`.cargo/config.toml` adds `-C target-cpu=cortex-a76` for `aarch64-unknown-linux-gnu` only. On the Pi: `cargo build --release -p robot-buddy-robot`. From another machine: `rustup target add aarch64-unknown-linux-gnu`, then `cross build --release --target aarch64-unknown-linux-gnu -p robot-buddy-robot`, or `cargo build` with an aarch64 linker configured. Install the binary to `/usr/local/bin/robot-buddy-robot` and use [the systemd unit](../../infra/robot-buddy.service); its header lists the install steps. In short, as root once: create the system group `pip-control` and account `robot-buddy` (no login shell, groups `audio`, `dialout`, `pip-control`), install the binary, put the identity file in `/etc/robot-buddy/` (mode `0600`, `robot-buddy:robot-buddy`) and [`device.env`](../../infra/device.env.example) beside it (mode `0600`), install the [polkit rule](../../infra/robot-buddy-nm.rules) as `/etc/polkit-1/rules.d/50-robot-buddy-nm.rules`, install the unit, run `runuser -u robot-buddy -- /usr/local/bin/robot-buddy-robot setup-card`, then `systemctl daemon-reload && systemctl enable --now robot-buddy` (do not enable `NetworkManager-wait-online.service`). Put the speech process's account in `pip-control` only, never `robot-buddy`.
+For the full Pip profile (machine-specific calibration, hardware models, optional OpenCV build, systemd profile and physical acceptance), follow [DEPLOYMENT.md](../../DEPLOYMENT.md). The basic thin-client build and unit remain available below.
 
-The service runs as `robot-buddy`, not root, with `UMask=0077`. The polkit rule lets that account, and only it, modify system NetworkManager profiles and control the network (it no longer grants `wifi.share.open` or `enable-disable-wifi`); polkit cannot tell profiles apart, so these cover every profile. The only capability is `CAP_NET_BIND_SERVICE`, for the setup page on 10.42.0.1:80. The unit is sandboxed (`ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp=yes`, writes only to `/var/lib/robot-buddy` and `/run/robot-buddy`, `NoNewPrivileges`, `ProtectProc=invisible`, `MemoryDenyWriteExecute=yes`, `RestrictAddressFamilies`, `SystemCallFilter=@system-service ~@privileged @chown`, 256 MB memory cap, 128 tasks), restarts forever, and runs at `Nice=-5` with best-effort I/O priority 2. It is `Type=notify`: READY=1 follows the panel, face and control socket. With `WatchdogSec=60s` the device loop beats on every pass and wakes at least every 15 s; the watchdog is pinged every 30 s only if the loop beat since the last ping, so a wedged loop, not only a wedged runtime, is restarted.
+`.cargo/config.toml` adds `-C target-cpu=cortex-a76` for `aarch64-unknown-linux-gnu` only. On the Pi: `cargo build --release -p robot-buddy-robot`. From another machine: `rustup target add aarch64-unknown-linux-gnu`, then `cross build --release --target aarch64-unknown-linux-gnu -p robot-buddy-robot`, or `cargo build` with an aarch64 linker configured. Install the binary to `/usr/local/bin/robot-buddy-robot` and use [the systemd unit](../../infra/robot-buddy.service); its header lists the install steps. In short, as root once: create the system group `pip-control` and account `robot-buddy` (no login shell, groups `audio`, `dialout`, `pip-control`), install the binary, put the identity file in `/etc/robot-buddy/` (mode `0600`, `robot-buddy:robot-buddy`) and [`device.env`](../../infra/device.env.example) beside it (mode `0600`), inspect existing `/etc/polkit-1/{rules.d,localauthority}` so priority `40` does not overturn a stricter site policy and install the [polkit rule](../../infra/robot-buddy-nm.rules) as `/etc/polkit-1/rules.d/40-robot-buddy-nm.rules` (removing any legacy `50-robot-buddy-nm.rules` on upgrade), install the unit, run `runuser -u robot-buddy -- /usr/local/bin/robot-buddy-robot setup-card`, then `systemctl daemon-reload && systemctl enable --now robot-buddy` (do not enable `NetworkManager-wait-online.service`). Put the speech process's account in `pip-control` only, never `robot-buddy`.
+
+The service runs as `robot-buddy`, not root, with `UMask=0077`. The polkit rule (at priority `40`, before Debian/Raspberry Pi OS `49-polkit-pkla-compat.rules`, with the site-policy check above) lets that account, and only it, modify system NetworkManager profiles and control the network (it no longer grants `wifi.share.open` or `enable-disable-wifi`); polkit cannot tell profiles apart, so these cover every profile. The only capability is `CAP_NET_BIND_SERVICE`, for the setup page on 10.42.0.1:80. The unit is sandboxed (`ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp=yes`, writes only to `/var/lib/robot-buddy` and `/run/robot-buddy`, `NoNewPrivileges`, `ProtectProc=invisible`, `MemoryDenyWriteExecute=yes`, `RestrictAddressFamilies`, three-directive `SystemCallFilter=@system-service` / `~@privileged` / `@chown` so `@privileged` is stripped while `@chown` remains for `pip-control` socket group assignment, 256 MB memory cap, 128 tasks), restarts forever, and runs at `Nice=-5` with best-effort I/O priority 2. It is `Type=notify`: READY=1 follows the panel, face and control socket. With `WatchdogSec=60s` the device loop beats on every pass and wakes at least every 15 s; the watchdog is pinged every 30 s only if the loop beat since the last ping, so a wedged loop, not only a wedged runtime, is restarted.
 
 ### Validation
 

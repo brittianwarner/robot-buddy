@@ -141,8 +141,23 @@ fn program() -> &'static Path {
 /// No `--` separator: nmcli does not document one for these subcommands. Every value is
 /// a constant, a path we built, an interface name that cannot start with `-`, a UUID
 /// nmcli printed, or an SSID that [`validate`] keeps from starting with `-`.
+fn nmcli_command() -> std::process::Command {
+    let mut command = std::process::Command::new(program());
+    nmcli_environment(&mut command);
+    command
+}
+
+fn nmcli_environment(command: &mut std::process::Command) {
+    command.env_clear().env("LC_ALL", "C");
+    for key in ["PATH", "DBUS_SYSTEM_BUS_ADDRESS"] {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+}
+
 async fn run(args: &[&str]) -> Result<Output> {
-    let mut command = tokio::process::Command::new(program());
+    let mut command = tokio::process::Command::from(nmcli_command());
     command
         .args(args)
         .env("LC_ALL", "C")
@@ -314,7 +329,7 @@ impl Drop for Hotspot {
         if !self.armed {
             return;
         }
-        let spawned = std::process::Command::new(program())
+        let spawned = nmcli_command()
             .args(["connection", "delete", "id", SETUP_ID])
             .env("LC_ALL", "C")
             .stdin(Stdio::null())
@@ -410,13 +425,18 @@ pub async fn setup(screen: &Screen, window: Option<Duration>) -> Result<()> {
     let network = setup_network();
     let hotspot = Hotspot::start(&interface, &network.ssid, network.password.expose()).await?;
     let listener = bind_retrying(SETUP_ADDRESS, BIND_TRIES, BIND_RETRY).await?;
+    let join = network.join_payload();
+    // Only the physical display receives the hotspot PSK. On cancellation the
+    // lease clears the eyes even when the rest of the future cannot run.
+    let eyes = screen.wifi_eyes(join.expose(), SETUP_ORIGIN);
     screen
         .show(
             "Join the setup Wi-Fi on the robot's card, or scan this. Then open http://10.42.0.1",
-            network.join_payload().expose(),
+            join.expose(),
         )
         .await?;
     drop(network);
+    drop(join);
     let joined = serve_setup(
         listener,
         interface,
@@ -425,6 +445,7 @@ pub async fn setup(screen: &Screen, window: Option<Duration>) -> Result<()> {
         Duration::from_secs(1),
     )
     .await;
+    drop(eyes);
     // After success the radio is on the home profile, so the hotspot is
     // already down. After a timeout, deleting it frees the radio.
     hotspot.remove().await?;
@@ -751,6 +772,16 @@ fn validate(ssid: &str, password: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn nmcli_never_receives_the_operator_secret() {
+        let mut child = std::process::Command::new("/usr/bin/env");
+        child.env("BUDDY_OPERATOR_TOKEN", "sentinel-secret");
+        super::nmcli_environment(&mut child);
+        let output = child.output().unwrap();
+        let environment = String::from_utf8(output.stdout).unwrap();
+        assert!(environment.lines().any(|line| line == "LC_ALL=C"));
+        assert!(!environment.contains("BUDDY_OPERATOR_TOKEN"));
+    }
     use super::*;
     use std::sync::OnceLock;
 

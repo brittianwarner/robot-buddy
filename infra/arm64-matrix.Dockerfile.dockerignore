@@ -1,0 +1,12 @@
+**
+!Cargo.toml
+!Cargo.lock
+!rust-toolchain.toml
+!.cargo/config.toml
+!crates/**
+!apps/**
+!infra/arm64-matrix-check.sh
+**/*.onnx
+**/*.bin
+**/*.key
+**/*.identity.json

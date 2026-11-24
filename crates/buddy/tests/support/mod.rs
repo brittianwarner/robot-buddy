@@ -889,8 +889,7 @@ impl Mock {
             .iter()
             .rev()
             .find(|m| m["role"] == "user")
-            .map(|m| m["content"].to_string())
-            .unwrap_or_default();
+            .map_or_default(|m| m["content"].to_string());
         let all = body.to_string();
         let request = ModelRequest {
             direct: all.contains("RESPONSE ROUTING:"),

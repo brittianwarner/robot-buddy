@@ -1,0 +1,234 @@
+{
+  "schema_version": 1,
+  "name": "pip-e2e-human-wake-positive-recipe",
+  "description": "Reproducible provenance recipe for prerecorded human speech wake positives and ablation controls. No audio media or private ONNX models are stored in git; prepare.py downloads upstream audio into gitignored tests/pip-e2e/.cache/speech/human-wake-positive/, verifies SHA-256 digests, and produces deterministic 16kHz mono S16_LE WAV/PCM clips.",
+  "policy": {
+    "no_media_or_models_in_git": true,
+    "private_classifier_opt_in_env": "PIP_E2E_HEY_PIP_ONNX (explicit operator-owned read-only path; no default)",
+    "superseded_by_operator_recording": "A verified, consented natural recording of 'Hey Pip' from Brittian supersedes the edited/spliced component-level clips for all acceptance testing.",
+    "strict_provenance_distinction": {
+      "human_recorded_natural": "Unedited contiguous slice from a public-domain human recording. Valid natural speech evidence for Whisper transcript wake; does NOT fire hey_pip.onnx (bare 'Pip, ...', not 'Hey Pip').",
+      "edited_spliced_human": "Component-level test stimulus assembled by trimming dead air and concatenating real licensed human word recordings. Explicitly NOT a natural held-out recording; must NEVER be represented as natural human recall/FAR evidence."
+    }
+  },
+  "upstream_sources": {
+    "librivox_great_expectations_ch17": {
+      "title": "Great Expectations (Chapter 17) by Charles Dickens",
+      "reader": "Mark F. Smith (LibriVox)",
+      "archive_item": "great_expectations_mfs_0812_librivox",
+      "url": "https://archive.org/download/great_expectations_mfs_0812_librivox/greatexpectations_17_dickens.mp3",
+      "license": "Public Domain",
+      "license_url": "http://creativecommons.org/licenses/publicdomain/",
+      "attribution_required": false,
+      "size_bytes": 20400266,
+      "sha256": "78bc98825c2500d65a720467f97a134a922b7ac85253d91b8594022139f03d84",
+      "filename": "greatexpectations_17_dickens.mp3"
+    },
+    "wikimedia_en_us_hey": {
+      "title": "File:En-us-hey.ogg",
+      "speaker": "Dvortygirl (Wikimedia Commons)",
+      "page_url": "https://commons.wikimedia.org/wiki/File:En-us-hey.ogg",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/6/6f/En-us-hey.ogg",
+      "license": "Public Domain (PD-self)",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "attribution_required": false,
+      "size_bytes": 8446,
+      "sha256": "0072ba1654084c9df0dba3b7865046c13e91824edeba451e869380afa1eb7bc8",
+      "filename": "En-us-hey.ogg"
+    },
+    "wikimedia_en_us_pip": {
+      "title": "File:En-us-pip.ogg",
+      "speaker": "Dvortygirl (Wikimedia Commons, recorded via Shtooka)",
+      "page_url": "https://commons.wikimedia.org/wiki/File:En-us-pip.ogg",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/3/39/En-us-pip.ogg",
+      "license": "CC BY-SA 3.0 (dual-licensed GFDL / CC BY-SA 3.0, 2.5, 2.0, 1.0)",
+      "license_url": "https://creativecommons.org/licenses/by-sa/3.0/",
+      "attribution_required": true,
+      "attribution_credit": "Dvortygirl (Wikimedia Commons, File:En-us-pip.ogg), CC BY-SA 3.0",
+      "usage_note": "Downloaded locally into gitignored .cache/ for component-level test execution only; never committed or distributed in the repository.",
+      "size_bytes": 11425,
+      "sha256": "6965bc8f3138572a75c0ee544b5695bef6b2af6f8dca75207cad956abc0c0df7",
+      "filename": "En-us-pip.ogg"
+    },
+    "voices_sp0307_followup": {
+      "title": "Lab41-SRI-VOiCES-src-sp0307-ch127535-sg0042.wav (VOiCES / LibriSpeech sp0307)",
+      "speaker": "LibriSpeech speaker sp0307 (via PyTorch torchaudio tutorial-assets)",
+      "url": "https://download.pytorch.org/torchaudio/tutorial-assets/Lab41-SRI-VOiCES-src-sp0307-ch127535-sg0042.wav",
+      "license": "CC-BY-4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "attribution_required": true,
+      "attribution_credit": "VOiCES / OpenSLR-12 LibriSpeech sp0307 (CC-BY-4.0), via PyTorch torchaudio tutorial-assets",
+      "size_bytes": 108844,
+      "sha256": "c65fcd726d6b08c82c1e5dc7558f863cd8d483e3ed2f4a7bcf271dc1865ada14",
+      "filename": "Lab41-SRI-VOiCES-src-sp0307-ch127535-sg0042.wav"
+    }
+  },
+  "assembly_parameters": {
+    "sample_rate_hz": 16000,
+    "channels": 1,
+    "sample_format": "S16_LE",
+    "lead_silence_s": 2.0,
+    "trail_silence_s": 1.5,
+    "inter_word_gap_s": 0.04,
+    "command_pause_s": 0.2,
+    "signal_processing": "none (linear resample to 16kHz + dead-air boundary slice only; zero EQ, gain, pitch, speed, or threshold tuning)",
+    "slices_s": {
+      "librivox_ch17_pip_what_a_fool": {
+        "source": "librivox_great_expectations_ch17",
+        "start_s": 924.6,
+        "duration_s": 2.9
+      },
+      "dvortygirl_hey": {
+        "source": "wikimedia_en_us_hey",
+        "start_s": 0.04,
+        "duration_s": 0.31
+      },
+      "dvortygirl_pip": {
+        "source": "wikimedia_en_us_pip",
+        "start_s": 0.23,
+        "duration_s": 0.35
+      },
+      "voices_followup_trimmed": {
+        "source": "voices_sp0307_followup",
+        "trim_abs_amplitude_threshold": 300,
+        "trim_pad_samples": 320
+      }
+    }
+  },
+  "outputs": [
+    {
+      "id": "natural_human_transcript_wake_pip",
+      "filename": "natural_human_transcript_wake_pip.wav",
+      "provenance": "human_recorded_natural",
+      "is_human_recording": true,
+      "is_natural_unmodified_utterance": true,
+      "is_edited_spliced": false,
+      "sources": ["librivox_great_expectations_ch17"],
+      "license_summary": "Public Domain",
+      "target_path": "whisper_transcript_wake_idle_only",
+      "expected_whisper": "Pip, what a fool you are.",
+      "expected_policy_idle": ["Wake", "Say"],
+      "expected_policy_busy": [],
+      "expected_onnx_wake_fired": false,
+      "observed_arm64": {
+        "wav_sha256": "23b6b1e94bda627e5ddb07f25efc099ca5f18fd91dbb5f2e6c28ede5377f6896",
+        "duration_s": 6.4,
+        "whisper_direct": "Pip, what a fool you are.",
+        "whisper_after_vad": "Pip, what a fool you are.",
+        "onnx_idle_score_max": 0.00647,
+        "onnx_idle_fired": false,
+        "onnx_busy_fired": false
+      }
+    },
+    {
+      "id": "edited_spliced_human_hey_pip",
+      "filename": "edited_spliced_human_hey_pip.wav",
+      "provenance": "edited_spliced_human",
+      "is_human_recording": true,
+      "is_natural_unmodified_utterance": false,
+      "is_edited_spliced": true,
+      "sources": ["wikimedia_en_us_hey", "wikimedia_en_us_pip"],
+      "license_summary": "Public Domain + CC BY-SA 3.0 (Dvortygirl)",
+      "target_path": "component_level_neural_wake_and_greeted_transcript_wake",
+      "expected_whisper": "Hey, Pip.",
+      "expected_policy_idle": ["Wake"],
+      "expected_policy_busy": ["Wake"],
+      "expected_onnx_wake_fired": true,
+      "observed_arm64": {
+        "wav_sha256": "a5c80eace3ed5c1f4166b75ab9375ba1d4921576dd744f77fcad2c340480f5cf",
+        "duration_s": 4.2,
+        "whisper_direct": "Hey, Pip.",
+        "whisper_after_vad": "Hey, Pip!",
+        "onnx_idle_score_max": 0.985009,
+        "onnx_idle_fired": true,
+        "onnx_idle_first_fire_hop": 36,
+        "onnx_busy_fired": true,
+        "onnx_warmup_nonzero_hops": 0
+      }
+    },
+    {
+      "id": "edited_spliced_human_hey_pip_command",
+      "filename": "edited_spliced_human_hey_pip_command.wav",
+      "provenance": "edited_spliced_human",
+      "is_human_recording": true,
+      "is_natural_unmodified_utterance": false,
+      "is_edited_spliced": true,
+      "sources": ["wikimedia_en_us_hey", "wikimedia_en_us_pip", "voices_sp0307_followup"],
+      "license_summary": "Public Domain + CC BY-SA 3.0 (Dvortygirl) + CC-BY-4.0 (VOiCES/LibriSpeech sp0307)",
+      "target_path": "component_level_neural_wake_plus_followup_command_turn",
+      "expected_whisper": "Hey! Pip! I had that curiosity beside me at this moment.",
+      "expected_onnx_wake_fired": true,
+      "observed_arm64": {
+        "wav_sha256": "029827ea53f698646321c3da6647147cee3123cc5f06ce45def06a4c26b0a3f2",
+        "duration_s": 7.796,
+        "whisper_direct": "Hey! Pip! I had that curiosity beside me at this moment.",
+        "vad_clips": [
+          {"index": 0, "whisper": "Hey, Pip.", "transcript_cmds": ["Wake"]},
+          {"index": 1, "whisper": "I had that curiosity beside me at this moment.", "transcript_cmds": ["Say"], "acoustic_cmds": ["Say"]}
+        ],
+        "onnx_idle_score_max": 0.929532,
+        "onnx_idle_fired": true,
+        "onnx_idle_first_fire_hop": 36,
+        "onnx_busy_fired": true,
+        "onnx_warmup_nonzero_hops": 0
+      }
+    },
+    {
+      "id": "control_human_hey_only",
+      "filename": "control_human_hey_only.wav",
+      "provenance": "human_recorded_ablation_control",
+      "is_human_recording": true,
+      "is_natural_unmodified_utterance": false,
+      "is_edited_spliced": false,
+      "sources": ["wikimedia_en_us_hey"],
+      "license_summary": "Public Domain (Dvortygirl)",
+      "target_path": "ablation_negative_control",
+      "expected_onnx_wake_fired": false,
+      "observed_arm64": {
+        "wav_sha256": "0aeb17afa20794e9de8a4748b7d99a8a9731f127a7cc0059c4535dfd6a3bfd31",
+        "duration_s": 3.81,
+        "whisper_direct": "Hey!",
+        "onnx_idle_score_max": 0.000547,
+        "onnx_idle_fired": false
+      }
+    },
+    {
+      "id": "control_human_pip_only",
+      "filename": "control_human_pip_only.wav",
+      "provenance": "human_recorded_ablation_control",
+      "is_human_recording": true,
+      "is_natural_unmodified_utterance": false,
+      "is_edited_spliced": false,
+      "sources": ["wikimedia_en_us_pip"],
+      "license_summary": "CC BY-SA 3.0 (Dvortygirl)",
+      "target_path": "ablation_negative_control",
+      "expected_onnx_wake_fired": false,
+      "observed_arm64": {
+        "wav_sha256": "aee44aac400360313d712bcd97a9f87bda2afaf25612e73892afa9c1e1e96818",
+        "duration_s": 3.85,
+        "whisper_direct": "Pip.",
+        "onnx_idle_score_max": 0.057181,
+        "onnx_idle_fired": false
+      }
+    },
+    {
+      "id": "control_human_pip_hey_reversed",
+      "filename": "control_human_pip_hey_reversed.wav",
+      "provenance": "edited_spliced_ablation_control",
+      "is_human_recording": true,
+      "is_natural_unmodified_utterance": false,
+      "is_edited_spliced": true,
+      "sources": ["wikimedia_en_us_pip", "wikimedia_en_us_hey"],
+      "license_summary": "Public Domain + CC BY-SA 3.0 (Dvortygirl)",
+      "target_path": "ablation_negative_control",
+      "expected_onnx_wake_fired": false,
+      "observed_arm64": {
+        "wav_sha256": "c7b6ccea4ebc70977fb2d5526c9e6b545a970cf880819b441e428907f86e803c",
+        "duration_s": 4.2,
+        "whisper_direct": "Pip! Hey!",
+        "onnx_idle_score_max": 0.013264,
+        "onnx_idle_fired": false
+      }
+    }
+  ]
+}

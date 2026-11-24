@@ -5,8 +5,8 @@ the repository root with Bun (`bun install` first). Results from a dated run are
 [validation](research/validation.md); latency numbers are in [e2e latency](research/e2e-latency.md).
 
 `bun run check:all` (`scripts/check-all.mjs`) runs the whole local gate in CI order and
-stops at the first failure: fmt, Clippy `-D warnings`, `cargo test`, the robot feature
-profile, `deny`, `test:integration`, a release build, `test:shutdown`,
+stops at the first failure: fmt, Clippy `-D warnings`, `cargo test`, the full Pip
+features (`pip full features`), the robot feature profile, `deny`, `test:integration`, a release build, `test:shutdown`,
 `tests/robot-reconnect.mjs --no-build --strict`, `cargo bench --no-run`,
 `tests/early-player.mjs`, `test:lab-reconnect`, `eval:voice` and `bench:report:check`. It
 passes its environment to every step, so set the port variables (see [ports](#ports)) and
@@ -15,12 +15,15 @@ and wall time. `-- --from <step>` resumes at a step.
 
 ## Suites
 
+All-features check, lint and the `pip full features` test step require OpenCV development headers/libraries, libclang and pkg-config. For default-profile robot tests (including mock camera, motor bus, face-board PTY and local speech controls), `cargo test -p robot-buddy-robot --locked` needs no OpenCV or models. The [release qualification gates](testing-pip-release.md) distinguish ARM64 workspace checks, virtual peripherals, the soak, and the deployment rehearsal from the physical tests in [DEPLOYMENT.md](../DEPLOYMENT.md).
+
 | Command | Runs in CI | Needs | Proves |
 | --- | --- | --- | --- |
 | `bun run format:check`, `bun run check`, `bun run lint` | yes | Rust toolchain | Formatting, type check of every target, Clippy with `-D warnings`. |
 | `bun run lint:pedantic` | via `lint` | Rust toolchain | Clippy pedantic with the four noisy lints allowed. `[workspace.lints.clippy]` already enables the same set, so `bun run lint` (`-D warnings`) gates it; this script only spells it out. |
-| `bun run test` | yes | Rust toolchain | Unit tests plus the offline integration-test crates below. Tests that need an engine are `#[ignore]`d here. |
+| `bun run test` | yes | Rust toolchain | Unit tests plus the offline integration-test crates below (default features). Tests that need an engine are `#[ignore]`d here. |
 | `bun run test:robot-features` | yes | Rust toolchain | `cargo test -p robot-buddy --no-default-features --locked`: the shared crate's tests in the feature profile the robot links (no actor runtime, no Rig). |
+| `cargo test --locked --all-features -p robot-buddy-robot` | yes | Rust toolchain, OpenCV dev packages, libclang, pkg-config | Full Pip robot feature profile (`pi-vision`, `onnx-wake`) unit tests alongside default workspace tests; asset-dependent vision/wake tests remain `#[ignore]`d. |
 | `bun run test:integration` | yes | Network once (engine download), free ports | Four engine-backed test binaries, one after another: the actor scenarios (`actors`), plus `core_sql_counts`, `core_retention` and `core_logs`, against a real Rivet engine, including output-event fixtures captured from the actor and the version 1 history upgrade. Ends with each suite's wall time. Timing limits are reported, not enforced (see [timing limits](#timing-limits)). |
 | `cargo build --release`, `cargo bench --no-run` | yes | Rust toolchain | Release builds link; the three benches in `crates/buddy/Cargo.toml` compile (`autobenches = false`, so `benches/legacy_sentences.rs` is only a module of `sentences`). |
 | `bun tests/early-player.mjs` | yes | Chromium (`bunx playwright install chromium`) | The lab voice player plays streamed PCM and stops on demand. Offline and deterministic. |
@@ -50,12 +53,12 @@ and wall time. `-- --from <step>` resumes at a step.
   change, regenerate with `BUDDY_UPDATE_GOLDEN=1 cargo test -p robot-buddy --test protocol_golden`
   and review the fixture diff.
 - Output events are not built in that file. Their fixtures (`output_event.*.json`, one per
-  kind: `turn.started`, `text.delta`, `speech.ready`, `tool.started`, `tool.completed`,
+  kind: `turn.started`, `text.delta`, `speech.ready`, `face.express`, `tool.started`, `tool.completed`,
   `turn.completed`, `turn.cancelled`, `turn.failed`, `turn.interrupted`) are captured from
   real turns by `actors.rs::output_events_match_their_golden_fixtures` and the restart test,
   which check that each pushed event equals its replayed copy and that both equal the fixture
   once sequence and turn ID are normalized. `protocol_golden.rs` then checks the set is
-  complete, each round-trips and ignores additive fields, and `speech.ready` carries only
+  complete, each round-trips and ignores additive fields. The live-only `face.express` cue replays as an empty payload; `speech.ready` carries only
   `index`. Recapture with `BUDDY_UPDATE_GOLDEN=1 bun run test:integration` and review the diff.
 - `voice_rules.rs` runs the table in `fixtures/voice_rules.json` (34 cases) through
   `VoiceConfig::speech_input` and `speech_body`, and through `VoiceConfig::for_speech`, which
@@ -301,7 +304,7 @@ Fixed on November 23, 2026; each test failed before its fix.
   and audio quality. The fakes fix those latencies, so the bench measures our overhead only.
 - Robot hardware: ALSA output, the ESP32 face, NetworkManager setup, wake word and speech
   recognition. `--simulate` skips Wi-Fi and the fake player has no real buffer underruns.
-- aarch64 runtime: CI type-checks the robot for the Pi; nothing runs on one.
+- aarch64 on a real Pi: CI only type-checks the robot for the Pi. The ARM64 [toolchain matrix](../infra/toolchain-validation.md), the [E2E and soak harness](../tests/pip-e2e/README.md) and the [systemd rehearsal](../tests/pip-deploy-qa/EVIDENCE.md) run in `linux/arm64` containers with virtual peripherals, not on a Pi 5.
 - Real OIDC login (only the controlled-provider lab test and the unit test cover it),
   production load, multi-node engines, backup and restore.
 - Timings come from a shared developer machine; run the bench on idle hardware before

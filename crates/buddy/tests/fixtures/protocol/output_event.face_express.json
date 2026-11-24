@@ -1,0 +1,10 @@
+{
+  "kind": "face.express",
+  "payload": {
+    "emotion": "happy",
+    "gesture": "nod",
+    "intensity": 0.75
+  },
+  "sequence": 7,
+  "turn_id": "0195f0a2-7c1e-7d2b-9a40-3f1c2b8e9d10"
+}

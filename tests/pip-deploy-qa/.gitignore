@@ -1,0 +1,7 @@
+.artifacts/
+.work/
+*.key
+*.crt
+*.pem
+*.identity.json
+*.log

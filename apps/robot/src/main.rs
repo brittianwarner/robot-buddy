@@ -8,11 +8,16 @@ mod controller;
 mod device;
 mod face;
 mod guard;
+mod hardware;
 mod input;
 mod journal;
+mod listen;
+mod motion;
+mod piper;
 mod screen;
 mod session;
 mod systemd;
+mod vision;
 mod wifi;
 
 use anyhow::Result;
@@ -26,6 +31,7 @@ use journal::Journal;
 use screen::Screen;
 use std::{sync::Arc, time::Duration};
 use tokio::time::Instant;
+use tracing_subscriber::prelude::*;
 
 /// Ordinary cursor checkpoints wait this long so a whole turn shares one
 /// write; terminal events, interruptions and the stop flush are written at
@@ -47,10 +53,13 @@ fn main() -> Result<()> {
     match std::env::args().nth(1).as_deref() {
         Some("setup-card") => return wifi::card::print_setup_card(),
         Some("claim-url") => return cache::print_claim_url(),
+        Some("servo") => return motion::servo_cli(&std::env::args().skip(2).collect::<Vec<_>>()),
         _ => {}
     }
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::from_default_env())
+        .with(tracing_subscriber::fmt::layer())
+        .with(screen::operator::LogLayer)
         .init();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(WORKER_THREADS)
@@ -79,12 +88,7 @@ async fn robot() -> Result<()> {
         cache: cache::load(&settings.cache_file),
         ..RobotState::default()
     };
-    let screen = Screen::new();
-    screen.serve().await?;
     let (face, target) = Face::new();
-    if let Some(path) = settings.face_serial.clone() {
-        tokio::spawn(face::run(target, face::Device(path)));
-    }
     let media = Arc::new(Media::new(
         &settings.server,
         settings.speech,
@@ -96,7 +100,14 @@ async fn robot() -> Result<()> {
         .redirect(reqwest::redirect::Policy::none())
         .build()?;
     let stdin = std::io::BufReader::with_capacity(input::MAX_LINE, std::io::stdin());
-    let mut input = Input::spawn(stdin)?;
+    let (mut input, microphone) = Input::with_microphone(stdin)?;
+    let devices = hardware::Devices::start(&settings, &face, microphone)?;
+    let screen = Screen::new().with_hardware(devices.panel.clone());
+    screen.serve().await?;
+    let face_task = settings
+        .face_serial
+        .clone()
+        .map(|path| tokio::spawn(face::run(target, face::Device(path))));
     // Type=notify: ready once input is served. Under WatchdogSec= the device
     // loop's heartbeat gates the watchdog pings.
     let pulse = systemd::ready();
@@ -112,11 +123,22 @@ async fn robot() -> Result<()> {
         insecure_local: settings.simulate,
     };
     let options = device::Options {
+        peripherals: devices.controller.clone(),
         journal,
         wifi_grace: settings.wifi_grace,
         pulse,
     };
     let result = device::run(link, &mut input, &face, &store, &mut state, options, stop).await;
+    drop(devices);
+    if let Some(task) = face_task {
+        face.stop();
+        if tokio::time::timeout(Duration::from_millis(600), task)
+            .await
+            .is_err()
+        {
+            tracing::warn!("face reset timed out during shutdown");
+        }
+    }
     // The loop silenced the speaker and closed the connection. Persist the
     // in-memory cursor and intents, not only the last coalesced checkpoint.
     tracing::info!("stopping");

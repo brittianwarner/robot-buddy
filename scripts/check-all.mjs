@@ -17,6 +17,7 @@ const STEPS = [
   ['fmt', 'cargo', ['fmt', '--all', '--check']],
   ['clippy', 'cargo', ['clippy', '--workspace', '--all-targets', '--all-features', '--locked', '--', '-D', 'warnings']],
   ['cargo test', 'cargo', ['test', '--workspace', '--locked']],
+  ['pip full features', 'cargo', ['test', '-p', 'robot-buddy-robot', '--all-features', '--locked']],
   ['test:robot-features', 'bun', ['run', 'test:robot-features']],
   ['deny', 'bun', ['run', 'deny']],
   ['integration', 'bun', ['run', 'test:integration']],

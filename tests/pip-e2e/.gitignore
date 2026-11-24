@@ -1,0 +1,13 @@
+# Ephemeral caches, downloaded official models/binaries, and test run reports.
+# Never commit downloaded models, private weights, recordings, or run artifacts.
+.cache/
+.artifacts/
+*.log
+*.key
+*.pem
+*.crt
+*.identity.json
+*.wav
+*.pcm
+*.onnx
+*.bin

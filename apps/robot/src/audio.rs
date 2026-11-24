@@ -9,11 +9,11 @@
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use futures_util::StreamExt;
 use robot_buddy::{audio::PcmFormat, protocol::SpeechRequest};
-use std::{future::Future, process::Stdio, sync::Arc, time::Duration};
+use std::{ffi::OsString, future::Future, process::Stdio, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     process::{Child, ChildStderr, ChildStdin},
-    sync::mpsc,
+    sync::{mpsc, watch},
     task::JoinHandle,
     time::{Instant, timeout},
 };
@@ -27,6 +27,7 @@ const WRITE_SLICE: usize = 16 * 1024;
 /// Longest silence between body chunks of the speech stream.
 const CHUNK_IDLE: Duration = Duration::from_secs(30);
 const DRAIN_DEADLINE: Duration = Duration::from_secs(10);
+const REAP_DEADLINE: Duration = Duration::from_secs(1);
 const AUDIO_BUDGET: usize = 16 * 1024 * 1024;
 /// Player diagnostics kept for the journal; the rest is read and dropped.
 const STDERR_CAP: usize = 1024;
@@ -113,10 +114,31 @@ pub struct Media {
     prespawn: bool,
 }
 
+fn local_aplay(simulate: bool, get: &impl Fn(&str) -> Option<OsString>) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new("aplay");
+    command.env_clear().env("LC_ALL", "C");
+    for key in [
+        "PATH",
+        "HOME",
+        "LD_LIBRARY_PATH",
+        "ALSA_CONFIG_PATH",
+        "XDG_RUNTIME_DIR",
+    ] {
+        if let Some(value) = get(key) {
+            command.env(key, value);
+        }
+    }
+    if simulate && let Some(value) = get("BENCH_APLAY_SOCK") {
+        command.env("BENCH_APLAY_SOCK", value);
+    }
+    command
+}
+
 impl Media {
     pub fn new(server: &str, enabled: bool, player: PlayerConfig) -> Result<Self> {
+        let simulate = std::env::args().any(|a| a == "--simulate");
         let make_player: PlayerFactory = Arc::new(move |format| {
-            let mut command = tokio::process::Command::new("aplay");
+            let mut command = local_aplay(simulate, &|k| std::env::var_os(k));
             command.args(player.args(format)).stdout(Stdio::null());
             command
         });
@@ -198,12 +220,38 @@ pub trait Speaker {
     fn stop(&mut self, rewarm: Rewarm) -> impl Future<Output = ()>;
 }
 
+struct Active {
+    cancel: watch::Sender<bool>,
+    task: JoinHandle<()>,
+}
+
+impl Active {
+    async fn stop_and_reap(mut self) {
+        let _ = self.cancel.send(true);
+        let _ = (&mut self.task).await;
+    }
+}
+
+impl Drop for Active {
+    fn drop(&mut self) {
+        let _ = self.cancel.send(true);
+        self.task.abort();
+    }
+}
+
+async fn cancelled(cancel: &mut watch::Receiver<bool>) {
+    if *cancel.borrow() {
+        return;
+    }
+    let _ = cancel.wait_for(|c| *c).await;
+}
+
 /// Per-session playback. At most one turn plays at a time.
 pub struct Playback {
     media: Arc<Media>,
     session: String,
     events: mpsc::Sender<PlaybackEvent>,
-    current: Option<JoinHandle<()>>,
+    current: Option<Active>,
     generation: u64,
 }
 
@@ -221,10 +269,9 @@ impl Playback {
 
 impl Speaker for Playback {
     fn start(&mut self, turn_id: &str) -> Option<u64> {
-        if let Some(task) = self.current.take() {
-            task.abort();
-        }
+        let previous = self.current.take();
         if !self.media.enabled {
+            drop(previous);
             return None;
         }
         self.generation += 1;
@@ -235,31 +282,52 @@ impl Speaker for Playback {
             self.events.clone(),
         );
         let turn_id = turn_id.to_owned();
-        self.current = Some(tokio::spawn(async move {
+        let (cancel, mut cancel_rx) = watch::channel(false);
+        let task = tokio::spawn(async move {
+            if let Some(previous) = previous {
+                previous.stop_and_reap().await;
+            }
             let mut played = false;
-            let result = play(&media, &session, &turn_id, generation, &events, &mut played).await;
+            let outcome = play(
+                &media,
+                &session,
+                &turn_id,
+                generation,
+                &events,
+                &mut played,
+                &mut cancel_rx,
+            )
+            .await;
+            let Some(result) = outcome else {
+                return;
+            };
             if let Err(error) = result {
                 tracing::warn!(%error, played, "speech playback failed");
+            }
+            if *cancel_rx.borrow() {
+                return;
             }
             // Never dropped: the session must learn that playback ended, or
             // it would show Speaking forever. Each generation sends at most
             // two events and the session drains them between RPCs.
-            let _ = events
-                .send(PlaybackEvent::Finished { generation, played })
-                .await;
-        }));
+            tokio::select! {
+                biased;
+                () = cancelled(&mut cancel_rx) => {}
+                _ = events.send(PlaybackEvent::Finished { generation, played }) => {}
+            }
+        });
+        self.current = Some(Active { cancel, task });
         Some(generation)
     }
 
     async fn stop(&mut self, rewarm: Rewarm) {
-        let Some(task) = self.current.take() else {
+        let Some(active) = self.current.take() else {
             return;
         };
-        let was_running = !task.is_finished();
-        task.abort();
-        // Dropping the task drops the child (`kill_on_drop`): SIGKILL, so
-        // the ALSA buffer is not drained.
-        let _ = task.await;
+        let was_running = !active.task.is_finished();
+        // Signal cancel and await the task so the player child is SIGKILLed and
+        // reaped (releasing ALSA) before stop returns.
+        active.stop_and_reap().await;
         if was_running && rewarm == Rewarm::Yes {
             // An abandoned HTTP/1.1 stream cannot be reused; warm a new one.
             let media = self.media.clone();
@@ -270,9 +338,7 @@ impl Speaker for Playback {
 
 impl Drop for Playback {
     fn drop(&mut self) {
-        if let Some(task) = self.current.take() {
-            task.abort();
-        }
+        self.current = None;
     }
 }
 
@@ -282,6 +348,14 @@ struct Player {
     input: Option<ChildStdin>,
     stderr: Option<JoinHandle<Vec<u8>>>,
     format: PcmFormat,
+}
+
+impl Drop for Player {
+    fn drop(&mut self) {
+        if let Some(reader) = self.stderr.take() {
+            reader.abort();
+        }
+    }
 }
 
 impl Player {
@@ -302,10 +376,25 @@ impl Player {
         })
     }
 
+    /// Kill and reap the player without waiting on stderr.
+    async fn kill_and_reap_in_place(&mut self) {
+        drop(self.input.take());
+        let _ = self.child.start_kill();
+        let _ = timeout(REAP_DEADLINE, self.child.wait()).await;
+        if let Some(reader) = self.stderr.take() {
+            reader.abort();
+        }
+    }
+
+    async fn kill_and_reap(mut self) {
+        self.kill_and_reap_in_place().await;
+    }
+
     /// Kill and reap the player, then log what it wrote to stderr.
     async fn fail(mut self) {
+        drop(self.input.take());
         let _ = self.child.start_kill();
-        let _ = timeout(Duration::from_secs(1), self.child.wait()).await;
+        let _ = timeout(REAP_DEADLINE, self.child.wait()).await;
         let Some(reader) = self.stderr.take() else {
             return;
         };
@@ -339,7 +428,11 @@ async fn play(
     generation: u64,
     events: &mpsc::Sender<PlaybackEvent>,
     audible: &mut bool,
-) -> Result<()> {
+    cancel: &mut watch::Receiver<bool>,
+) -> Option<Result<()>> {
+    if *cancel.borrow() {
+        return None;
+    }
     let mut report = Report {
         generation,
         events,
@@ -347,17 +440,35 @@ async fn play(
         started: Instant::now(),
         headers_ms: None,
     };
-    let mut player = media
+    let mut player = match media
         .prespawn
         .then(|| Player::spawn(media, EXPECTED_FORMAT))
-        .transpose()?;
-    let streamed = stream(media, session, turn_id, &mut report, &mut player).await;
-    if streamed.is_err()
-        && let Some(player) = player
+        .transpose()
     {
-        player.fail().await;
+        Ok(player) => player,
+        Err(error) => return Some(Err(error)),
+    };
+    let outcome = tokio::select! {
+        biased;
+        () = cancelled(cancel) => None,
+        streamed = stream(media, session, turn_id, &mut report, &mut player) => Some(streamed),
+    };
+    match outcome {
+        None => {
+            if let Some(player) = player.take() {
+                player.kill_and_reap().await;
+            }
+            None
+        }
+        Some(streamed) => {
+            if streamed.is_err()
+                && let Some(player) = player.take()
+            {
+                player.fail().await;
+            }
+            Some(streamed)
+        }
     }
-    streamed
 }
 
 /// Where a turn reports its first audio.
@@ -418,7 +529,11 @@ async fn stream(
     );
     let format = PcmFormat::parse(header("content-type").context("audio format required")?)?;
     if player.as_ref().is_none_or(|p| p.format != format) {
-        // Dropping a mismatched early player kills it (`kill_on_drop`).
+        // Kill and reap a mismatched early player before opening ALSA again.
+        if let Some(old) = player.as_mut() {
+            old.kill_and_reap_in_place().await;
+        }
+        *player = None;
         *player = Some(Player::spawn(media, format)?);
     }
     let Some(player) = player.as_mut() else {
@@ -1160,5 +1275,155 @@ mod tests {
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
         assert_eq!(health.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn aplay_environment_strips_secrets_and_gates_bench_socket_on_simulate() {
+        let vars = |key: &str| -> Option<OsString> {
+            match key {
+                "PATH" => Some("/usr/bin".into()),
+                "HOME" => Some("/var/lib/robot-buddy".into()),
+                "LD_LIBRARY_PATH" => Some("/usr/local/lib".into()),
+                "ALSA_CONFIG_PATH" => Some("/etc/alsa.conf".into()),
+                "XDG_RUNTIME_DIR" => Some("/run/user/999".into()),
+                "BENCH_APLAY_SOCK" => Some("/tmp/aplay.sock".into()),
+                "BUDDY_OPERATOR_TOKEN" => Some("secret-operator-token".into()),
+                "BUDDY_LAB_TOKEN" => Some("secret-lab-token".into()),
+                _ => None,
+            }
+        };
+        let env_map = |simulate: bool| -> std::collections::HashMap<OsString, Option<OsString>> {
+            local_aplay(simulate, &vars)
+                .as_std()
+                .get_envs()
+                .map(|(k, v)| (k.to_owned(), v.map(std::ffi::OsStr::to_owned)))
+                .collect()
+        };
+        for simulate in [false, true] {
+            let env = env_map(simulate);
+            assert_eq!(
+                env.get(std::ffi::OsStr::new("LC_ALL")),
+                Some(&Some(OsString::from("C")))
+            );
+            for kept in [
+                "PATH",
+                "HOME",
+                "LD_LIBRARY_PATH",
+                "ALSA_CONFIG_PATH",
+                "XDG_RUNTIME_DIR",
+            ] {
+                assert!(env.contains_key(std::ffi::OsStr::new(kept)), "{kept}");
+            }
+            for secret in ["BUDDY_OPERATOR_TOKEN", "BUDDY_LAB_TOKEN"] {
+                assert!(!env.contains_key(std::ffi::OsStr::new(secret)), "{secret}");
+            }
+            assert_eq!(
+                env.contains_key(std::ffi::OsStr::new("BENCH_APLAY_SOCK")),
+                simulate
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn stop_reaps_player_before_returning_for_exclusive_replacement() {
+        let dir = std::env::temp_dir().join(format!("buddy-reap-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pid_file = dir.join("player.pid");
+        let app = Router::new().route(
+            "/v1/speech",
+            post(|| async {
+                let stream = futures_util::stream::unfold(0, |i| async move {
+                    if i > 0 {
+                        tokio::time::sleep(Duration::from_mins(1)).await;
+                    }
+                    Some((Ok::<_, std::io::Error>(vec![0u8; 4800]), i + 1))
+                });
+                (PCM_HEADERS, Body::from_stream(stream))
+            }),
+        );
+        let (server, _) = serve(app).await;
+        let pid_path = pid_file.clone();
+        let factory: PlayerFactory = Arc::new(move |_| {
+            let mut command = tokio::process::Command::new("sh");
+            let script = format!("echo $$ > '{}'; exec sleep 30", pid_path.display());
+            command.args(["-c", &script]).stdout(Stdio::null());
+            command
+        });
+        let media = Arc::new(Media::for_test(&server, factory, WRITE_DEADLINE));
+        let (tx, mut rx) = mpsc::channel(8);
+        let mut playback = Playback::new(media, "s".into(), tx);
+        let generation = playback.start("test-turn").unwrap();
+        assert_eq!(
+            next_event(&mut rx).await,
+            PlaybackEvent::Started { generation }
+        );
+        let deadline = Instant::now() + GUARD;
+        let pid: i32 = loop {
+            if let Ok(text) = std::fs::read_to_string(&pid_file)
+                && let Ok(pid) = text.trim().parse::<i32>()
+            {
+                break pid;
+            }
+            assert!(Instant::now() < deadline, "player pid never written");
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        };
+        playback.stop(Rewarm::No).await;
+        // Immediately on return from stop(), the player must already be dead and reaped.
+        let status = std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stderr(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(
+            !status.success(),
+            "player pid {pid} still exists after stop()"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn format_mismatch_reaps_early_player_before_spawning_replacement() {
+        let dir = std::env::temp_dir().join(format!("buddy-fmt-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pid_file = dir.join("early.pid");
+        let app = Router::new().route(
+            "/v1/speech",
+            post(|| async {
+                (
+                    [
+                        ("content-type", "audio/pcm;rate=16000;channels=1"),
+                        ("x-audio-encoding", "pcm_s16le"),
+                        ("x-audio-turn-id", "test-turn"),
+                    ],
+                    vec![0u8; 3200],
+                )
+            }),
+        );
+        let (server, _) = serve(app).await;
+        let pid_path = pid_file.clone();
+        let factory: PlayerFactory = Arc::new(move |format| {
+            let mut command = tokio::process::Command::new("sh");
+            let script = if format == EXPECTED_FORMAT {
+                format!("echo $$ > '{}'; exec sleep 30", pid_path.display())
+            } else {
+                // Fail if the prespawned player is still alive/unreaped when replacement spawns.
+                format!(
+                    "if [ -f '{0}' ] && kill -0 \"$(cat '{0}')\" 2>/dev/null; then exit 42; fi; exec cat >/dev/null",
+                    pid_path.display()
+                )
+            };
+            command.args(["-c", &script]).stdout(Stdio::null());
+            command
+        });
+        let media = Arc::new(Media::for_test(&server, factory, WRITE_DEADLINE));
+        let (tx, mut rx) = mpsc::channel(8);
+        let mut playback = Playback::new(media, "s".into(), tx);
+        let generation = playback.start("test-turn").unwrap();
+        assert_eq!(
+            next_event(&mut rx).await,
+            PlaybackEvent::Started { generation }
+        );
+        assert_eq!(finished(&mut rx).await, (generation, true));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

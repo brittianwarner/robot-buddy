@@ -41,6 +41,9 @@ redundant_clone = "warn"
 # Errors and panics are documented where they are not obvious from the signature.
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
+# Empty-result checks need not dump private transcript or credential-bearing
+# collections to CI logs on failure. Prefer asserting the predicate itself.
+assert_is_empty = "allow"
 must_use_candidate = "allow"
 module_name_repetitions = "allow"
 

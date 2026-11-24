@@ -1,0 +1,2657 @@
+Repository:          /Users/brittianwarner/goods/robot-buddy
+Branch:              feat/pip-hardware
+HEAD SHA:            b960f1c1e2202cab1a2802d3513779ef08881b5d
+Workspace tree hash: dcbcb88569e1ec1655b3b9d88a9c8d2a8107fcf393695c1d6baa6e12d2465189
+Workspace sources:   CLEAN (matches b960f1c1e2202cab1a2802d3513779ef08881b5d)
+Non-workspace status (excluded from build context):
+?? infra/arm64-matrix-check.sh
+?? infra/arm64-matrix.Dockerfile
+?? infra/arm64-matrix.Dockerfile.dockerignore
+?? infra/run-arm64-matrix.sh
+Mode:                trixie (gate), SOURCE_SHA=b960f1c1e2202cab1a2802d3513779ef08881b5d, CARGO_JOBS=2, OPENCV_BUILD_JOBS=2
+
+>>> Running docker buildx target=trixie-gate (linux/arm64, SOURCE_SHA=b960f1c1e2202cab1a2802d3513779ef08881b5d, TREE_HASH=dcbcb88569e1ec1655b3b9d88a9c8d2a8107fcf393695c1d6baa6e12d2465189)
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from arm64-matrix.Dockerfile
+#1 transferring dockerfile: 4.92kB done
+#1 DONE 0.0s
+
+#2 resolve image config for docker-image://docker.io/docker/dockerfile:1
+#2 DONE 0.5s
+
+#3 docker-image://docker.io/docker/dockerfile:1@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183
+#3 resolve docker.io/docker/dockerfile:1@sha256:572cebbc2b15e6f84c077742952674889cb63cd5e9b80abdffcbe587b6f19183 done
+#3 CACHED
+
+#4 [internal] load metadata for docker.io/library/rust:1.100.0-slim-trixie@sha256:3b199fd6db7d709274df56565b8f4003f9e30d7bfcff9d53148c86053b7855e2
+#4 DONE 0.3s
+
+#5 [trixie-toolchain 1/3] FROM docker.io/library/rust:1.100.0-slim-trixie@sha256:3b199fd6db7d709274df56565b8f4003f9e30d7bfcff9d53148c86053b7855e2
+#5 resolve docker.io/library/rust:1.100.0-slim-trixie@sha256:3b199fd6db7d709274df56565b8f4003f9e30d7bfcff9d53148c86053b7855e2 done
+#5 DONE 0.0s
+
+#6 [internal] load build context
+#6 transferring context: 12.26kB 0.0s done
+#6 DONE 0.0s
+
+#7 [trixie-toolchain 2/3] RUN test "arm64" = arm64     && apt-get update && apt-get install -y --no-install-recommends       build-essential clang libclang-dev libopencv-dev cmake pkg-config ca-certificates file     && rm -rf /var/lib/apt/lists/*     && pkg-config --atleast-version=4.8 opencv4     && rustup component add rustfmt clippy
+#7 CACHED
+
+#8 [trixie-source 4/6] COPY apps ./apps
+#8 CACHED
+
+#9 [trixie-source 2/6] COPY .cargo/config.toml .cargo/config.toml
+#9 CACHED
+
+#10 [trixie-toolchain 3/3] WORKDIR /src
+#10 CACHED
+
+#11 [trixie-source 5/6] COPY infra/arm64-matrix-check.sh /usr/local/bin/arm64-matrix-check
+#11 CACHED
+
+#12 [trixie-source 1/6] COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+#12 CACHED
+
+#13 [trixie-source 3/6] COPY crates ./crates
+#13 CACHED
+
+#14 [trixie-source 6/6] RUN chmod +x /usr/local/bin/arm64-matrix-check
+#14 CACHED
+
+#15 [trixie-gate 1/1] RUN --mount=type=cache,id=arm64-matrix-cargo-registry,target=/usr/local/cargo/registry,sharing=locked     --mount=type=cache,id=arm64-matrix-trixie-target,target=/src/target,sharing=locked     /usr/local/bin/arm64-matrix-check trixie "2" "b960f1c1e2202cab1a2802d3513779ef08881b5d" "dcbcb88569e1ec1655b3b9d88a9c8d2a8107fcf393695c1d6baa6e12d2465189"
+#15 0.497 === ARM64 Matrix Gate: trixie ===
+#15 0.497 SOURCE_SHA:         b960f1c1e2202cab1a2802d3513779ef08881b5d
+#15 0.497 EXPECTED_TREE_HASH: dcbcb88569e1ec1655b3b9d88a9c8d2a8107fcf393695c1d6baa6e12d2465189
+#15 0.497 ACTUAL_TREE_HASH:   dcbcb88569e1ec1655b3b9d88a9c8d2a8107fcf393695c1d6baa6e12d2465189
+#15 0.497 PRETTY_NAME="Debian GNU/Linux 13 (trixie)"
+#15 0.497 VERSION_CODENAME=trixie
+#15 0.498 Linux buildkitsandbox 7.0.12-linuxkit #1 SMP PREEMPT Thu Aug 27 14:02:21 UTC 2026 aarch64 GNU/Linux
+#15 0.521 rustc 1.100.0 (0ef1bc386 2026-11-09)
+#15 0.539 cargo 1.100.0 (3acc79c0c 2026-11-05)
+#15 0.566 clippy 0.1.100 (0ef1bc3860 2026-11-09)
+#15 0.584 rustfmt 1.11.0-stable (0ef1bc3860 2026-11-09)
+#15 0.586 opencv4 modversion: 4.10.0
+#15 0.587 opencv4 prefix: /usr
+#15 0.587 CARGO_JOBS: 2
+#15 0.587 
+#15 0.587 >>> [trixie][FMT] cargo fmt --all -- --check
+#15 0.859 
+#15 0.859 >>> [trixie][DEFAULT] cargo clippy --workspace --all-targets --locked -j 2 -- -D warnings
+#15 0.917     Updating crates.io index
+#15 4.063  Downloading crates ...
+#15 4.251   Downloaded litemap v0.8.3
+#15 4.263   Downloaded macro_rules_attribute-proc_macro v0.2.3
+#15 4.264   Downloaded loop9 v0.1.5
+#15 4.266   Downloaded md-5 v0.10.6
+#15 4.287   Downloaded matchers v0.2.0
+#15 4.297   Downloaded maybe-rayon v0.1.1
+#15 4.302   Downloaded lru-slab v0.1.3
+#15 4.305   Downloaded lz4 v1.28.1
+#15 4.307   Downloaded monostate-impl v0.1.18
+#15 4.317   Downloaded multiversion_no_op v1.0.0
+#15 4.318   Downloaded new_debug_unreachable v1.0.6
+#15 4.319   Downloaded num-derive v0.4.2
+#15 4.323   Downloaded munge_macro v0.4.7
+#15 4.324   Downloaded noop_proc_macro v0.3.0
+#15 4.326   Downloaded num_cpus v1.17.0
+#15 4.332   Downloaded parking v2.2.1
+#15 4.332   Downloaded number_prefix v0.4.0
+#15 4.333   Downloaded permutation v0.4.1
+#15 4.343   Downloaded multimap v0.10.1
+#15 4.348   Downloaded percent-encoding v2.3.2
+#15 4.352   Downloaded pest_stack_guard v1.0.1
+#15 4.365   Downloaded pastey v0.1.1
+#15 4.375   Downloaded phf_codegen v0.13.1
+#15 4.377   Downloaded munge v0.4.7
+#15 4.383   Downloaded openssl-probe v0.2.2
+#15 4.385   Downloaded option-ext v0.2.0
+#15 4.388   Downloaded phf_shared v0.13.1
+#15 4.392   Downloaded adler2 v2.0.1
+#15 4.403   Downloaded monostate v0.1.18
+#15 4.407   Downloaded num-conv v0.2.2
+#15 4.431   Downloaded opentelemetry-http v0.28.0
+#15 4.449   Downloaded page_size v0.6.0
+#15 4.450   Downloaded phf_shared v0.12.1
+#15 4.462   Downloaded macro_rules_attribute v0.2.3
+#15 4.463   Downloaded aligned v0.4.3
+#15 4.465   Downloaded alloca v0.4.0
+#15 4.491   Downloaded mime v0.3.18
+#15 4.495   Downloaded lexical-write-integer v1.0.6
+#15 4.497   Downloaded arrayref v0.3.9
+#15 4.502   Downloaded async-stream v0.3.6
+#15 4.520   Downloaded cfg_aliases v0.2.2
+#15 4.521   Downloaded castaway v0.2.4
+#15 4.529   Downloaded const-random-macro v0.1.16
+#15 4.536   Downloaded num-complex v0.4.6
+#15 4.541   Downloaded pest_generator v2.9.6
+#15 4.542   Downloaded phf_generator v0.13.1
+#15 4.544   Downloaded num-integer v0.1.47
+#15 4.545   Downloaded num-rational v0.4.2
+#15 4.546   Downloaded mime_guess v2.0.5
+#15 4.548   Downloaded phf v0.13.1
+#15 4.554   Downloaded pkcs8 v0.10.2
+#15 4.561   Downloaded onig v6.5.3
+#15 4.562   Downloaded phf v0.12.1
+#15 4.564   Downloaded lock_api v0.4.14
+#15 4.589   Downloaded pest_derive v2.9.6
+#15 4.597   Downloaded oorandom v11.1.5
+#15 4.600   Downloaded paste v1.0.15
+#15 4.603   Downloaded pin-project-lite v0.2.17
+#15 4.608   Downloaded rustls-native-certs v0.8.5
+#15 4.609   Downloaded matchit v0.8.4
+#15 4.611   Downloaded memmap2 v0.9.12
+#15 4.613   Downloaded matchit v0.7.3
+#15 4.626   Downloaded nu-ansi-term v0.50.3
+#15 4.638   Downloaded async-recursion v1.2.0
+#15 4.642   Downloaded bitflags v1.3.2
+#15 4.645   Downloaded either v1.19.0
+#15 4.647   Downloaded pkg-config v0.3.34
+#15 4.650   Downloaded byteorder v1.5.0
+#15 4.660   Downloaded datafusion-macros v53.1.0
+#15 4.661   Downloaded derive_builder_macro v0.20.2
+#15 4.665   Downloaded ordered-float v5.5.1
+#15 4.667   Downloaded pastey v0.2.3
+#15 4.668   Downloaded once_cell v1.21.4
+#15 4.686   Downloaded path_abs v0.5.1
+#15 4.691   Downloaded lz4_flex v0.13.1
+#15 4.693   Downloaded ort-sys v2.0.0-rc.9
+#15 4.695   Downloaded ethnum v1.5.3
+#15 4.699   Downloaded no_std_io2 v0.9.4
+#15 4.708   Downloaded pin-project-internal v1.1.13
+#15 4.710   Downloaded parking_lot_core v0.9.12
+#15 4.712   Downloaded opentelemetry-otlp v0.28.0
+#15 4.714   Downloaded tap v1.0.1
+#15 4.715   Downloaded matrixmultiply v0.3.11
+#15 4.720   Downloaded log v0.4.35
+#15 4.733   Downloaded crossbeam-deque v0.8.8
+#15 4.736   Downloaded csv-core v0.1.13
+#15 4.742   Downloaded tracing-serde v0.2.0
+#15 4.743   Downloaded equivalent v1.0.3
+#15 4.744   Downloaded futures-sink v0.3.34
+#15 4.745   Downloaded tower-layer v0.3.3
+#15 4.746   Downloaded anyhow v1.0.104
+#15 4.756   Downloaded ciborium v0.2.2
+#15 4.774   Downloaded untrusted v0.7.1
+#15 4.775   Downloaded utf8_iter v1.1.0
+#15 4.776   Downloaded want v0.3.2
+#15 4.780   Downloaded datafusion-session v53.1.0
+#15 4.781   Downloaded pin-project v1.1.13
+#15 4.790   Downloaded displaydoc v0.2.7
+#15 4.792   Downloaded parking_lot v0.12.5
+#15 4.794   Downloaded errno v0.3.15
+#15 4.810   Downloaded num-traits v0.2.19
+#15 4.814   Downloaded wasm-bindgen-shared v0.2.130
+#15 4.834   Downloaded profiling-procmacros v1.0.18
+#15 4.837   Downloaded quick-error v2.0.1
+#15 4.856   Downloaded datafusion-catalog-listing v53.1.0
+#15 4.857   Downloaded unicase v2.10.0
+#15 4.860   Downloaded httpdate v1.0.3
+#15 4.861   Downloaded utf_types v1.0.0
+#15 4.863   Downloaded vbare-gen v0.2.0
+#15 4.866   Downloaded rand_pcg v0.10.2
+#15 4.868   Downloaded rayon-cond v0.4.0
+#15 4.869   Downloaded opentelemetry v0.28.0
+#15 4.873   Downloaded web-time v1.1.0
+#15 4.874   Downloaded pest_meta v2.9.6
+#15 4.876   Downloaded miniz_oxide v0.9.1
+#15 4.888   Downloaded zeroize v1.9.1
+#15 4.890   Downloaded rivet-sqlite-types v3.1.1
+#15 4.893   Downloaded lindera-dictionary v3.0.7
+#15 4.896   Downloaded tokio-stream v0.1.19
+#15 4.899   Downloaded tempfile v3.27.0
+#15 4.901   Downloaded darling v0.24.1
+#15 4.904   Downloaded include_dir_macros v0.7.4
+#15 4.905   Downloaded rivetkit-client-protocol v3.1.1
+#15 4.907   Downloaded rivetkit-shared-types v3.1.1
+#15 4.908   Downloaded alloc-no-stdlib v3.0.0
+#15 4.910   Downloaded equator-macro v0.4.2
+#15 4.911   Downloaded arrow-data v58.4.1
+#15 4.913   Downloaded arrow-row v58.4.1
+#15 4.920   Downloaded datafusion-catalog v53.1.0
+#15 4.922   Downloaded funty v2.0.0
+#15 4.930   Downloaded futures-core v0.3.34
+#15 4.932   Downloaded quote v1.0.47
+#15 4.934   Downloaded rand_core v0.6.4
+#15 4.935   Downloaded minimal-lexical v0.2.1
+#15 4.938   Downloaded rand_xoshiro v0.7.0
+#15 4.941   Downloaded lindera v3.0.7
+#15 4.944   Downloaded miniz_oxide v0.8.9
+#15 4.950   Downloaded ort v2.0.0-rc.9
+#15 4.954   Downloaded equator v0.4.2
+#15 4.956   Downloaded rig-harness-protocol v0.46.0
+#15 4.957   Downloaded rivet-envoy-protocol v3.1.1
+#15 4.958   Downloaded ident_case v1.0.1
+#15 4.959   Downloaded memchr v2.8.3
+#15 4.965   Downloaded crossbeam-utils v0.8.23
+#15 4.967   Downloaded darling_core v0.20.11
+#15 4.970   Downloaded tracing-core v0.1.36
+#15 4.972   Downloaded zerovec-derive v0.11.7
+#15 4.974   Downloaded zstd-safe v7.4.1
+#15 4.975   Downloaded byteorder-lite v0.1.0
+#15 4.976   Downloaded ciborium-io v0.2.2
+#15 4.977   Downloaded cedarwood v0.4.6
+#15 4.978   Downloaded arrow-schema v58.4.1
+#15 4.980   Downloaded prost-build v0.14.6
+#15 4.984   Downloaded event-listener-strategy v0.5.4
+#15 4.985   Downloaded comfy-table v7.2.2
+#15 4.991   Downloaded compact_str v0.9.1
+#15 4.993   Downloaded unsafe-libyaml v0.2.11
+#15 4.996   Downloaded compression-core v0.4.34
+#15 4.997   Downloaded const-random v0.1.18
+#15 4.998   Downloaded futures-io v0.3.34
+#15 5.011   Downloaded async_cell v0.2.3
+#15 5.013   Downloaded datafusion-doc v53.1.0
+#15 5.014   Downloaded tungstenite v0.29.0
+#15 5.017   Downloaded fallible-streaming-iterator v0.1.9
+#15 5.018   Downloaded ar_archive_writer v0.5.5
+#15 5.020   Downloaded axum-core v0.4.5
+#15 5.021   Downloaded futures-task v0.3.34
+#15 5.022   Downloaded deepsize v0.2.0
+#15 5.023   Downloaded deepsize_derive v0.1.2
+#15 5.024   Downloaded dunce v1.0.5
+#15 5.025   Downloaded base64 v0.23.1
+#15 5.029   Downloaded bumpalo v3.20.4
+#15 5.031   Downloaded fnv v1.0.7
+#15 5.033   Downloaded der v0.7.10
+#15 5.037   Downloaded datafusion-physical-expr-common v53.1.0
+#15 5.039   Downloaded futures-macro v0.3.34
+#15 5.040   Downloaded lance-bitpacking v7.0.0
+#15 5.042   Downloaded mio v1.2.5
+#15 5.047   Downloaded num-bigint v0.4.8
+#15 5.051   Downloaded arrow-csv v58.4.1
+#15 5.052   Downloaded nom v7.1.3
+#15 5.057   Downloaded crossbeam-queue v0.3.14
+#15 5.058   Downloaded av1-grain v0.2.5
+#15 5.060   Downloaded dashmap v6.2.1
+#15 5.062   Downloaded proc-macro2 v1.0.107
+#15 5.065   Downloaded ahash v0.8.12
+#15 5.067   Downloaded serde_repr v0.1.21
+#15 5.069   Downloaded serde_urlencoded v0.7.1
+#15 5.071   Downloaded simd_helpers v0.1.0
+#15 5.076   Downloaded unicode-normalization-alignments v0.1.12
+#15 5.081   Downloaded criterion-plot v0.8.2
+#15 5.096   Downloaded itoa v1.0.19
+#15 5.098   Downloaded schemars_derive v1.2.3
+#15 5.100   Downloaded tagptr v0.2.0
+#15 5.101   Downloaded http-range-header v0.4.2
+#15 5.102   Downloaded tonic v0.12.3
+#15 5.109   Downloaded bitflags v2.13.2
+#15 5.112   Downloaded built v0.8.1
+#15 5.114   Downloaded stable_deref_trait v1.2.1
+#15 5.114   Downloaded shlex v2.0.1
+#15 5.115   Downloaded simdutf8 v0.1.5
+#15 5.118   Downloaded snafu-derive v0.9.2
+#15 5.119   Downloaded datafusion-functions-nested v53.1.0
+#15 5.122   Downloaded strum_macros v0.26.4
+#15 5.124   Downloaded urlencoding v2.1.3
+#15 5.125   Downloaded version_check v0.9.5
+#15 5.126   Downloaded y4m v0.8.0
+#15 5.128   Downloaded zerofrom v0.1.8
+#15 5.136   Downloaded nom v8.0.0
+#15 5.141   Downloaded ptr_meta v0.3.2
+#15 5.143   Downloaded criterion v0.8.2
+#15 5.149   Downloaded thiserror-impl v2.0.21
+#15 5.149   Downloaded potential_utf v0.1.6
+#15 5.151   Downloaded rancor v0.1.3
+#15 5.153   Downloaded http-body v1.1.0
+#15 5.154   Downloaded include_dir v0.7.4
+#15 5.155   Downloaded stfu8 v0.2.7
+#15 5.156   Downloaded rawpointer v0.2.1
+#15 5.157   Downloaded ref-cast-impl v1.0.27
+#15 5.159   Downloaded hex v0.4.3
+#15 5.161   Downloaded datafusion-expr-common v53.1.0
+#15 5.163   Downloaded lance-arrow v7.0.0
+#15 5.164   Downloaded encoding_rs_io v0.1.8
+#15 5.165   Downloaded untrusted v0.9.0
+#15 5.167   Downloaded rand v0.9.5
+#15 5.170   Downloaded rivet-error-macros v3.1.1
+#15 5.170   Downloaded pest v2.9.6
+#15 5.174   Downloaded heck v0.5.0
+#15 5.176   Downloaded opentelemetry-proto v0.28.0
+#15 5.186   Downloaded tiff v0.11.3
+#15 5.190   Downloaded rustls-platform-verifier v0.7.1
+#15 5.193   Downloaded time-macros v0.2.32
+#15 5.195   Downloaded tokio-tungstenite v0.26.2
+#15 5.196   Downloaded prost-derive v0.14.6
+#15 5.197   Downloaded rand_chacha v0.9.0
+#15 5.198   Downloaded rustc-hash v2.1.3
+#15 5.199   Downloaded arg_enum_proc_macro v0.3.4
+#15 5.201   Downloaded socket2 v0.5.10
+#15 5.202   Downloaded tracing-attributes v0.1.31
+#15 5.204   Downloaded axum v0.7.9
+#15 5.211   Downloaded async-stream-impl v0.3.6
+#15 5.212   Downloaded async-compression v0.4.52
+#15 5.219   Downloaded darling_core v0.24.1
+#15 5.223   Downloaded libm v0.2.16
+#15 5.230   Downloaded bytecheck v0.8.3
+#15 5.230   Downloaded cast v0.3.0
+#15 5.232   Downloaded color_quant v1.1.0
+#15 5.233   Downloaded serde_derive v1.0.229
+#15 5.235   Downloaded crunchy v0.2.4
+#15 5.236   Downloaded png v0.18.1
+#15 5.239   Downloaded form_urlencoded v1.2.3
+#15 5.240   Downloaded arrow-select v58.4.1
+#15 5.242   Downloaded ptr_meta_derive v0.3.2
+#15 5.243   Downloaded rig-fastembed v0.46.0
+#15 5.244   Downloaded moxcms v0.8.1
+#15 5.251   Downloaded opentelemetry_sdk v0.28.0
+#15 5.258   Downloaded tinyvec v1.13.3
+#15 5.261   Downloaded autocfg v1.5.1
+#15 5.263   Downloaded cmake v0.1.58
+#15 5.264   Downloaded rivetkit-client v3.1.1
+#15 5.266   Downloaded rustls-pki-types v1.16.0
+#15 5.267   Downloaded dary_heap v0.3.9
+#15 5.268   Downloaded rig-lancedb v0.46.0
+#15 5.270   Downloaded serde_bytes v0.11.19
+#15 5.272   Downloaded avif-serialize v0.8.9
+#15 5.273   Downloaded arrow-string v58.4.1
+#15 5.274   Downloaded strum v0.28.0
+#15 5.275   Downloaded time-core v0.1.9
+#15 5.276   Downloaded schemars v1.2.3
+#15 5.284   Downloaded derive_builder_core v0.20.2
+#15 5.286   Downloaded digest v0.10.7
+#15 5.288   Downloaded blake2 v0.10.6
+#15 5.291   Downloaded lexical-core v1.0.6
+#15 5.292   Downloaded rustversion v1.0.23
+#15 5.295   Downloaded try-lock v0.2.5
+#15 5.296   Downloaded clap_builder v4.6.7
+#15 5.300   Downloaded regex v1.13.1
+#15 5.304   Downloaded reqwest v0.12.28
+#15 5.309   Downloaded fax v0.2.7
+#15 5.311   Downloaded datafusion-datasource-arrow v53.1.0
+#15 5.312   Downloaded signal-hook-registry v1.4.8
+#15 5.313   Downloaded foldhash v0.2.0
+#15 5.314   Downloaded utf8-ranges v1.0.5
+#15 5.315   Downloaded wasm-bindgen-macro v0.2.130
+#15 5.316   Downloaded tokenizers v0.21.4
+#15 5.323   Downloaded prometheus v0.14.0
+#15 5.328   Downloaded quinn v0.11.12
+#15 5.331   Downloaded derive_builder v0.20.2
+#15 5.334   Downloaded slab v0.4.12
+#15 5.335   Downloaded futures-timer v3.0.4
+#15 5.337   Downloaded thiserror v2.0.21
+#15 5.341   Downloaded crc32fast v1.5.5
+#15 5.344   Downloaded crossbeam-skiplist v0.1.3
+#15 5.345   Downloaded lance-datagen v7.0.0
+#15 5.347   Downloaded yoke-derive v0.8.4
+#15 5.348   Downloaded lance-namespace-reqwest-client v0.7.7
+#15 5.355   Downloaded find-msvc-tools v0.1.15
+#15 5.357   Downloaded futures-executor v0.3.34
+#15 5.358   Downloaded semver v1.0.28
+#15 5.361   Downloaded unicode-blocks v0.1.11
+#15 5.362   Downloaded static_assertions v1.1.0
+#15 5.363   Downloaded smallvec v1.16.5
+#15 5.363   Downloaded hyper-rustls v0.27.10
+#15 5.365   Downloaded http-body-util v0.1.5
+#15 5.366   Downloaded radium v0.7.0
+#15 5.367   Downloaded datafusion-functions-aggregate v53.1.0
+#15 5.370   Downloaded ref-cast v1.0.27
+#15 5.372   Downloaded bitvec v1.1.1
+#15 5.384   Downloaded typenum v1.20.1
+#15 5.387   Downloaded zune-core v0.5.3
+#15 5.389   Downloaded profiling v1.0.18
+#15 5.389   Downloaded moka v0.12.16
+#15 5.395   Downloaded weezl v0.1.12
+#15 5.398   Downloaded glob v0.3.4
+#15 5.399   Downloaded serde_yaml_ng v0.10.0
+#15 5.402   Downloaded idna_adapter v1.2.2
+#15 5.403   Downloaded rand_core v0.9.5
+#15 5.403   Downloaded foldhash v0.1.5
+#15 5.404   Downloaded as-slice v0.2.1
+#15 5.405   Downloaded atoi v2.0.0
+#15 5.406   Downloaded bit_field v0.10.4
+#15 5.408   Downloaded rgb v0.8.53
+#15 5.411   Downloaded rusqlite v0.37.0
+#15 5.415   Downloaded fastrand v2.5.0
+#15 5.416   Downloaded fdeflate v0.3.7
+#15 5.418   Downloaded object_store v0.13.2
+#15 5.424   Downloaded rig-milvus v0.46.0
+#15 5.426   Downloaded anstyle v1.0.14
+#15 5.427   Downloaded rig-vectorize v0.46.0
+#15 5.429   Downloaded rivetkit-engine-process v3.1.1
+#15 5.430   Downloaded portable-atomic v1.15.0
+#15 5.436   Downloaded flatbuffers v25.12.19
+#15 5.437   Downloaded rustls-webpki v0.103.17
+#15 5.440   Downloaded fs_extra v1.3.0
+#15 5.442   Downloaded ciborium-ll v0.2.2
+#15 5.442   Downloaded fixedbitset v0.5.9
+#15 5.444   Downloaded darling_macro v0.20.11
+#15 5.445   Downloaded datafusion-common-runtime v53.1.0
+#15 5.446   Downloaded lazy_static v1.5.1
+#15 5.447   Downloaded serde_bare v0.5.0
+#15 5.448   Downloaded lance-io v7.0.0
+#15 5.452   Downloaded prost-types v0.14.6
+#15 5.454   Downloaded fallible-iterator v0.3.0
+#15 5.455   Downloaded sha1 v0.10.7
+#15 5.457   Downloaded ipnet v2.12.2
+#15 5.459   Downloaded indoc v2.0.8
+#15 5.462   Downloaded axum-macros v0.5.1
+#15 5.469   Downloaded bs58 v0.5.1
+#15 5.472   Downloaded datafusion v53.1.0
+#15 5.479   Downloaded ed25519 v2.2.3
+#15 5.481   Downloaded concurrent-queue v2.5.0
+#15 5.482   Downloaded datafusion-physical-expr-adapter v53.1.0
+#15 5.483   Downloaded deranged v0.5.9
+#15 5.484   Downloaded lexical-parse-float v1.0.6
+#15 5.487   Downloaded qoi v0.4.1
+#15 5.491   Downloaded simd-adler32 v0.3.10
+#15 5.493   Downloaded utoipa v5.5.0
+#15 5.495   Downloaded snafu-derive v0.8.9
+#15 5.496   Downloaded arrow-cast v58.4.1
+#15 5.499   Downloaded lance-testing v7.0.0
+#15 5.499   Downloaded webpki-roots v0.26.11
+#15 5.501   Downloaded arrow-array v58.4.1
+#15 5.505   Downloaded console v0.15.11
+#15 5.509   Downloaded lance-namespace v7.0.0
+#15 5.510   Downloaded jobserver v0.1.35
+#15 5.512   Downloaded protobuf v3.7.2
+#15 5.520   Downloaded reqwest v0.13.5
+#15 5.525   Downloaded datafusion-functions-window-common v53.1.0
+#15 5.526   Downloaded ndarray v0.16.1
+#15 5.536   Downloaded time v0.3.55
+#15 5.546   Downloaded unicode_categories v0.1.1
+#15 5.548   Downloaded rend v0.5.4
+#15 5.550   Downloaded rivet-error v3.1.1
+#15 5.551   Downloaded tinystr v0.8.5
+#15 5.552   Downloaded thiserror-impl v1.0.69
+#15 5.553   Downloaded tokio-tungstenite v0.29.0
+#15 5.555   Downloaded psm v0.1.32
+#15 5.557   Downloaded zmij v1.0.23
+#15 5.559   Downloaded prost v0.13.5
+#15 5.561   Downloaded walkdir v2.5.0
+#15 5.563   Downloaded rand_core v0.10.1
+#15 5.564   Downloaded blake3 v1.8.7
+#15 5.570   Downloaded cfg-if v1.0.5
+#15 5.571   Downloaded jsonwebtoken v10.4.0
+#15 5.576   Downloaded imgref v1.12.3
+#15 5.577   Downloaded rustc_version v0.4.1
+#15 5.578   Downloaded hashlink v0.10.0
+#15 5.580   Downloaded yoke v0.8.4
+#15 5.581   Downloaded bitpacking v0.9.3
+#15 5.583   Downloaded generic-array v0.14.7
+#15 5.584   Downloaded webpki-roots v1.0.12
+#15 5.587   Downloaded serde_ignored v0.1.14
+#15 5.588   Downloaded dyn-clone v1.0.20
+#15 5.590   Downloaded arrayvec v0.7.8
+#15 5.592   Downloaded datafusion-functions-table v53.1.0
+#15 5.594   Downloaded xxhash-rust v0.8.19
+#15 5.595   Downloaded rig-helixdb v0.46.0
+#15 5.596   Downloaded tokio-util v0.7.20
+#15 5.603   Downloaded schemars v0.9.0
+#15 5.611   Downloaded serde v1.0.229
+#15 5.614   Downloaded croner v2.2.0
+#15 5.616   Downloaded serde_json v1.0.154
+#15 5.620   Downloaded compression-codecs v0.4.47
+#15 5.625   Downloaded tracing-subscriber v0.3.23
+#15 5.631   Downloaded sha2 v0.10.9
+#15 5.634   Downloaded spki v0.7.3
+#15 5.635   Downloaded uuid v1.29.2
+#15 5.637   Downloaded tiny-keccak v2.0.2
+#15 5.639   Downloaded protobuf-support v3.7.2
+#15 5.640   Downloaded arrow-buffer v58.4.1
+#15 5.644   Downloaded vbare v0.2.0
+#15 5.646   Downloaded tokio-rustls v0.26.6
+#15 5.647   Downloaded v_frame v0.3.9
+#15 5.649   Downloaded rivetkit-actor-persist v3.1.1
+#15 5.650   Downloaded object v0.39.1
+#15 5.659   Downloaded atomic-waker v1.1.2
+#15 5.660   Downloaded darling_macro v0.24.1
+#15 5.661   Downloaded datafusion-functions v53.1.0
+#15 5.669   Downloaded clap_lex v1.1.2
+#15 5.670   Downloaded rivet-metrics v3.1.1
+#15 5.671   Downloaded zune-inflate v0.2.54
+#15 5.673   Downloaded vcpkg v0.2.15
+#15 5.700   Downloaded crypto-common v0.1.7
+#15 5.701   Downloaded strsim v0.11.1
+#15 5.702   Downloaded rivet-envoy-client v3.1.1
+#15 5.704   Downloaded ryu v1.0.23
+#15 5.708   Downloaded std_prelude v0.2.12
+#15 5.709   Downloaded tokio-macros v2.7.2
+#15 5.710   Downloaded anes v0.1.6
+#15 5.713   Downloaded sqlparser_derive v0.5.0
+#15 5.713   Downloaded data-encoding v2.11.1
+#15 5.714   Downloaded fsst v7.0.0
+#15 5.715   Downloaded half v1.8.3
+#15 5.717   Downloaded nix v0.30.1
+#15 5.726   Downloaded fast-float2 v0.2.4
+#15 5.727   Downloaded getrandom v0.2.17
+#15 5.729   Downloaded lebe v0.5.3
+#15 5.731   Downloaded hmac v0.12.1
+#15 5.733   Downloaded lance-linalg v7.0.0
+#15 5.735   Downloaded sdd v4.10.0
+#15 5.737   Downloaded serde_derive_internals v0.30.0
+#15 5.738   Downloaded event-listener v5.4.2
+#15 5.740   Downloaded lexical-parse-integer v1.0.6
+#15 5.742   Downloaded wyz v0.5.1
+#15 5.742   Downloaded rig-agent v0.46.0
+#15 5.754   Downloaded hyper-timeout v0.5.2
+#15 5.756   Downloaded bitstream-io v4.10.0
+#15 5.760   Downloaded httparse v1.10.1
+#15 5.762   Downloaded signature v2.2.0
+#15 5.763   Downloaded socks v0.3.4
+#15 5.764   Downloaded futures-channel v0.3.34
+#15 5.766   Downloaded procfs v0.17.0
+#15 5.769   Downloaded vbare-compiler v0.2.0
+#15 5.770   Downloaded lz4-sys v1.11.1+lz4-1.10.0
+#15 5.785   Downloaded socket2 v0.6.5
+#15 5.786   Downloaded prost v0.14.6
+#15 5.788   Downloaded aws-lc-rs v1.19.0
+#15 5.799   Downloaded humantime v2.4.0
+#15 5.801   Downloaded rivetkit v3.1.1
+#15 5.802   Downloaded async-trait v0.1.92
+#15 5.804   Downloaded chrono v0.4.45
+#15 5.810   Downloaded zerofrom-derive v0.1.8
+#15 5.811   Downloaded aligned-vec v0.6.4
+#15 5.812   Downloaded tower-service v0.3.3
+#15 5.813   Downloaded hf-hub v0.4.3
+#15 5.815   Downloaded iana-time-zone v0.1.65
+#15 5.817   Downloaded bigdecimal v0.4.11
+#15 5.820   Downloaded rand v0.8.8
+#15 5.823   Downloaded sharded-slab v0.1.7
+#15 5.826   Downloaded thiserror v1.0.69
+#15 5.829   Downloaded arc-swap v1.9.5
+#15 5.832   Downloaded rangemap v1.8.0
+#15 5.833   Downloaded datafusion-datasource-csv v53.1.0
+#15 5.834   Downloaded datafusion-expr v53.1.0
+#15 5.839   Downloaded dirs-sys v0.5.0
+#15 5.840   Downloaded aho-corasick v1.1.5
+#15 5.844   Downloaded bytes v1.12.1
+#15 5.847   Downloaded scopeguard v1.2.0
+#15 5.848   Downloaded unicode-segmentation v1.13.3
+#15 5.850   Downloaded rkyv_derive v0.8.18
+#15 5.852   Downloaded tracing-futures v0.2.5
+#15 5.853   Downloaded thread_local v1.1.10
+#15 5.855   Downloaded serde_core v1.0.229
+#15 5.857   Downloaded siphasher v1.0.4
+#15 5.860   Downloaded rig-typesafeai v0.46.0
+#15 5.861   Downloaded tower v0.4.13
+#15 5.873   Downloaded rustix v0.38.44
+#15 5.896   Downloaded strum v0.26.3
+#15 5.896   Downloaded same-file v1.0.6
+#15 5.897   Downloaded subtle v2.6.1
+#15 5.899   Downloaded utf-8 v0.7.6
+#15 5.901   Downloaded ucd-trie v0.1.7
+#15 5.902   Downloaded av-scenechange v0.14.1
+#15 5.912   Downloaded base64 v0.13.1
+#15 5.915   Downloaded zerocopy-derive v0.8.63
+#15 5.921   Downloaded qrcode v0.14.1
+#15 5.924   Downloaded lance-file v7.0.0
+#15 5.927   Downloaded roaring v0.11.5
+#15 5.932   Downloaded rand_chacha v0.3.1
+#15 5.932   Downloaded serde_with_macros v3.24.0
+#15 5.934   Downloaded jiff-core v0.1.5
+#15 5.937   Downloaded prettyplease v0.2.37
+#15 5.940   Downloaded powerfmt v0.2.1
+#15 5.941   Downloaded rayon-core v1.13.0
+#15 5.944   Downloaded lancedb v0.30.0
+#15 5.954   Downloaded zeroize_derive v1.5.0
+#15 5.955   Downloaded crossbeam-channel v0.5.17
+#15 5.959   Downloaded rivetkit-inspector-protocol v3.1.1
+#15 5.961   Downloaded ureq v2.12.1
+#15 5.965   Downloaded datafusion-datasource-json v53.1.0
+#15 5.966   Downloaded strum_macros v0.28.0
+#15 5.968   Downloaded unicode-width v0.2.3
+#15 5.973   Downloaded async-channel v2.5.0
+#15 5.974   Downloaded syn v1.0.109
+#15 5.980   Downloaded darling v0.20.11
+#15 5.983   Downloaded datafusion-execution v53.1.0
+#15 5.984   Downloaded saa v5.6.4
+#15 5.987   Downloaded serde_path_to_error v0.1.20
+#15 5.988   Downloaded twox-hash v2.1.5
+#15 5.991   Downloaded zlib-rs v0.6.8
+#15 5.995   Downloaded bytecheck_derive v0.8.3
+#15 5.995   Downloaded syn v3.0.10
+#15 6.002   Downloaded arrow-ipc v58.4.1
+#15 6.006   Downloaded arrow-json v58.4.1
+#15 6.009   Downloaded dirs v6.0.0
+#15 6.010   Downloaded alloc-stdlib v0.3.0
+#15 6.011   Downloaded thread-tree v0.3.3
+#15 6.012   Downloaded tower-http v0.6.11
+#15 6.020   Downloaded bytemuck v1.25.2
+#15 6.023   Downloaded tinytemplate v1.2.1
+#15 6.025   Downloaded ppv-lite86 v0.2.21
+#15 6.026   Downloaded stacker v0.1.25
+#15 6.029   Downloaded writeable v0.6.4
+#15 6.031   Downloaded constant_time_eq v0.4.2
+#15 6.033   Downloaded cpufeatures v0.2.17
+#15 6.034   Downloaded block-buffer v0.10.4
+#15 6.035   Downloaded brotli-decompressor v6.3.1
+#15 6.043   Downloaded prost-derive v0.13.5
+#15 6.044   Downloaded zstd v0.13.5
+#15 6.047   Downloaded gif v0.14.2
+#15 6.048   Downloaded lance-table v7.0.0
+#15 6.051   Downloaded half v2.7.1
+#15 6.054   Downloaded unicode-ident v1.0.27
+#15 6.058   Downloaded icu_provider v2.4.0
+#15 6.060   Downloaded clap v4.6.9
+#15 6.065   Downloaded arrow-arith v58.4.1
+#15 6.067   Downloaded indexmap v1.9.3
+#15 6.069   Downloaded snafu v0.9.2
+#15 6.074   Downloaded getrandom v0.4.3
+#15 6.077   Downloaded cc v1.11.2
+#15 6.080   Downloaded datafusion-sql v53.1.0
+#15 6.085   Downloaded wasm-bindgen-macro-support v0.2.130
+#15 6.087   Downloaded tracing-opentelemetry v0.29.0
+#15 6.091   Downloaded getrandom v0.3.4
+#15 6.093   Downloaded procfs-core v0.17.0
+#15 6.096   Downloaded rand v0.10.3
+#15 6.098   Downloaded lance-core v7.0.0
+#15 6.102   Downloaded url v2.5.9
+#15 6.105   Downloaded lance-namespace-impls v7.0.0
+#15 6.109   Downloaded lance-datafusion v7.0.0
+#15 6.112   Downloaded rig-cassette v0.46.0
+#15 6.118   Downloaded curve25519-dalek v4.1.3
+#15 6.127   Downloaded quinn-proto v0.11.19
+#15 6.133   Downloaded jiff-static v0.2.43
+#15 6.134   Downloaded lexical-util v1.0.7
+#15 6.137   Downloaded rig-memory v0.46.0
+#15 6.142   Downloaded tracing v0.1.44
+#15 6.151   Downloaded serde_with v3.24.0
+#15 6.162   Downloaded datafusion-physical-expr v53.1.0
+#15 6.168   Downloaded onig_sys v69.9.3
+#15 6.179   Downloaded lance-index v7.0.0
+#15 6.191   Downloaded rig-tungstenite v0.46.0
+#15 6.193   Downloaded synstructure v0.14.0
+#15 6.194   Downloaded regex-syntax v0.8.11
+#15 6.198   Downloaded rustix v1.1.6
+#15 6.223   Downloaded seq-macro v0.3.6
+#15 6.224   Downloaded sync_wrapper v1.0.2
+#15 6.225   Downloaded brotli v9.1.1
+#15 6.235   Downloaded spm_precompiled v0.1.4
+#15 6.241   Downloaded lance-encoding v7.0.0
+#15 6.249   Downloaded rustls v0.23.46
+#15 6.259   Downloaded rivetkit-core v3.1.1
+#15 6.265   Downloaded hyperloglogplus v0.4.1
+#15 6.267   Downloaded libc v0.2.191
+#15 6.327   Downloaded petgraph v0.8.3
+#15 6.344   Downloaded rig-http v0.46.0
+#15 6.346   Downloaded chrono-tz v0.10.4
+#15 6.357   Downloaded zstd-sys v2.1.3+zstd.1.5.7
+#15 6.369   Downloaded csv v1.4.0
+#15 6.381   Downloaded futures v0.3.34
+#15 6.383   Downloaded icu_normalizer_data v2.4.0
+#15 6.385   Downloaded indicatif v0.17.11
+#15 6.388   Downloaded lance-tokenizer v7.0.0
+#15 6.389   Downloaded datafusion-physical-plan v53.1.0
+#15 6.402   Downloaded tokio v1.54.1
+#15 6.433   Downloaded axum-core v0.5.6
+#15 6.435   Downloaded base64ct v1.8.3
+#15 6.437   Downloaded tracing-log v0.2.0
+#15 6.438   Downloaded kanaria v0.2.0
+#15 6.445   Downloaded quinn-udp v0.5.16
+#15 6.447   Downloaded rig-reqwest v0.46.0
+#15 6.448   Downloaded pxfm v0.1.30
+#15 6.462   Downloaded serde_cbor v0.11.2
+#15 6.464   Downloaded const-oid v0.9.6
+#15 6.466   Downloaded ravif v0.13.0
+#15 6.466   Downloaded image-webp v0.2.4
+#15 6.468   Downloaded rav1e v0.8.1
+#15 6.492   Downloaded rig-core v0.46.0
+#15 6.549   Downloaded prettyplease v0.3.0
+#15 6.552   Downloaded datafusion-functions-aggregate-common v53.1.0
+#15 6.554   Downloaded flate2 v1.1.11
+#15 6.558   Downloaded chacha20 v0.10.2
+#15 6.560   Downloaded icu_locale_core v2.4.0
+#15 6.566   Downloaded ring v0.17.14
+#15 6.597   Downloaded crossbeam-epoch v0.9.21
+#15 6.599   Downloaded allocator-api2 v0.2.21
+#15 6.601   Downloaded linux-raw-sys v0.4.15
+#15 6.629   Downloaded datafusion-pruning v53.1.0
+#15 6.630   Downloaded datafusion-functions-window v53.1.0
+#15 6.631   Downloaded async-lock v3.5.0
+#15 6.633   Downloaded rust-stemmers v1.2.0
+#15 6.657   Downloaded base64 v0.22.1
+#15 6.660   Downloaded datafusion-physical-optimizer v53.1.0
+#15 6.662   Downloaded linux-raw-sys v0.12.1
+#15 6.700   Downloaded ed25519-dalek v2.2.0
+#15 6.703   Downloaded icu_collections v2.4.0
+#15 6.708   Downloaded indexmap v2.14.2
+#15 6.712   Downloaded tungstenite v0.26.2
+#15 6.714   Downloaded arrow-ord v58.4.1
+#15 6.716   Downloaded arrow v58.4.1
+#15 6.719   Downloaded zerotrie v0.2.5
+#15 6.723   Downloaded jieba-rs v0.9.0
+#15 6.754   Downloaded rand_distr v0.5.1
+#15 6.757   Downloaded http v1.5.0
+#15 6.760   Downloaded libsqlite3-sys v0.35.0
+#15 6.800   Downloaded io-uring v0.7.16
+#15 6.803   Downloaded hashbrown v0.12.3
+#15 6.806   Downloaded tower v0.5.3
+#15 6.817   Downloaded wasm-bindgen v0.2.130
+#15 6.819   Downloaded zune-jpeg v0.5.15
+#15 6.822   Downloaded snafu v0.8.9
+#15 6.826   Downloaded daachorse v2.1.1
+#15 6.829   Downloaded hyper-util v0.1.21
+#15 6.835   Downloaded lexical-write-float v1.0.6
+#15 6.837   Downloaded unicode-normalization v0.1.26
+#15 6.840   Downloaded zerovec v0.11.9
+#15 6.844   Downloaded random_word v0.5.3
+#15 6.867   Downloaded hashbrown v0.15.5
+#15 6.871   Downloaded icu_properties v2.4.0
+#15 6.874   Downloaded hashbrown v0.14.5
+#15 6.878   Downloaded aws-lc-sys v0.47.0
+#15 7.050   Downloaded datafusion-datasource v53.1.0
+#15 7.053   Downloaded itertools v0.13.0
+#15 7.057   Downloaded idna v1.1.0
+#15 7.060   Downloaded itertools v0.14.0
+#15 7.064   Downloaded hashbrown v0.17.1
+#15 7.068   Downloaded utoipa-gen v5.5.0
+#15 7.072   Downloaded futures-util v0.3.34
+#15 7.080   Downloaded hashbrown v0.16.1
+#15 7.083   Downloaded hyper v1.12.0
+#15 7.089   Downloaded h2 v0.4.20
+#15 7.094   Downloaded rkyv v0.8.18
+#15 7.106   Downloaded esaxx-rs v0.1.10
+#15 7.109   Downloaded icu_properties_data v2.4.0
+#15 7.114   Downloaded jieba-macros v0.9.0
+#15 7.116   Downloaded webpki-root-certs v1.0.12
+#15 7.118   Downloaded axum v0.8.9
+#15 7.125   Downloaded scc v3.8.8
+#15 7.129   Downloaded rayon v1.12.0
+#15 7.134   Downloaded datafusion-optimizer v53.1.0
+#15 7.139   Downloaded exr v1.74.3
+#15 7.147   Downloaded image v0.25.10
+#15 7.154   Downloaded datafusion-common v53.1.0
+#15 7.159   Downloaded syn v2.0.119
+#15 7.166   Downloaded zerocopy v0.8.63
+#15 7.178   Downloaded fastembed v4.9.1
+#15 7.183   Downloaded sqlparser v0.61.0
+#15 7.189   Downloaded encoding_rs v0.8.44
+#15 7.196   Downloaded icu_normalizer v2.4.0
+#15 7.202   Downloaded regex-automata v0.4.18
+#15 7.213   Downloaded jiff v0.2.43
+#15 7.224   Downloaded rig v0.46.0
+#15 7.230   Downloaded jsonb v0.5.6
+#15 7.242   Downloaded lance v7.0.0
+#15 7.265   Downloaded fst v0.4.7
+#15 7.662    Compiling proc-macro2 v1.0.107
+#15 7.662    Compiling unicode-ident v1.0.27
+#15 7.698    Compiling quote v1.0.47
+#15 7.800    Compiling serde_core v1.0.229
+#15 7.913    Compiling libc v0.2.191
+#15 8.135    Compiling syn v3.0.10
+#15 8.745    Compiling syn v2.0.119
+#15 11.36    Compiling jobserver v0.1.35
+#15 11.54    Compiling find-msvc-tools v0.1.15
+#15 11.67    Compiling shlex v2.0.1
+#15 11.75     Checking cfg-if v1.0.5
+#15 11.78    Compiling cc v1.11.2
+#15 12.04    Compiling serde v1.0.229
+#15 12.23    Compiling serde_derive v1.0.229
+#15 12.83     Checking itoa v1.0.19
+#15 12.91     Checking memchr v2.8.3
+#15 13.08     Checking pin-project-lite v0.2.17
+#15 13.13     Checking smallvec v1.16.5
+#15 13.23     Checking once_cell v1.21.4
+#15 13.31     Checking futures-core v0.3.34
+#15 13.37     Checking log v0.4.35
+#15 13.45     Checking futures-sink v0.3.34
+#15 13.50    Compiling parking_lot_core v0.9.12
+#15 13.61     Checking scopeguard v1.2.0
+#15 13.75     Checking lock_api v0.4.14
+#15 13.86     Checking tracing-core v0.1.36
+#15 14.03     Checking slab v0.4.12
+#15 14.11     Checking parking_lot v0.12.5
+#15 14.21     Checking futures-channel v0.3.34
+#15 14.26     Checking bytes v1.12.1
+#15 14.31     Checking errno v0.3.15
+#15 14.36    Compiling tracing-attributes v0.1.31
+#15 14.51    Compiling futures-macro v0.3.34
+#15 15.03     Checking futures-io v0.3.34
+#15 15.17     Checking futures-task v0.3.34
+#15 15.22     Checking futures-util v0.3.34
+#15 15.28     Checking tracing v0.1.44
+#15 15.36     Checking signal-hook-registry v1.4.8
+#15 15.42     Checking mio v1.2.5
+#15 15.56     Checking getrandom v0.2.17
+#15 15.63     Checking socket2 v0.6.5
+#15 15.78    Compiling tokio-macros v2.7.2
+#15 16.28    Compiling synstructure v0.14.0
+#15 16.34    Compiling pkg-config v0.3.34
+#15 16.58     Checking tokio v1.54.1
+#15 16.60     Checking http v1.5.0
+#15 16.93    Compiling zeroize_derive v1.5.0
+#15 17.38    Compiling zmij v1.0.23
+#15 17.56     Checking zeroize v1.9.1
+#15 17.63    Compiling zerofrom-derive v0.1.8
+#15 18.45    Compiling object v0.39.1
+#15 18.58    Compiling fs_extra v1.3.0
+#15 18.73     Checking zerofrom v0.1.8
+#15 18.75    Compiling yoke-derive v0.8.4
+#15 18.78     Checking stable_deref_trait v1.2.1
+#15 19.49     Checking yoke v0.8.4
+#15 19.58    Compiling cmake v0.1.58
+#15 19.78     Checking percent-encoding v2.3.2
+#15 19.84    Compiling dunce v1.0.5
+#15 19.88    Compiling aws-lc-sys v0.47.0
+#15 20.70    Compiling ar_archive_writer v0.5.5
+#15 20.80    Compiling zerovec-derive v0.11.7
+#15 21.17    Compiling serde_json v1.0.154
+#15 21.30    Compiling psm v0.1.32
+#15 21.55     Checking zerovec v0.11.9
+#15 21.96    Compiling displaydoc v0.2.7
+#15 22.48     Checking subtle v2.6.1
+#15 22.99     Checking rustls-pki-types v1.16.0
+#15 23.13     Checking http-body v1.1.0
+#15 23.18    Compiling stacker v0.1.25
+#15 23.36    Compiling httparse v1.10.1
+#15 23.48     Checking tower-service v0.3.3
+#15 23.52    Compiling aws-lc-rs v1.19.0
+#15 23.63     Checking equivalent v1.0.3
+#15 23.65     Checking hashbrown v0.17.1
+#15 23.86     Checking indexmap v2.14.2
+#15 24.30    Compiling ring v0.17.14
+#15 24.66    Compiling zerocopy v0.8.63
+#15 24.87     Checking fnv v1.0.7
+#15 24.94    Compiling pest_stack_guard v1.0.1
+#15 26.18     Checking tinystr v0.8.5
+#15 26.26     Checking tokio-util v0.7.20
+#15 26.52    Compiling zerocopy-derive v0.8.63
+#15 27.64     Checking writeable v0.6.4
+#15 27.73     Checking utf_types v1.0.0
+#15 27.84     Checking litemap v0.8.3
+#15 27.93     Checking untrusted v0.7.1
+#15 27.99     Checking icu_locale_core v2.4.0
+#15 28.35     Checking utf8_iter v1.1.0
+#15 30.54     Checking zerotrie v0.2.5
+#15 30.66     Checking potential_utf v0.1.6
+#15 30.72     Checking untrusted v0.9.0
+#15 30.77    Compiling icu_normalizer_data v2.4.0
+#15 30.88    Compiling thiserror v2.0.21
+#15 31.06    Compiling icu_properties_data v2.4.0
+#15 31.18    Compiling version_check v0.9.5
+#15 31.33     Checking bitflags v2.13.2
+#15 31.41     Checking mime v0.3.18
+#15 31.50    Compiling rustversion v1.0.23
+#15 31.67    Compiling ucd-trie v0.1.7
+#15 31.80     Checking tower-layer v0.3.3
+#15 31.88    Compiling pest v2.9.6
+#15 32.65    Compiling generic-array v0.14.7
+#15 33.44     Checking icu_collections v2.4.0
+#15 33.62     Checking icu_provider v2.4.0
+#15 33.75     Checking sync_wrapper v1.0.2
+#15 33.78    Compiling thiserror-impl v2.0.21
+#15 34.40    Compiling anyhow v1.0.104
+#15 34.50    Compiling rustls v0.23.46
+#15 34.57     Checking httpdate v1.0.3
+#15 34.61     Checking try-lock v0.2.5
+#15 34.64     Checking atomic-waker v1.1.2
+#15 34.67    Compiling autocfg v1.5.1
+#15 34.79     Checking h2 v0.4.20
+#15 35.94     Checking want v0.3.2
+#15 36.30    Compiling pest_meta v2.9.6
+#15 36.90     Checking http-body-util v0.1.5
+#15 36.97     Checking typenum v1.20.1
+#15 37.35    Compiling pest_generator v2.9.6
+#15 37.57     Checking icu_properties v2.4.0
+#15 37.89     Checking icu_normalizer v2.4.0
+#15 37.99     Checking hyper v1.12.0
+#15 38.34     Checking form_urlencoded v1.2.3
+#15 38.37     Checking ipnet v2.12.2
+#15 38.46    Compiling prettyplease v0.2.37
+#15 38.53     Checking base64 v0.23.1
+#15 38.62     Checking hyper-util v0.1.21
+#15 38.91     Checking rustls-webpki v0.103.17
+#15 39.08     Checking idna_adapter v1.2.2
+#15 39.12    Compiling pest_derive v2.9.6
+#15 39.39     Checking tower v0.5.3
+#15 39.52     Checking openssl-probe v0.2.2
+#15 39.55    Compiling heck v0.5.0
+#15 39.62    Compiling vbare-gen v0.2.0
+#15 40.03     Checking rustls-native-certs v0.8.5
+#15 40.06     Checking idna v1.1.0
+#15 40.23     Checking crypto-common v0.1.7
+#15 40.26     Checking block-buffer v0.10.4
+#15 40.29     Checking ppv-lite86 v0.2.21
+#15 40.36     Checking webpki-roots v1.0.12
+#15 40.40    Compiling unicase v2.10.0
+#15 40.42    Compiling vbare-compiler v0.2.0
+#15 40.46    Compiling mime_guess v2.0.5
+#15 40.48     Checking digest v0.10.7
+#15 40.54     Checking url v2.5.9
+#15 40.65     Checking tokio-rustls v0.26.6
+#15 40.71    Compiling encoding_rs v0.8.44
+#15 40.72     Checking futures-executor v0.3.34
+#15 40.79     Checking rand_core v0.6.4
+#15 40.84     Checking cpufeatures v0.2.17
+#15 40.86    Compiling multiversion_no_op v1.0.0
+#15 40.92     Checking http-range-header v0.4.2
+#15 40.94     Checking simdutf8 v0.1.5
+#15 40.95     Checking base64 v0.22.1
+#15 41.03     Checking tower-http v0.6.11
+#15 41.31     Checking hyper-rustls v0.27.10
+#15 41.33    Compiling num-traits v0.2.19
+#15 41.45     Checking rand_chacha v0.3.1
+#15 41.50     Checking rand v0.8.8
+#15 41.93    Compiling async-trait v0.1.92
+#15 42.16     Checking glob v0.3.4
+#15 42.22    Compiling getrandom v0.3.4
+#15 42.33    Compiling async-stream-impl v0.3.6
+#15 42.36    Compiling pin-project-internal v1.1.13
+#15 42.59    Compiling getrandom v0.4.3
+#15 42.67     Checking hex v0.4.3
+#15 42.74     Checking async-stream v0.3.6
+#15 42.82     Checking pin-project v1.1.13
+#15 42.82     Checking futures v0.3.34
+#15 42.85    Compiling thiserror v1.0.69
+#15 42.95     Checking ryu v1.0.23
+#15 42.95     Checking lazy_static v1.5.1
+#15 42.98     Checking regex-syntax v0.8.11
+#15 42.99     Checking serde_urlencoded v0.7.1
+#15 43.08     Checking rand_core v0.9.5
+#15 43.17     Checking vbare v0.2.0
+#15 43.26     Checking regex-automata v0.4.18
+#15 43.28     Checking sha2 v0.10.9
+#15 43.33     Checking opentelemetry v0.28.0
+#15 43.49    Compiling indexmap v1.9.3
+#15 43.57    Compiling thiserror-impl v1.0.69
+#15 43.86     Checking serde_bytes v0.11.19
+#15 43.91    Compiling either v1.19.0
+#15 43.98    Compiling rustix v0.38.44
+#15 44.08    Compiling itertools v0.14.0
+#15 44.16     Checking uuid v1.29.2
+#15 44.26     Checking rand_chacha v0.9.0
+#15 44.31     Checking serde_path_to_error v0.1.20
+#15 44.47     Checking linux-raw-sys v0.4.15
+#15 44.55     Checking hashbrown v0.12.3
+#15 44.56    Compiling protobuf v3.7.2
+#15 44.65    Compiling procfs v0.17.0
+#15 44.69    Compiling ref-cast v1.0.27
+#15 44.83    Compiling prost-derive v0.13.5
+#15 45.45     Checking rand v0.9.5
+#15 45.61     Checking protobuf-support v3.7.2
+#15 45.65     Checking opentelemetry_sdk v0.28.0
+#15 45.68     Checking reqwest v0.12.28
+#15 45.98     Checking procfs-core v0.17.0
+#15 46.18     Checking axum-core v0.4.5
+#15 46.77     Checking sha1 v0.10.7
+#15 46.80     Checking rustls-platform-verifier v0.7.1
+#15 46.84     Checking serde_bare v0.5.0
+#15 46.90    Compiling ref-cast-impl v1.0.27
+#15 46.95    Compiling serde_derive_internals v0.30.0
+#15 47.16     Checking data-encoding v2.11.1
+#15 47.23    Compiling prometheus v0.14.0
+#15 47.25     Checking matchit v0.7.3
+#15 47.30     Checking utf-8 v0.7.6
+#15 47.35     Checking futures-timer v3.0.4
+#15 47.35     Checking tungstenite v0.26.2
+#15 47.40     Checking rig-http v0.46.0
+#15 47.50     Checking axum v0.7.9
+#15 47.89    Compiling schemars_derive v1.2.3
+#15 48.57     Checking reqwest v0.13.5
+#15 48.58    Compiling utoipa-gen v5.5.0
+#15 49.79     Checking prost v0.13.5
+#15 49.88     Checking tower v0.4.13
+#15 50.19     Checking matchers v0.2.0
+#15 50.22     Checking sharded-slab v0.1.7
+#15 50.36    Compiling rivetkit-client-protocol v3.1.1
+#15 50.65    Compiling rivet-envoy-protocol v3.1.1
+#15 50.73     Checking webpki-roots v0.26.11
+#15 50.75     Checking hyper-timeout v0.5.2
+#15 50.81     Checking half v2.7.1
+#15 50.90     Checking webpki-root-certs v1.0.12
+#15 50.92     Checking tokio-stream v0.1.19
+#15 50.94     Checking tracing-serde v0.2.0
+#15 50.98     Checking tracing-log v0.2.0
+#15 51.02     Checking socket2 v0.5.10
+#15 51.05     Checking thread_local v1.1.10
+#15 51.10    Compiling cfg_aliases v0.2.2
+#15 51.11     Checking siphasher v1.0.4
+#15 51.12     Checking nu-ansi-term v0.50.3
+#15 51.16    Compiling semver v1.0.28
+#15 51.19     Checking dyn-clone v1.0.20
+#15 51.22     Checking iana-time-zone v0.1.65
+#15 51.26     Checking ciborium-io v0.2.2
+#15 51.26     Checking chrono v0.4.45
+#15 51.28     Checking ciborium-ll v0.2.2
+#15 51.33    Compiling rustc_version v0.4.1
+#15 51.41     Checking schemars v1.2.3
+#15 51.55     Checking tracing-subscriber v0.3.23
+#15 51.61     Checking phf_shared v0.12.1
+#15 51.65    Compiling nix v0.30.1
+#15 51.77     Checking tonic v0.12.3
+#15 52.23     Checking rig-reqwest v0.46.0
+#15 52.32     Checking tokio-tungstenite v0.26.2
+#15 52.40     Checking utoipa v5.5.0
+#15 52.96    Compiling rivet-error-macros v3.1.1
+#15 52.99     Checking opentelemetry-http v0.28.0
+#15 53.11     Checking ordered-float v5.5.1
+#15 53.20    Compiling rivetkit-inspector-protocol v3.1.1
+#15 53.29    Compiling rivetkit-actor-persist v3.1.1
+#15 53.48     Checking urlencoding v2.1.3
+#15 53.51    Compiling indoc v2.0.8
+#15 53.53     Checking web-time v1.1.0
+#15 53.55     Checking saa v5.6.4
+#15 53.63     Checking fastrand v2.5.0
+#15 53.64     Checking sdd v4.10.0
+#15 53.68    Compiling chrono-tz v0.10.4
+#15 53.76     Checking scc v3.8.8
+#15 53.76     Checking rig-core v0.46.0
+#15 54.16     Checking rivet-error v3.1.1
+#15 54.90     Checking rivet-metrics v3.1.1
+#15 58.35     Checking opentelemetry-proto v0.28.0
+#15 58.90     Checking tracing-opentelemetry v0.29.0
+#15 58.97     Checking phf v0.12.1
+#15 59.01    Compiling curve25519-dalek v4.1.3
+#15 59.10     Checking ciborium v0.2.2
+#15 59.24    Compiling rivetkit-core v3.1.1
+#15 59.35     Checking rivetkit-shared-types v3.1.1
+#15 59.44     Checking axum-core v0.5.6
+#15 59.88    Compiling axum-macros v0.5.1
+#15 60.35    Compiling include_dir_macros v0.7.4
+#15 60.50     Checking half v1.8.3
+#15 60.56     Checking matchit v0.8.4
+#15 60.58     Checking signature v2.2.0
+#15 60.61     Checking serde_cbor v0.11.2
+#15 60.63     Checking axum v0.8.9
+#15 60.74     Checking include_dir v0.7.4
+#15 60.78     Checking rig-memory v0.46.0
+#15 62.32     Checking opentelemetry-otlp v0.28.0
+#15 62.45     Checking rivet-envoy-client v3.1.1
+#15 63.65     Checking rivetkit-engine-process v3.1.1
+#15 63.94     Checking croner v2.2.0
+#15 64.01     Checking tracing-futures v0.2.5
+#15 64.04     Checking rivet-sqlite-types v3.1.1
+#15 64.08     Checking rig-agent v0.46.0
+#15 65.40     Checking rivetkit-client v3.1.1
+#15 65.93     Checking ed25519 v2.2.3
+#15 65.96     Checking rig-harness-protocol v0.46.0
+#15 66.04     Checking rig v0.46.0
+#15 66.07     Checking ed25519-dalek v2.2.0
+#15 66.12     Checking hmac v0.12.1
+#15 66.16     Checking serde_ignored v0.1.14
+#15 66.21    Compiling vcpkg v0.2.15
+#15 66.42    Compiling libsqlite3-sys v0.35.0
+#15 66.60    Compiling alloca v0.4.0
+#15 66.73     Checking foldhash v0.1.5
+#15 66.83     Checking anstyle v1.0.14
+#15 66.88     Checking clap_lex v1.1.2
+#15 66.92     Checking clap_builder v4.6.7
+#15 67.40     Checking itertools v0.13.0
+#15 67.83     Checking hashbrown v0.15.5
+#15 68.32     Checking rivetkit v3.1.1
+#15 70.63     Checking cast v0.3.0
+#15 70.67     Checking same-file v1.0.6
+#15 70.71     Checking walkdir v2.5.0
+#15 70.75     Checking criterion-plot v0.8.2
+#15 70.91     Checking hashlink v0.10.0
+#15 70.99     Checking clap v4.6.9
+#15 71.02     Checking regex v1.13.1
+#15 71.11     Checking tinytemplate v1.2.1
+#15 71.17     Checking page_size v0.6.0
+#15 71.20     Checking fallible-iterator v0.3.0
+#15 71.29     Checking fallible-streaming-iterator v0.1.9
+#15 71.33     Checking anes v0.1.6
+#15 71.38     Checking oorandom v11.1.5
+#15 71.41     Checking criterion v0.8.2
+#15 71.81     Checking rusqlite v0.37.0
+#15 72.06     Checking qrcode v0.14.1
+#15 72.16     Checking jsonwebtoken v10.4.0
+#15 114.8     Checking robot-buddy v0.1.0 (/src/crates/buddy)
+#15 117.7     Checking robot-buddy-server v0.1.0 (/src/apps/server)
+#15 118.4     Checking robot-buddy-robot v0.1.0 (/src/apps/robot)
+#15 123.3     Finished `dev` profile [unoptimized] target(s) in 2m 02s
+#15 123.5 
+#15 123.5 >>> [trixie][DEFAULT] cargo test --workspace --locked -j 2
+#15 123.8    Compiling serde_core v1.0.229
+#15 123.8    Compiling libc v0.2.191
+#15 124.3    Compiling pin-project-lite v0.2.17
+#15 124.3    Compiling smallvec v1.16.5
+#15 124.4    Compiling once_cell v1.21.4
+#15 124.5    Compiling futures-core v0.3.34
+#15 124.5    Compiling log v0.4.35
+#15 124.5    Compiling serde v1.0.229
+#15 124.5    Compiling futures-sink v0.3.34
+#15 124.6    Compiling scopeguard v1.2.0
+#15 124.6    Compiling parking_lot_core v0.9.12
+#15 124.7    Compiling lock_api v0.4.14
+#15 124.7    Compiling bytes v1.12.1
+#15 124.7    Compiling tracing-core v0.1.36
+#15 124.9    Compiling slab v0.4.12
+#15 124.9    Compiling parking_lot v0.12.5
+#15 124.9    Compiling futures-channel v0.3.34
+#15 125.0    Compiling errno v0.3.15
+#15 125.0    Compiling futures-io v0.3.34
+#15 125.0    Compiling futures-task v0.3.34
+#15 125.0    Compiling futures-util v0.3.34
+#15 125.0    Compiling tracing v0.1.44
+#15 125.1    Compiling signal-hook-registry v1.4.8
+#15 125.2    Compiling socket2 v0.6.5
+#15 125.3    Compiling mio v1.2.5
+#15 125.5    Compiling getrandom v0.2.17
+#15 125.5    Compiling tokio v1.54.1
+#15 125.9    Compiling http v1.5.0
+#15 126.2    Compiling zeroize v1.9.1
+#15 126.2    Compiling zerofrom v0.1.8
+#15 126.3    Compiling stable_deref_trait v1.2.1
+#15 126.3    Compiling yoke v0.8.4
+#15 126.3    Compiling percent-encoding v2.3.2
+#15 126.4    Compiling zerovec v0.11.9
+#15 126.5    Compiling subtle v2.6.1
+#15 126.6    Compiling serde_json v1.0.154
+#15 127.0    Compiling rustls-pki-types v1.16.0
+#15 127.1    Compiling http-body v1.1.0
+#15 127.1    Compiling tower-service v0.3.3
+#15 127.2    Compiling equivalent v1.0.3
+#15 127.2    Compiling hashbrown v0.17.1
+#15 127.4    Compiling indexmap v2.14.2
+#15 127.5    Compiling fnv v1.0.7
+#15 127.5    Compiling httparse v1.10.1
+#15 127.6    Compiling tokio-util v0.7.20
+#15 127.6    Compiling tinystr v0.8.5
+#15 127.7    Compiling aws-lc-sys v0.47.0
+#15 127.8    Compiling untrusted v0.7.1
+#15 127.8    Compiling utf_types v1.0.0
+#15 127.8    Compiling litemap v0.8.3
+#15 127.9    Compiling writeable v0.6.4
+#15 127.9    Compiling utf8_iter v1.1.0
+#15 127.9    Compiling aws-lc-rs v1.19.0
+#15 128.0    Compiling icu_locale_core v2.4.0
+#15 128.3    Compiling zerocopy v0.8.63
+#15 128.4    Compiling zerotrie v0.2.5
+#15 128.5    Compiling potential_utf v0.1.6
+#15 128.6    Compiling untrusted v0.9.0
+#15 128.6    Compiling tower-layer v0.3.3
+#15 128.6    Compiling bitflags v2.13.2
+#15 128.7    Compiling mime v0.3.18
+#15 128.8    Compiling ring v0.17.14
+#15 129.4    Compiling icu_collections v2.4.0
+#15 129.6    Compiling icu_provider v2.4.0
+#15 129.6    Compiling sync_wrapper v1.0.2
+#15 129.7    Compiling atomic-waker v1.1.2
+#15 129.7    Compiling httpdate v1.0.3
+#15 129.7    Compiling try-lock v0.2.5
+#15 129.7    Compiling want v0.3.2
+#15 129.7    Compiling h2 v0.4.20
+#15 129.8    Compiling thiserror v2.0.21
+#15 129.8    Compiling rustls-webpki v0.103.17
+#15 130.1    Compiling icu_normalizer_data v2.4.0
+#15 130.1    Compiling icu_properties_data v2.4.0
+#15 130.1    Compiling http-body-util v0.1.5
+#15 130.2    Compiling typenum v1.20.1
+#15 130.4    Compiling generic-array v0.14.7
+#15 130.6    Compiling icu_properties v2.4.0
+#15 131.0    Compiling icu_normalizer v2.4.0
+#15 131.2    Compiling hyper v1.12.0
+#15 131.4    Compiling rustls v0.23.46
+#15 131.8    Compiling form_urlencoded v1.2.3
+#15 131.8    Compiling ipnet v2.12.2
+#15 131.9    Compiling base64 v0.23.1
+#15 132.0    Compiling hyper-util v0.1.21
+#15 132.7    Compiling idna_adapter v1.2.2
+#15 132.7    Compiling tower v0.5.3
+#15 132.8    Compiling openssl-probe v0.2.2
+#15 132.9    Compiling rustls-native-certs v0.8.5
+#15 133.0    Compiling idna v1.1.0
+#15 133.2    Compiling crypto-common v0.1.7
+#15 133.2    Compiling block-buffer v0.10.4
+#15 133.2    Compiling ppv-lite86 v0.2.21
+#15 133.3    Compiling webpki-roots v1.0.12
+#15 133.3    Compiling digest v0.10.7
+#15 133.4    Compiling url v2.5.9
+#15 133.4    Compiling tokio-rustls v0.26.6
+#15 133.5    Compiling futures-executor v0.3.34
+#15 133.6    Compiling mime_guess v2.0.5
+#15 133.6    Compiling rand_core v0.6.4
+#15 133.7    Compiling cpufeatures v0.2.17
+#15 133.7    Compiling http-range-header v0.4.2
+#15 133.7    Compiling simdutf8 v0.1.5
+#15 133.7    Compiling base64 v0.22.1
+#15 133.8    Compiling encoding_rs v0.8.44
+#15 133.8    Compiling tower-http v0.6.11
+#15 134.3    Compiling hyper-rustls v0.27.10
+#15 134.3    Compiling rand_chacha v0.3.1
+#15 134.4    Compiling num-traits v0.2.19
+#15 134.5    Compiling rand v0.8.8
+#15 134.6    Compiling glob v0.3.4
+#15 134.7    Compiling hex v0.4.3
+#15 134.7    Compiling async-stream v0.3.6
+#15 134.7    Compiling pin-project v1.1.13
+#15 134.8    Compiling getrandom v0.3.4
+#15 134.8    Compiling futures v0.3.34
+#15 134.8    Compiling lazy_static v1.5.1
+#15 134.8    Compiling regex-syntax v0.8.11
+#15 134.8    Compiling ryu v1.0.23
+#15 134.9    Compiling serde_urlencoded v0.7.1
+#15 134.9    Compiling rand_core v0.9.5
+#15 135.0    Compiling getrandom v0.4.3
+#15 135.0    Compiling sha2 v0.10.9
+#15 135.1    Compiling vbare v0.2.0
+#15 135.2    Compiling regex-automata v0.4.18
+#15 135.4    Compiling opentelemetry v0.28.0
+#15 135.7    Compiling serde_bytes v0.11.19
+#15 135.8    Compiling thiserror v1.0.69
+#15 135.8    Compiling uuid v1.29.2
+#15 135.9    Compiling rand_chacha v0.9.0
+#15 136.1    Compiling serde_path_to_error v0.1.20
+#15 136.2    Compiling linux-raw-sys v0.4.15
+#15 136.3    Compiling hashbrown v0.12.3
+#15 136.4    Compiling rustix v0.38.44
+#15 136.4    Compiling indexmap v1.9.3
+#15 136.6    Compiling rand v0.9.5
+#15 136.7    Compiling protobuf-support v3.7.2
+#15 136.9    Compiling opentelemetry_sdk v0.28.0
+#15 137.5    Compiling reqwest v0.12.28
+#15 138.2    Compiling procfs-core v0.17.0
+#15 138.7    Compiling axum-core v0.4.5
+#15 139.2    Compiling sha1 v0.10.7
+#15 139.3    Compiling rustls-platform-verifier v0.7.1
+#15 139.3    Compiling serde_bare v0.5.0
+#15 139.4    Compiling data-encoding v2.11.1
+#15 139.4    Compiling futures-timer v3.0.4
+#15 139.5    Compiling matchit v0.7.3
+#15 139.6    Compiling utf-8 v0.7.6
+#15 139.6    Compiling tungstenite v0.26.2
+#15 139.6    Compiling axum v0.7.9
+#15 139.9    Compiling rig-http v0.46.0
+#15 140.1    Compiling ref-cast v1.0.27
+#15 140.1    Compiling reqwest v0.13.5
+#15 140.8    Compiling procfs v0.17.0
+#15 141.3    Compiling protobuf v3.7.2
+#15 141.4    Compiling prost v0.13.5
+#15 141.5    Compiling tower v0.4.13
+#15 141.8    Compiling matchers v0.2.0
+#15 141.9    Compiling sharded-slab v0.1.7
+#15 142.0    Compiling webpki-roots v0.26.11
+#15 142.0    Compiling hyper-timeout v0.5.2
+#15 142.1    Compiling half v2.7.1
+#15 142.2    Compiling webpki-root-certs v1.0.12
+#15 142.2    Compiling tokio-stream v0.1.19
+#15 142.4    Compiling tracing-log v0.2.0
+#15 142.4    Compiling tracing-serde v0.2.0
+#15 142.4    Compiling socket2 v0.5.10
+#15 142.6    Compiling thread_local v1.1.10
+#15 142.7    Compiling iana-time-zone v0.1.65
+#15 142.7    Compiling ciborium-io v0.2.2
+#15 142.7    Compiling nu-ansi-term v0.50.3
+#15 142.8    Compiling siphasher v1.0.4
+#15 142.9    Compiling dyn-clone v1.0.20
+#15 142.9    Compiling schemars v1.2.3
+#15 143.3    Compiling phf_shared v0.12.1
+#15 143.4    Compiling tracing-subscriber v0.3.23
+#15 143.4    Compiling ciborium-ll v0.2.2
+#15 143.4    Compiling chrono v0.4.45
+#15 143.9    Compiling tonic v0.12.3
+#15 144.0    Compiling prometheus v0.14.0
+#15 144.5    Compiling rig-reqwest v0.46.0
+#15 144.7    Compiling tokio-tungstenite v0.26.2
+#15 144.8    Compiling utoipa v5.5.0
+#15 144.9    Compiling opentelemetry-http v0.28.0
+#15 145.1    Compiling ordered-float v5.5.1
+#15 145.2    Compiling saa v5.6.4
+#15 145.3    Compiling sdd v4.10.0
+#15 145.5    Compiling urlencoding v2.1.3
+#15 145.5    Compiling fastrand v2.5.0
+#15 145.6    Compiling web-time v1.1.0
+#15 145.6    Compiling rig-core v0.46.0
+#15 145.8    Compiling rivet-error v3.1.1
+#15 145.9    Compiling rivet-envoy-protocol v3.1.1
+#15 150.3    Compiling scc v3.8.8
+#15 150.7    Compiling rivetkit-client-protocol v3.1.1
+#15 151.2    Compiling opentelemetry-proto v0.28.0
+#15 152.0    Compiling rivet-metrics v3.1.1
+#15 152.0    Compiling tracing-opentelemetry v0.29.0
+#15 152.1    Compiling ciborium v0.2.2
+#15 152.3    Compiling phf v0.12.1
+#15 152.3    Compiling rivetkit-shared-types v3.1.1
+#15 152.4    Compiling axum-core v0.5.6
+#15 153.0    Compiling signature v2.2.0
+#15 153.0    Compiling matchit v0.8.4
+#15 153.1    Compiling half v1.8.3
+#15 153.2    Compiling serde_cbor v0.11.2
+#15 153.4    Compiling axum v0.8.9
+#15 154.9    Compiling rig-memory v0.46.0
+#15 156.3    Compiling include_dir v0.7.4
+#15 156.3    Compiling chrono-tz v0.10.4
+#15 157.6    Compiling nix v0.30.1
+#15 158.2    Compiling rivet-envoy-client v3.1.1
+#15 158.3    Compiling opentelemetry-otlp v0.28.0
+#15 158.7    Compiling rivetkit-inspector-protocol v3.1.1
+#15 160.3    Compiling rivetkit-actor-persist v3.1.1
+#15 160.4    Compiling rivetkit-engine-process v3.1.1
+#15 160.7    Compiling croner v2.2.0
+#15 160.8    Compiling tracing-futures v0.2.5
+#15 160.8    Compiling rivet-sqlite-types v3.1.1
+#15 160.9    Compiling rivetkit-core v3.1.1
+#15 160.9    Compiling rig-agent v0.46.0
+#15 163.0    Compiling curve25519-dalek v4.1.3
+#15 163.3    Compiling rivetkit-client v3.1.1
+#15 164.4    Compiling ed25519 v2.2.3
+#15 164.5    Compiling rig-harness-protocol v0.46.0
+#15 164.7    Compiling rig v0.46.0
+#15 164.7    Compiling ed25519-dalek v2.2.0
+#15 164.8    Compiling hmac v0.12.1
+#15 164.8    Compiling serde_ignored v0.1.14
+#15 164.8    Compiling foldhash v0.1.5
+#15 164.9    Compiling anstyle v1.0.14
+#15 164.9    Compiling clap_lex v1.1.2
+#15 165.0    Compiling clap_builder v4.6.7
+#15 166.1    Compiling hashbrown v0.15.5
+#15 166.2    Compiling itertools v0.13.0
+#15 166.8    Compiling rivetkit v3.1.1
+#15 169.4    Compiling same-file v1.0.6
+#15 169.5    Compiling cast v0.3.0
+#15 169.5    Compiling criterion-plot v0.8.2
+#15 169.6    Compiling walkdir v2.5.0
+#15 169.7    Compiling libsqlite3-sys v0.35.0
+#15 169.8    Compiling alloca v0.4.0
+#15 169.8    Compiling hashlink v0.10.0
+#15 169.9    Compiling clap v4.6.9
+#15 169.9    Compiling regex v1.13.1
+#15 170.1    Compiling tinytemplate v1.2.1
+#15 170.2    Compiling page_size v0.6.0
+#15 170.2    Compiling fallible-iterator v0.3.0
+#15 170.3    Compiling fallible-streaming-iterator v0.1.9
+#15 170.3    Compiling anes v0.1.6
+#15 170.4    Compiling oorandom v11.1.5
+#15 170.4    Compiling criterion v0.8.2
+#15 171.4    Compiling rusqlite v0.37.0
+#15 171.8    Compiling qrcode v0.14.1
+#15 172.0    Compiling jsonwebtoken v10.4.0
+#15 231.3    Compiling robot-buddy v0.1.0 (/src/crates/buddy)
+#15 238.2    Compiling robot-buddy-server v0.1.0 (/src/apps/server)
+#15 262.9    Compiling robot-buddy-robot v0.1.0 (/src/apps/robot)
+#15 273.5     Finished `test` profile [unoptimized] target(s) in 2m 30s
+#15 273.6      Running unittests src/lib.rs (target/debug/build/robot-buddy/7240d76b335454e4/out/robot_buddy-7240d76b335454e4)
+#15 273.6 
+#15 273.6 running 79 tests
+#15 273.6 test actor::tests::codes_are_six_digits_and_inputs_are_bounded ... ok
+#15 273.6 test audio::tests::requires_explicit_supported_audio_format ... ok
+#15 273.6 test auth::tests::ct_eq_matches_equality ... ok
+#15 273.6 test auth::tests::signing_keys_zeroize_on_drop ... ok
+#15 273.6 test auth::tests::short_keys_are_rejected_for_sign_and_verify ... ok
+#15 273.6 test config::tests::signing_key_requires_32_bytes ... ok
+#15 273.6 test config::tests::errors_never_contain_the_key ... ok
+#15 273.6 test auth::tests::tokens_are_bound_to_purpose_and_key ... ok
+#15 273.6 test context::tests::local_time_handles_dst_and_date_boundary ... ok
+#15 273.6 test context::tests::rejects_unknown_timezone ... ok
+#15 273.6 test conversation::harness::tests::first_dialogue_pins_once_then_accepts ... ok
+#15 273.6 test conversation::delivery::tests::an_expired_connection_that_failed_to_close_gets_nothing ... ok
+#15 273.6 test conversation::delivery::tests::all_valid_connections_broadcast ... ok
+#15 273.6 test conversation::delivery::tests::closed_connections_lose_their_subscription ... ok
+#15 273.6 test conversation::delivery::tests::fallback_skips_connections_never_seen_subscribing ... ok
+#15 273.6 test conversation::delivery::tests::sessions_are_verified_once_per_connection ... ok
+#15 273.6 test conversation::delivery::tests::closed_connections_are_forgotten ... ok
+#15 273.6 test auth::tests::secrets_are_redacted_and_round_trip_identity_files ... ok
+#15 273.6 test conversation::harness::tests::leading_whitespace_does_not_admit_speech ... ok
+#15 273.6 test conversation::harness::tests::modes_gate_admission ... ok
+#15 273.6 test conversation::harness::tests::spoken_budget_is_enforced ... ok
+#15 273.6 test conversation::harness::tests::spoken_numbers_chunks_and_skips_whitespace ... ok
+#15 273.6 test conversation::harness::tests::tool_call_after_dialogue_closes_speech_but_keeps_the_sentence ... ok
+#15 273.6 test conversation::harness::tests::spoken_phase_tolerates_a_tool_start_before_text ... ok
+#15 273.6 test conversation::harness::tests::whitespace_before_dialogue_is_not_in_the_output ... ok
+#15 273.6 test conversation::history::tests::older_triggers_force_a_restart ... ok
+#15 273.6 test conversation::harness::tests::unpinned_calls_finish_without_chunks ... ok
+#15 273.6 test conversation::history::tests::batch_size_matches_the_statement ... ok
+#15 273.6 test conversation::retention::tests::prune_guard_prevents_overlap_and_releases_on_drop_or_panic ... ok
+#15 273.6 test conversation::speech::tests::early_speech_waits_for_a_queued_turn_and_stops_with_the_turn ... ok
+#15 273.6 test auth::tests::certificate_and_proof_bind_device_key ... ok
+#15 273.6 test conversation::tests::drain_guard_clears_the_flag_and_rechecks_on_panic ... ok
+#15 273.6 test conversation::tests::drain_guard_clears_the_flag_on_return ... ok
+#15 273.6 test actor::tests::migration_is_idempotent_and_keeps_rows ... ok
+#15 273.6 test conversation::tests::schema_changes_raise_the_schema_version ... ok
+#15 273.6 test actor::tests::five_wrong_codes_invalidate_the_pending_claim ... ok
+#15 273.6 test conversation::tools::tests::a_web_search_refuses_persistent_and_history_tools_for_the_rest_of_the_turn ... ok
+#15 273.6 test conversation::tools::tests::arguments_name_what_is_missing ... ok
+#15 273.6 test conversation::tools::tests::every_write_tool_in_the_catalog_is_refused_after_a_web_search ... ok
+#15 273.6 test db::tests::bot_key_is_exactly_one_string_segment ... ok
+#15 273.6 test db::tests::params_bind_text_in_order ... ok
+#15 273.6 test db::tests::readers_check_column_types ... ok
+#15 273.6 test actor::tests::a_correct_code_after_some_failures_claims ... ok
+#15 273.6 test memory::tests::inputs_are_bounded ... ok
+#15 273.6 test memory::tests::fact_cap_rejects_new_keys_but_allows_updates ... ok
+#15 273.6 test memory::tests::newest_fact_reads_use_the_updated_index ... ok
+#15 273.6 test model::tests::budget_counts_reasoning_arguments_and_unknown_payloads ... ok
+#15 273.6 test model::tests::budget_limits_text_separately ... ok
+#15 273.6 test model::tests::catalog_holds_every_tool_with_the_voice_schema ... ok
+#15 273.6 test model::tests::express_schema_names_match_the_device_wire_names ... ok
+#15 273.6 test model::tests::only_loopback_hosts_may_skip_tls ... ok
+#15 273.6 test model::tests::tools_are_parsed_once ... ok
+#15 273.6 test sentences::tests::bounds_unpunctuated_unicode ... ok
+#15 273.6 test sentences::tests::coalesces_terminal_runs_and_closers ... ok
+#15 273.6 test sentences::tests::digits_and_domains ... ok
+#15 273.6 test sentences::tests::first_chunk_breaks_early_at_a_clause ... ok
+#15 273.6 test sentences::tests::flush_boundary_decides_a_stalled_sentence_end ... ok
+#15 273.6 test sentences::tests::splits_before_completion_and_preserves_text ... ok
+#15 273.6 test sentences::tests::whitespace_stays_with_the_chunk_it_ends ... ok
+#15 273.6 test voice::speech_rule_tests::annotations_preserve_punctuation_and_word_boundaries ... ok
+#15 273.6 test voice::speech_rule_tests::rejects_markup_in_phonemes ... ok
+#15 273.6 test voice::tests::curated_voice_rejects_arbitrary_provider_ids ... ok
+#15 273.6 test voice::tests::default_voice_is_will_and_factory_adrian_still_matches ... ok
+#15 273.6 test voice::tests::eleven_request_speaks_the_line_only ... ok
+#15 273.6 test voice::tests::legacy_fish_names_load_as_premade_speakers ... ok
+#15 273.6 test voice::tests::synthesis_rejects_out_of_bounds_controls ... ok
+#15 273.6 test conversation::expression::tests::only_a_running_turn_can_offer_one_cue_and_the_log_is_inert ... ok
+#15 273.6 test conversation::tests::factory_adoption_keeps_a_persona_saved_after_the_read ... ok
+#15 273.6 test conversation::speech::tests::a_stopped_turn_is_never_pinned ... ok
+#15 273.6 test memory::tests::search_reads_matches_then_the_newest_facts_in_one_statement ... ok
+#15 273.6 test conversation::speech::tests::one_read_returns_status_and_the_chunk_once_committed ... ok
+#15 273.6 test conversation::tests::schema_state_tracks_version_and_legacy_triggers ... ok
+#15 273.6 test conversation::speech::tests::pinning_twice_keeps_the_first_voice ... ok
+#15 273.6 test conversation::retention::tests::only_the_newest_turns_keep_events_and_speech ... ok
+#15 273.6 test conversation::retention::tests::an_active_turn_is_never_pruned ... ok
+#15 273.7 test conversation::retention::tests::a_full_window_keeps_everything ... ok
+#15 273.7 test conversation::tests::replay_pages_hold_the_byte_budget_and_never_stall ... ok
+#15 273.7 test conversation::retention::tests::the_start_probe_finds_rows_past_the_window_until_a_pass_clears_them ... ok
+#15 273.7 test conversation::retention::tests::batches_are_bounded ... ok
+#15 273.7 
+#15 273.7 test result: ok. 79 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.14s
+#15 273.7 
+#15 273.7      Running tests/actors.rs (target/debug/build/robot-buddy/41e64632fa36e2db/out/actors-41e64632fa36e2db)
+#15 273.7 
+#15 273.7 running 23 tests
+#15 273.7 test a_cancel_in_the_spoken_phase_frees_the_worker_at_once ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test barge_in_closes_the_provider_stream_and_commits_nothing_after ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test bots_are_isolated_from_each_other ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test cancel_by_request_id_stops_an_unacknowledged_turn_and_one_not_yet_submitted ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test challenges_are_single_use_and_claims_confirm_once ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test chat_turn_is_one_provider_call_and_hides_private_text ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test direct_mode_tool_call_after_spoken_text_runs_the_tool_and_continues ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test enrollment_is_idempotent_and_session_bound ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test expression_push_is_typed_and_replay_is_inert ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test history_pages_newest_first_and_searches_phrases ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test memory_remembers_searches_and_forgets ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test output_events_match_their_golden_fixtures ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test persona_library_keeps_50_names_and_16_versions ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test personas_save_activate_and_roll_back_together ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test restart_interrupts_streams_and_fails_closed_on_unresolved_tools ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test revoke_blocks_bot_conversation_and_memory ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test running_turn_pins_voice_rejects_busy_and_cancels_cleanly ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test speech_streams_one_numbered_chunk_per_sentence ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test system_prompt_tool_write_applies_to_the_next_turn ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test tool_turn_writes_memory_then_speaks_without_tools ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test version_one_history_upgrades_on_the_engine_across_interruptions ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test voice_and_context_settings_are_compare_and_swap ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 test web_results_cannot_drive_persistent_writes_in_the_same_turn ... ignored, needs the isolated engine; run bun run test:integration
+#15 273.7 
+#15 273.7 test result: ok. 0 passed; 0 failed; 23 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#15 273.7 
+#15 273.7      Running tests/core_index_cost.rs (target/debug/build/robot-buddy/53ba485b685fdd6a/out/core_index_cost-53ba485b685fdd6a)
+#15 273.7 
+#15 273.7 running 3 tests
+#15 273.7 test history_search_latency ... ignored, measurement; run explicitly
+#15 273.7 test memory_search_cost ... ignored, measurement; run explicitly
+#15 273.7 test turns_completed_build_cost ... ignored, measurement; run explicitly
+#15 273.7 
+#15 273.7 test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#15 273.7 
+#15 273.7      Running tests/core_logs.rs (target/debug/build/robot-buddy/9d09ff1b86509718/out/core_logs-9d09ff1b86509718)
+#15 273.7 
+#15 273.7 running 1 test
+#15 273.7 test logs_carry_no_conversation_text ... ignored, needs the isolated engine; run with the integration environment
+#15 273.7 
+#15 273.7 test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#15 273.7 
+#15 273.7      Running tests/core_retention.rs (target/debug/build/robot-buddy/c30f7c32b0517433/out/core_retention-c30f7c32b0517433)
+#15 273.7 
+#15 273.7 running 2 tests
+#15 273.7 test old_turns_lose_events_and_speech_but_replay_still_works ... ignored, needs the isolated engine; run with the integration environment
+#15 273.7 test retention_catches_up_across_short_actor_lifetimes ... ignored, needs the isolated engine; run with the integration environment
+#15 273.7 
+#15 273.7 test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#15 273.7 
+#15 273.7      Running tests/core_sql_counts.rs (target/debug/build/robot-buddy/48bdd61d88a331ea/out/core_sql_counts-48bdd61d88a331ea)
+#15 273.7 
+#15 273.7 running 1 test
+#15 273.7 test per_turn_statement_and_transaction_counts ... ignored, needs the isolated engine; run with the integration environment
+#15 273.7 
+#15 273.7 test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#15 273.7 
+#15 273.7      Running tests/history_sql.rs (target/debug/build/robot-buddy/a6fbff6711f4d06a/out/history_sql-a6fbff6711f4d06a)
+#15 273.7 
+#15 273.7 running 10 tests
+#15 273.8 test an_empty_database_marks_the_rebuild_done ... ok
+#15 273.8 test current_triggers_stand_down_beside_version_one ... ok
+#15 273.8 test recent_turns_use_the_completed_index ... ok
+#15 273.8 test terminal_answer_replaces_its_search_row_by_key ... ok
+#15 273.8 test rebuild_statements_read_by_key_and_range ... ok
+#15 273.9 test version_one_history_migrates_without_loss ... ok
+#15 273.9 test second_rows_from_the_first_keyed_layout_are_removed ... ok
+#15 274.2 test rebuild_resumes_after_interruption_at_any_batch ... ok
+#15 274.5 test version_one_code_during_a_rolling_deploy ... ok
+#15 274.7 test five_thousand_turns_rebuild_in_bounded_batches ... ok
+#15 274.7 
+#15 274.7 test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.98s
+#15 274.7 
+#15 274.7      Running tests/protocol_golden.rs (target/debug/build/robot-buddy/de77371c1f19e74e/out/protocol_golden-de77371c1f19e74e)
+#15 274.7 
+#15 274.7 running 16 tests
+#15 274.7 test busy_refusals_name_the_open_turn ... ok
+#15 274.7 test expression_reader_ignores_future_fields_but_never_moves_on_unknown_or_invalid_cues ... ok
+#15 274.7 test action_envelope_and_connection_params_are_pinned ... ok
+#15 274.7 test stored_voice_names_from_older_actors_still_parse ... ok
+#15 274.7 test unknown_event_kinds_parse_and_unknown_commands_are_rejected ... ok
+#15 274.7 test speech_ready_carries_only_the_sentence_index ... ok
+#15 274.7 test settings_writes_reject_unknown_fields ... ok
+#15 274.7 test speech_request_is_pinned_and_stream_defaults_off ... ok
+#15 274.7 test settings_payloads_are_pinned ... ok
+#15 274.7 test action_replies_are_pinned ... ok
+#15 274.7 test replies_older_clients_read_are_unchanged ... ok
+#15 274.7 test settings_read_back_ignore_additive_fields ... ok
+#15 274.7 test enrollment_and_bundle_are_pinned ... ok
+#15 274.7 test output_events_are_pinned ... ok
+#15 274.7 test messages_a_client_reads_ignore_additive_fields ... ok
+#15 274.7 test every_command_variant_has_a_golden_fixture ... ok
+#15 274.7 
+#15 274.7 test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#15 274.7 
+#15 274.7      Running tests/sentences.rs (target/debug/build/robot-buddy/644b1307b1fa44ee/out/sentences-644b1307b1fa44ee)
+#15 274.7 
+#15 274.7 running 4 tests
+#15 274.7 test corpus_has_realistic_coverage ... ok
+#15 274.7 test corpus_matches_whole_input ... ok
+#15 274.7 test corpus_is_fragmentation_invariant ... ok
+#15 274.9 test random_text_concatenates_bounds_and_ignores_fragmentation ... ok
+#15 274.9 
+#15 274.9 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+#15 274.9 
+#15 274.9      Running tests/voice_rules.rs (target/debug/build/robot-buddy/59d58eff22d97efe/out/voice_rules-59d58eff22d97efe)
+#15 274.9 
+#15 274.9 running 11 tests
+#15 274.9 test equal_length_overlaps_go_to_the_leftmost ... ok
+#15 274.9 test longest_overlapping_match_wins_across_start_positions ... ok
+#15 274.9 test every_style_renders_whisper_or_plain ... ok
+#15 274.9 test model_authored_tags_do_not_reach_the_provider ... ok
+#15 274.9 test model_markup_is_removed_with_tidy_spacing ... ok
+#15 274.9 test rules_do_not_change_the_canonical_transcript ... ok
+#15 274.9 test corpus_cases_render_exactly ... ok
+#15 274.9 test rendering_never_changes_the_spoken_words ... ok
+#15 274.9 test thirty_two_rules_are_allowed_and_the_thirty_third_is_not ... ok
+#15 274.9 test provider_input_has_no_markup_except_whispering ... ok
+#15 274.9 test rendered_input_is_capped_at_24_kib ... ok
+#15 274.9 
+#15 274.9 test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+#15 274.9 
+#15 274.9      Running unittests src/main.rs (target/debug/build/robot-buddy-robot/544c8d727657e7b7/out/robot_buddy_robot-544c8d727657e7b7)
+#15 274.9 
+#15 274.9 running 250 tests
+#15 274.9 test audio::tests::aplay_environment_strips_secrets_and_gates_bench_socket_on_simulate ... ok
+#15 274.9 test audio::tests::player_arguments_include_buffer_and_device ... ok
+#15 275.0 test audio::tests::a_stop_before_the_headers_cancels_the_request_and_the_player ... ok
+#15 275.0 test backoff::tests::backoff_grows_with_jitter_and_resets_only_when_healthy ... ok
+#15 275.0 test backoff::tests::setup_reopens_only_after_the_grace_period ... ok
+#15 275.0 test audio::tests::early_exit_of_the_player_ends_playback ... ok
+#15 275.0 test audio::tests::runtime_shutdown_kills_an_abandoned_player ... ok
+#15 275.0 test audio::tests::plays_incrementally_before_http_completion_and_stop_kills_the_player ... ok
+#15 275.0 test audio::tests::player_stderr_is_kept_bounded_and_drained ... ok
+#15 275.0 test audio::tests::format_mismatch_reaps_early_player_before_spawning_replacement ... ok
+#15 275.0 test cache::tests::debug_output_never_shows_the_claim_token_or_utterance_text ... ok
+#15 275.0 test cache::tests::flush_is_durable_before_returning_and_never_rewinds ... ok
+#15 275.0 test cache::tests::ordinary_checkpoints_are_written_after_the_interval ... ok
+#15 275.0 test cache::tests::reads_caches_written_before_cancel_and_active_turn_existed ... ok
+#15 275.0 test cache::tests::request_cancellations_are_bounded_and_deduplicated ... ok
+#15 275.0 test cache::tests::shutdown_writes_the_outstanding_checkpoint ... ok
+#15 275.0 test cache::tests::load_tolerates_corruption_and_removes_stale_temps ... ok
+#15 275.0 test cache::tests::coalesces_a_burst_of_checkpoints_into_few_fsyncs ... ok
+#15 275.0 test audio::tests::stop_reaps_player_before_returning_for_exclusive_replacement ... ok
+#15 275.0 test config::tests::engine_endpoints_need_tls_unless_local_and_opted_in ... ok
+#15 275.0 test config::tests::hardware_mode_keeps_the_journal_compact ... ok
+#15 275.0 test config::tests::rejects_plain_http_outside_local_simulation ... ok
+#15 275.0 test cache::tests::terminal_checkpoint_is_written_without_waiting_for_the_interval ... ok
+#15 275.0 test config::tests::the_identity_file_must_be_private ... ok
+#15 275.0 test controller::tests::a_request_cancel_an_old_server_refuses_is_dropped ... ok
+#15 275.0 test controller::tests::a_ready_submit_preempts_a_replay_in_flight ... ok
+#15 275.0 test controller::tests::a_cancelled_submit_reply_does_not_start_speech_or_live_turn ... ok
+#15 275.0 test controller::tests::a_failed_write_keeps_the_utterance_and_blocks_only_its_submit ... ok
+#15 275.0 test controller::tests::a_stale_cached_utterance_is_never_submitted ... ok
+#15 275.0 test controller::tests::a_superseded_cancelled_submit_needs_no_followup_cancel ... ok
+#15 275.0 test controller::tests::a_waiting_replay_that_hangs_is_unanswered_after_its_deadline ... ok
+#15 275.0 test controller::tests::a_submit_waits_for_request_cancels_and_never_queues_unsent_ones ... ok
+#15 275.0 test controller::tests::an_acknowledgement_for_a_replaced_utterance_is_cancelled_silently ... ok
+#15 275.0 test controller::tests::an_answered_replaced_submit_is_cancelled_by_turn_not_by_request ... ok
+#15 275.0 test controller::tests::an_utterance_expires_after_its_time_to_live ... ok
+#15 275.0 test controller::tests::an_unanswered_submit_is_retried_with_the_same_id_and_stays_silent ... ok
+#15 275.0 test controller::tests::an_unanswered_submit_replaced_by_wake_is_cancelled_by_request_after_reconnect ... ok
+#15 275.0 test controller::tests::audible_speech_clears_the_first_audio_deadline ... ok
+#15 275.0 test cache::tests::interrupted_write_never_replaces_the_cache_with_partial_content ... ok
+#15 275.0 test controller::tests::idle_rest_and_explicit_sleep_end_on_wake ... ok
+#15 275.0 test controller::tests::barge_in_silences_first_and_submits_only_after_persisting ... ok
+#15 275.0 test controller::tests::listening_true_clears_sleeping_and_resting_neck ... ok
+#15 275.0 test controller::tests::face_follows_wake_think_speak_and_failure ... ok
+#15 275.0 test cache::tests::claim_url_helper_reports_active_expired_owned_and_missing_states ... ok
+#15 275.0 test controller::tests::busy_stays_true_until_online_speaker_stops_on_wake_sleep_and_offline ... ok
+#15 275.0 test controller::tests::offline_mute_and_say_answer_at_once ... ok
+#15 275.0 test controller::tests::next_sequence_applies_directly_and_gaps_fall_back_to_replay ... ok
+#15 275.0 test controller::tests::only_a_replay_while_waiting_on_the_turn_has_the_short_deadline ... ok
+#15 275.0 test controller::tests::not_owned_robots_keep_the_utterance_until_registration ... ok
+#15 275.0 test controller::tests::long_reply_claim_offline_and_mute_reset_the_rest_timer ... ok
+#15 275.0 test controller::tests::only_a_stop_into_idle_rewarms_the_speaker ... ok
+#15 275.0 test controller::tests::replayed_history_never_auto_speaks ... ok
+#15 275.0 test controller::tests::silent_speech_after_ready_is_retried_once_at_the_deadline ... ok
+#15 275.0 test controller::tests::only_live_contiguous_cues_for_our_turn_move_the_face ... ok
+#15 275.0 test controller::tests::speech_retries_once_whichever_of_ready_and_silence_comes_first ... ok
+#15 275.0 test controller::tests::speech_starts_at_acknowledgement_only_for_new_turns ... ok
+#15 275.0 test controller::tests::refusals_drop_the_utterance_with_an_apology ... ok
+#15 275.0 test controller::tests::the_busy_turn_is_cancelled_by_the_id_the_server_names ... ok
+#15 275.0 test controller::tests::wake_cancels_the_live_turn_and_clears_the_utterance ... ok
+#15 275.0 test cache::tests::store_writes_real_files ... ok
+#15 275.0 test device::tests::a_question_is_submitted_while_a_catch_up_replay_hangs ... ok
+#15 275.0 test device::tests::a_lost_submit_ack_never_replays_old_speech_and_the_next_turn_plays ... ok
+#15 275.0 test audio::tests::the_player_starts_while_the_request_waits_for_audio ... ok
+#15 275.0 test device::tests::a_closed_connection_reconnects_and_owned_bots_poll_rarely ... ok
+#15 275.0 test device::tests::a_request_replaced_mid_submit_is_cancelled_after_reconnect ... ok
+#15 275.0 test controller::tests::a_request_silent_past_the_deadline_is_cancelled_and_the_retry_plays ... ok
+#15 275.0 test device::tests::a_replacement_that_closes_while_waiting_is_dropped ... ok
+#15 275.0 test device::tests::a_replacement_that_fails_its_first_call_never_touches_the_current_session ... ok
+#15 275.0 test device::tests::an_unowned_robot_refuses_utterances_without_queuing_them ... ok
+#15 275.0 test device::tests::an_idle_loop_keeps_beating ... ok
+#15 275.0 test controller::tests::offline_announcement_participates_in_busy_and_reaps_before_wake_or_reconnect ... ok
+#15 275.0 test device::tests::a_spoken_code_confirms_the_claim_and_registers_at_once ... ok
+#15 275.0 test device::tests::long_claim_and_long_reply_do_not_prematurely_sleep_in_device_loop ... ok
+#15 275.0 test device::tests::an_owned_robot_forgets_its_claim_link ... ok
+#15 275.0 test device::tests::offline_mute_and_say_answer_at_once ... ok
+#15 275.0 test device::tests::rotation_is_scheduled_ahead_of_expiry_but_not_too_early ... ok
+#15 275.0 test device::tests::cached_pending_is_cleared_when_registration_confirms_unowned ... ok
+#15 275.0 test device::tests::a_silent_connection_is_replaced_fast_only_while_a_turn_is_awaited ... ok
+#15 275.0 test device::tests::wake_then_replacement_say_submits_before_a_held_replay_releases ... ok
+#15 275.0 test device::tests::unowned_and_claiming_spoken_digits_are_never_persisted_or_submitted_after_confirm ... ok
+#15 275.0 test face::tests::a_failure_clearing_the_eyes_does_not_restart_the_link_on_shutdown ... ok
+#15 275.0 test face::tests::a_flash_never_hides_listening_speaking_or_muted ... ok
+#15 275.0 test device::tests::rotation_mid_speech_keeps_talking_and_closes_the_old_connection ... ok
+#15 275.0 test face::tests::commands_serialize_to_the_exact_wire_shapes ... ok
+#15 275.1 test device::tests::barge_in_while_calls_and_the_disk_are_stalled_stops_first ... ok
+#15 275.1 test face::tests::every_open_applies_raw_115200_clocal_without_hupcl ... ok
+#15 275.1 test face::tests::frames_are_every_command_line_in_one_buffer ... ok
+#15 275.1 test face::tests::heartbeat_keeps_the_esp32_out_of_its_5s_fallback ... ok
+#15 275.1 test face::tests::heartbeat_refreshes_expression_but_never_replays_gestures_or_qr ... ok
+#15 275.1 test face::tests::idle_lost_face_releases_tracking_and_sorry_overrides_the_last_cue ... ok
+#15 275.1 test face::tests::mood_follows_conversation_signals ... ok
+#15 275.1 test face::tests::reads_board_status_from_the_same_raw_tty ... ok
+#15 275.1 test face::tests::reopens_the_device_after_it_disappears ... ok
+#15 275.1 test face::tests::second_hello_repaints_qr_mood_and_gaze_without_replaying_gesture ... ok
+#15 275.1 test face::tests::state_changes_are_written_immediately_and_flash_returns_to_steady ... ok
+#15 275.1 test device::tests::offline_announcement_clears_busy_on_natural_finish ... ok
+#15 275.1 test controller::tests::wake_never_waits_on_a_paused_journal_reader ... ok
+#15 275.1 test guard::tests::connections_past_the_cap_wait_for_a_free_slot ... ok
+#15 275.1 test hardware::tests::face_controls_work_without_a_neck_or_camera ... ok
+#15 275.1 test input::tests::a_control_fifo_is_reopened_after_each_writer ... ok
+#15 275.1 test input::tests::a_failed_reader_spawn_releases_its_slot ... ok
+#15 275.1 test input::tests::a_stale_socket_is_replaced_but_other_files_are_kept ... ok
+#15 275.1 test input::tests::an_open_input_does_not_delay_runtime_shutdown ... ok
+#15 275.1 test input::tests::bounded_reads_discard_oversized_lines_and_keep_going ... ok
+#15 275.1 test input::tests::confirmation_codes_are_six_digits_only ... ok
+#15 275.1 test input::tests::invalid_lines_are_rejected ... ok
+#15 275.1 test input::tests::json_lines_are_commands ... ok
+#15 275.1 test input::tests::plain_lines_are_utterances ... ok
+#15 275.2 test audio::tests::only_an_idle_stop_warms_a_connection ... ok
+#15 275.2 test input::tests::the_control_socket_comes_from_the_environment ... ok
+#15 275.2 test device::tests::wifi_setup_opens_after_the_boot_grace_while_input_still_works ... ok
+#15 275.2 test input::tests::the_socket_belongs_to_the_control_group_with_mode_0660 ... ok
+#15 275.2 test input::tests::the_socket_is_owner_only_from_the_moment_it_is_bound ... ok
+#15 275.2 test input::tests::writer_slots_are_bounded_and_released_on_drop ... ok
+#15 275.2 test face::tests::device_sink_writes_lines_to_a_file ... ok
+#15 275.2 test journal::tests::claim_lines_emit_clean_urls_and_ignore_unsafe_values ... ok
+#15 275.2 test journal::tests::compact_lines_carry_no_conversation_text ... ok
+#15 275.2 test listen::io::tests::alsa_extracts_selected_channel_and_reports_safe_exit_signal_and_spawn_errors ... ok
+#15 275.2 test listen::io::tests::capture_stop_reaps_the_child_before_a_reopen ... ok
+#15 275.2 test listen::io::tests::cli_drains_long_wav_stdin_and_returns_normalized_segments ... ok
+#15 275.2 test listen::io::tests::local_command_preserves_thread_caps_and_strips_credentials ... ok
+#15 275.2 test listen::io::tests::recognizer_reports_safe_exit_code_signal_and_spawn_errors ... ok
+#15 275.2 test input::tests::reader_skips_bad_lines_and_eof_disables_the_branch ... ok
+#15 275.2 test listen::io::tests::wav_has_exact_lengths_rate_and_little_endian_pcm ... ok
+#15 275.2 test listen::policy::tests::barge_requires_address_and_stop_never_starts_a_turn ... ok
+#15 275.2 test listen::policy::tests::followup_is_scoped_to_voice_onset_not_decoder_finish_time ... ok
+#15 275.2 test listen::policy::tests::only_confirming_state_interprets_digits_as_claim_input ... ok
+#15 275.2 test listen::policy::tests::leading_punctuation_and_misheard_name_work_after_acoustic_wake ... ok
+#15 275.2 test listen::policy::tests::silence_and_song_artifacts_are_ignored_without_blocking_addressed_speech ... ok
+#15 275.2 test listen::policy::tests::sleep_clears_the_window_without_a_wake_or_chat_turn ... ok
+#15 275.2 test listen::tests::drop_log_is_rate_limited_and_emits_only_safe_metadata ... ok
+#15 275.2 test listen::tests::busy_acoustic_wake_accepts_immediate_idle_clip_but_not_old_playback ... ok
+#15 275.2 test listen::tests::leaving_claim_mode_cancels_inflight_recognition ... ok
+#15 275.2 test listen::tests::mock_beam_reaches_existing_control_channel_in_order ... ok
+#15 275.2 test listen::tests::neural_wake_interrupts_held_followup_decode_with_full_queue_and_skips_prewake_clip ... ok
+#15 275.2 test listen::tests::priority_wake_preserves_aba_generation_mute_and_claim_confirmation ... ok
+#15 275.2 test listen::tests::transcript_mode_blocks_busy_echo_cancels_stale_decode_and_accepts_post_playback_wake ... ok
+#15 275.2 test listen::tests::transcript_mode_disables_barge_in_even_with_legacy_env_and_preserves_enrollment ... ok
+#15 275.2 test listen::tests::wake_worker_load_failure_falls_back_to_transcript_without_barge_in_and_keeps_claims ... ok
+#15 275.2 test listen::tests::wake_detector_stays_warm_across_busy_and_resets_on_privacy_or_claim_boundaries ... ok
+#15 275.3 test listen::vad::tests::reset_preserves_noise_floor_and_clears_inflight_recording ... ok
+#15 275.3 test listen::vad::tests::speech_keeps_onset_and_waits_through_short_pauses ... ok
+#15 275.3 test listen::vad::tests::noise_click_and_continuous_input_are_bounded ... ok
+#15 275.3 test motion::poses::tests::gestures_ease_from_rest_and_return_to_neutral ... ok
+#15 275.3 test motion::sts3215::tests::baud_verification_fails_closed_when_rate_is_not_one_megabaud ... ok
+#15 275.3 test motion::sts3215::tests::read_frame_and_fragmented_echo_status ... ok
+#15 275.3 test motion::sts3215::tests::serial_transaction_reads_reply_after_a_real_tty_echo ... ok
+#15 275.3 test motion::sts3215::tests::status_tolerates_extra_leading_0xff_before_header_and_echo ... ok
+#15 275.3 test motion::sts3215::tests::sync_write_packs_three_bounded_goals_in_one_frame ... ok
+#15 275.3 test listen::vad::tests::sustained_ambient_above_500_rms_recovers_for_speech ... ok
+#15 275.3 test motion::tests::admission_rejects_unlocked_wrong_mode_limits_and_outside_position ... ok
+#15 275.3 test motion::tests::arm_uses_measured_position_and_drop_disables_every_axis ... ok
+#15 275.3 test guard::tests::a_half_sent_request_is_cut_off_and_its_slot_freed ... ok
+#15 275.3 test audio::tests::started_follows_the_first_pipe_write_not_the_whole_chunk ... ok
+#15 275.3 test audio::tests::a_stalled_speech_body_ends_playback_at_the_idle_deadline ... ok
+#15 275.3 test audio::tests::a_player_that_stops_reading_is_killed_at_the_deadline ... ok
+#15 275.3 test motion::tests::cue_expires_after_four_seconds_reenabling_tracking_while_express_persists_and_gesture_completes ... ok
+#15 275.3 test motion::sts3215::tests::write_uses_addressed_inst_write_and_handles_ack_silent_and_error ... ok
+#15 275.3 test motion::tests::loop_timing_tracks_p95_and_missed_20ms_deadlines_across_windows ... ok
+#15 275.3 test motion::tests::malformed_or_missing_calibration_is_never_replaced_by_defaults ... ok
+#15 275.3 test motion::tests::planned_goals_stay_inset_bounded_by_center_clearance_while_initial_goal_is_preserved ... ok
+#15 275.3 test journal::tests::a_paused_reader_never_blocks_the_caller ... ok
+#15 275.3 test motion::tests::provisioning_needs_explicit_consent_before_hardware_access ... ok
+#15 275.3 test motion::tests::staggered_health_reads_once_per_tick_and_latches_every_safety_fault ... ok
+#15 275.3 test motion::tests::tracking_does_not_absorb_yaw_or_pitch_gestures ... ok
+#15 275.3 test motion::tests::tracking_moves_then_recenters_and_manual_pose_wins_over_gesture ... ok
+#15 275.3 test motion::tests::tracking_pitch_clamp_is_relative_to_active_expression ... ok
+#15 275.3 test input::tests::the_control_socket_survives_its_writer_restarting ... ok
+#15 275.3 test piper::tests::failed_partial_and_oversized_renders_never_start_playback ... ok
+#15 275.3 test piper::tests::speaks_only_housekeeping_line_and_sends_pcm_to_player ... ok
+#15 275.3 test piper::tests::startup_and_announce_reject_unsafe_or_invalid_sidecar ... ok
+#15 275.3 test piper::tests::startup_validation_rejects_bad_paths_binary_and_model ... ok
+#15 275.3 test motion::tests::worker_alive_flips_false_on_stop_fault_and_panic_with_torque_off ... ok
+#15 275.3 test piper::tests::voice_colouring_is_feedforward_and_bounded ... ok
+#15 275.3 test screen::operator::tests::aborted_setup_clears_physical_qr_pair ... ok
+#15 275.3 test motion::tests::deadline_log::run_emits_missed_deadline_warning_when_bus_exceeds_20ms_period ... ok
+#15 275.3 test motion::tests::failed_arm_readback_does_not_leave_partially_enabled_neck ... ok
+#15 275.3 test piper::tests::stop_cancels_and_reaps_synth_and_player_before_returning ... ok
+#15 275.3 test screen::operator::tests::limits_and_local_only_address ... ok
+#15 275.3 test screen::operator::tests::enrollment_surfaces_sanitized_precondition_and_offline_errors_without_leaks ... ok
+#15 275.3 test screen::operator::tests::log_retains_only_bounded_callsite_metadata ... ok
+#15 275.3 test screen::operator::tests::local_people_enrollment_and_recognition_use_the_device_adapter ... ok
+#15 275.3 test screen::operator::tests::offline_camera_returns_503_immediately_and_preserves_caps ... ok
+#15 275.3 test screen::tests::a_moved_panel_answers_only_its_own_host_and_origin ... ok
+#15 275.3 test screen::tests::an_off_or_invalid_panel_binds_nothing ... ok
+#15 275.3 test screen::tests::an_unchanged_qr_code_is_rendered_once ... ok
+#15 275.3 test screen::tests::confirm_checks_origin_host_and_rotating_csrf ... ok
+#15 275.3 test screen::tests::page_is_locked_down ... ok
+#15 275.3 test screen::tests::the_address_is_loopback_configurable_or_off ... ok
+#15 275.3 test session::tests::a_busy_refusal_names_the_open_turn ... ok
+#15 275.3 test session::tests::a_cleared_claim_is_replaced_at_once ... ok
+#15 275.3 test session::tests::calls_keep_the_typed_wire_shape ... ok
+#15 275.3 test session::tests::http_dates_parse_to_unix_seconds ... ok
+#15 275.3 test session::tests::only_server_answers_count_as_rejections ... ok
+#15 275.3 test session::tests::output_events_decode_from_one_argument ... ok
+#15 275.3 test session::tests::request_cancels_and_probes_use_the_shared_wire_shape ... ok
+#15 275.3 test session::tests::session_lifetime_uses_the_server_clock_within_bounds ... ok
+#15 275.3 test session::tests::submit_reply_honors_cancelled_and_duplicate_flags ... ok
+#15 275.3 test systemd::tests::notifications_reach_the_socket ... ok
+#15 275.3 test systemd::tests::the_watchdog_is_pinged_only_while_the_loop_beats ... ok
+#15 275.3 test systemd::tests::watchdog_interval_honors_pid_and_zero ... ok
+#15 275.3 test vision::tests::bad_boxes_are_skipped_without_failing_detection ... ok
+#15 275.3 test vision::tests::camera_accepts_a_complete_i420_frame_and_rejects_a_truncated_next_frame ... ok
+#15 275.3 test vision::tests::camera_passes_noir_options_and_reports_bounded_exit_status_without_private_data ... ok
+#15 275.3 test vision::tests::capture_drives_tracking_lost_face_and_disconnect ... ok
+#15 275.3 test vision::tests::config_validates_model_files_and_rejects_git_lfs_pointers ... ok
+#15 275.3 test vision::tests::config_validates_noir_tuning_file_and_awb_gains ... ok
+#15 275.3 test vision::tests::error_rate_limiter_suppresses_bursts_and_reports_suppressed_count ... ok
+#15 275.3 test vision::tests::gallery_rejects_shared_files_invalid_vectors_and_symlinks ... ok
+#15 275.4 test vision::tests::gallery_roundtrips_samples_and_forgets_without_storing_photos ... ok
+#15 275.4 test motion::tests::confirm_retries_read_only_without_extra_write ... ok
+#15 275.4 test vision::tests::jpeg_is_decoupled_from_engine_mutex_and_avoids_reencoding_same_frame ... ok
+#15 275.4 test vision::tests::inference_activity_log_emits_once_per_interval_only_on_valid_inference_without_private_data ... ok
+#15 275.4 test vision::tests::per_frame_inference_errors_recover_then_stop_at_bounded_limit ... ok
+#15 275.4 test vision::tests::panel_enrolls_only_one_fresh_face_clears_stale_labels_and_loses_access_on_shutdown ... ok
+#15 275.4 test vision::tests::recognition_uses_cosine_and_rejects_a_close_but_below_threshold_match ... ok
+#15 275.4 test wifi::card::tests::a_damaged_file_is_an_error_not_a_new_password ... ok
+#15 275.4 test wifi::card::tests::a_symlink_at_setup_wifi_is_refused ... ok
+#15 275.4 test wifi::card::tests::credentials_are_created_once_private_and_reused ... ok
+#15 275.4 test wifi::card::tests::generated_credentials_differ_per_robot ... ok
+#15 275.4 test wifi::card::tests::the_card_carries_the_network_password_and_a_qr_code ... ok
+#15 275.4 test motion::tests::provision_skips_matching_eeprom_and_relocks_after_readback_error ... ok
+#15 275.4 test wifi::card::tests::the_setup_card_command_prints_the_stored_network ... ok
+#15 275.4 test wifi::tests::a_mistyped_password_keeps_the_working_home_network ... ok
+#15 275.4 test wifi::tests::a_proven_join_clears_stale_home_profiles ... ok
+#15 275.4 test wifi::tests::an_unsaved_password_fails_the_join_and_keeps_the_old_profile ... ok
+#15 275.4 test wifi::tests::interface_names_cannot_be_options ... ok
+#15 275.4 test wifi::tests::connected_reads_the_general_state ... ok
+#15 275.4 test wifi::tests::nmcli_never_receives_the_operator_secret ... ok
+#15 275.4 test wifi::tests::only_a_global_route_counts_as_connected ... ok
+#15 275.4 test wifi::tests::passwords_are_escaped_for_passwd_file_and_terse_output ... ok
+#15 275.4 test wifi::tests::rejects_keyfile_injection ... ok
+#15 275.4 test wifi::tests::setup_form_requires_host_origin_and_csrf ... ok
+#15 275.4 test motion::tests::cli_reports_unconfirmed_torque_off_to_stderr_on_finish_error_and_panic ... ok
+#15 275.4 test wifi::tests::joining_home_proves_the_new_profile_before_retiring_the_old ... ok
+#15 275.4 test wifi::tests::the_new_profile_uuid_comes_from_nmcli ... ok
+#15 275.4 test vision::tests::recognition_intervals_distinguish_unchecked_no_match_and_known_and_react_to_forget ... ok
+#15 275.5 test screen::operator::tests::camera_enforces_work_and_viewer_caps_and_closes_when_camera_drops ... ok
+#15 275.5 test screen::operator::tests::operator_requires_local_authenticated_owned_session_on_every_route ... ok
+#15 275.6 test device::tests::offline_announcement_reaps_before_online_playback_on_reconnect ... ok
+#15 275.6 test wifi::tests::the_setup_bind_waits_for_its_address ... ok
+#15 275.6 test guard::tests::a_silent_or_trickling_client_is_disconnected ... ok
+#15 275.7 test screen::operator::tests::guarded_camera_and_routes_recover_across_guard_lifetime ... ok
+#15 275.8 test audio::tests::first_audio_tracks_server_latency_and_reuses_the_connection ... ok
+#15 275.9 test wifi::tests::setup_timeout_cancels_inflight_join_home_cleanly ... ok
+#15 276.2 test wifi::tests::the_hotspot_is_deleted_when_setup_is_abandoned ... ok
+#15 276.3 test motion::tests::center_accepts_reference_tolerance_eight_and_preserves_stall_cutoff ... ok
+#15 276.4 test audio::tests::a_slow_steady_player_takes_a_large_chunk_past_the_deadline ... ok
+#15 276.7 test device::tests::claim_url_is_emitted_once_per_new_url_and_reset_when_owned ... ok
+#15 278.5 test face::tests::a_stalled_port_times_out_without_leaking_threads_and_reopens_raw ... ok
+#15 278.5 
+#15 278.5 test result: ok. 250 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.59s
+#15 278.5 
+#15 278.5      Running unittests src/main.rs (target/debug/build/robot-buddy-server/c6c699e17bebbba0/out/robot_buddy_server-c6c699e17bebbba0)
+#15 278.5 
+#15 278.5 running 75 tests
+#15 278.5 test engine::tests::config_names_name_their_writer ... ok
+#15 278.5 test config::tests::secret_endpoints_need_tls_off_loopback ... ok
+#15 278.5 test engine::tests::s3_endpoints_carry_keys_only_over_tls ... ok
+#15 278.5 test claim::tests::a_sign_in_is_spent_once_and_a_forged_state_leaves_it ... ok
+#15 278.5 test claim::tests::sign_ins_are_bounded_per_client_and_never_refused ... ok
+#15 278.5 test engine::tests::engine_config_is_private_ephemeral_and_removed ... ok
+#15 278.6 test http_tests::lab_login_and_csrf_statuses ... ok
+#15 278.6 test http_tests::missing_configuration_is_503_and_disabled_lab_is_404 ... ok
+#15 278.6 test http_tests::responses_carry_security_headers ... ok
+#15 278.6 test http_tests::claim_csp_allows_multi_origin_https_idp_redirects ... ok
+#15 278.6 test http_tests::credential_endpoints_are_rate_limited_per_client ... ok
+#15 278.6 test http_tests::login_redirects_with_independent_state_and_nonce ... ok
+#15 278.6 test lab::tests::lab_token_rejects_nul_padding ... ok
+#15 278.6 test limit::tests::bucket_allows_a_burst_then_refills ... ok
+#15 278.6 test limit::tests::forwarded_for_is_used_only_from_trusted_proxies ... ok
+#15 278.6 test limit::tests::ipv6_clients_are_keyed_by_their_64_and_mapped_ipv4_is_ipv4 ... ok
+#15 278.6 test limit::tests::map_stays_bounded ... ok
+#15 278.6 test limit::tests::one_client_cannot_fill_the_shared_pool ... ok
+#15 278.6 test limit::tests::trusted_proxies_are_cidr_blocks ... ok
+#15 278.6 test http_tests::only_an_extended_request_outlives_the_header_deadline ... ok
+#15 278.6 test http_tests::one_client_holds_at_most_its_share_of_the_pool ... ok
+#15 278.6 test oidc::tests::token_form_omits_an_empty_secret ... ok
+#15 278.6 test engine::tests::a_start_sweeps_only_orphaned_configs ... ok
+#15 278.6 test serve::tests::a_partial_head_is_dropped_at_the_head_deadline ... ok
+#15 278.6 test http_tests::login_rejects_cross_site_and_unbound_posts ... ok
+#15 278.6 test serve::tests::a_trickled_head_is_dropped_at_the_head_deadline ... ok
+#15 278.6 test serve::tests::a_silent_connection_is_dropped_at_the_head_deadline ... ok
+#15 278.6 test serve::tests::another_client_is_served_beside_a_slowloris ... ok
+#15 278.6 test serve::tests::keep_alive_lasts_the_idle_window_and_requests_are_not_cut ... ok
+#15 278.6 test serve::tests::one_client_cannot_hold_every_connection ... ok
+#15 278.6 test http_tests::readiness_coalesces_its_engine_probe ... ok
+#15 278.6 test http_tests::health_answers_while_the_pool_is_full ... ok
+#15 278.6 test speech::error::tests::client_errors_are_classified_by_their_rivetkit_shape ... ok
+#15 278.6 test serve::tests::the_tcp_listener_serves ... ok
+#15 278.6 test serve::tests::the_pool_cap_queues_new_connections ... ok
+#15 278.6 test speech::error::tests::every_kind_has_a_distinct_failure_status ... ok
+#15 278.6 test speech::source::tests::connection_transport_errors_are_distinguished_from_actor_rpc_errors ... ok
+#15 278.6 test speech::tests::a_called_provider_that_sends_nothing_fails_the_stream ... ok
+#15 278.6 test http_tests::the_lab_cookie_is_an_opaque_session_id ... ok
+#15 278.6 test speech::tests::an_all_markup_turn_has_no_speech ... ok
+#15 278.6 test http_tests::an_authenticated_speech_body_gets_a_short_read_deadline ... ok
+#15 278.6 test speech::tests::base_url_policy ... ok
+#15 278.6 test speech::tests::capacity_stays_bounded_across_bots ... ok
+#15 278.6 test speech::tests::eval_barge_in_releases_promptly ... ok
+#15 278.6 test speech::tests::eval_first_byte_follows_commit ... ok
+#15 278.6 test speech::tests::eval_newest_request_wins ... ok
+#15 278.6 test speech::tests::a_stream_outlives_the_bearer_it_was_admitted_with ... ok
+#15 278.6 test speech::tests::eval_slow_check_pauses_audio ... ok
+#15 278.6 test speech::tests::eval_revocation_stops_stream ... ok
+#15 278.6 test speech::tests::finished_body_drains_after_the_task_ends ... ok
+#15 278.6 test speech::tests::eval_gap_lookahead_vs_sequential ... ok
+#15 278.6 test http_tests::the_callback_is_rate_limited_per_client ... ok
+#15 278.6 test speech::tests::eval_actor_calls_per_stream ... ok
+#15 278.6 test http_tests::slow_bodies_cannot_delay_health_enrollment_or_speech ... ok
+#15 278.6 test speech::tests::provider_negotiates_http2 ... ignored, reaches openrouter.ai
+#15 278.6 test speech::tests::response_keeps_audio_contract_headers ... ok
+#15 278.6 test http_tests::callback_handles_oidc_errors_and_malformed_queries ... ok
+#15 278.6 test web::tests::clearing_cookies_keeps_secure ... ok
+#15 278.6 test web::tests::bodies_are_read_within_the_deadline ... ok
+#15 278.6 test web::tests::forms_refuse_repeated_fields ... ok
+#15 278.6 test web::tests::reads_cookies_from_every_header ... ok
+#15 278.6 test speech::tests::replaced_backpressured_body_yields_the_stop_first ... ok
+#15 278.6 test web::tests::security_headers_fill_defaults_and_keep_route_values ... ok
+#15 278.6 test web::tests::escape_covers_html_and_attribute_metacharacters ... ok
+#15 278.6 test web::tests::server_errors_hide_details ... ok
+#15 278.6 test speech::tests::voice_is_decoded_once_per_stream ... ok
+#15 278.6 test speech::tests::markup_chunks_are_skipped_and_the_reply_continues ... ok
+#15 278.6 test http_tests::slow_unauthenticated_speech_bodies_are_refused_from_headers ... ok
+#15 278.6 test speech::tests::openrouter_skips_markup_through_the_pipeline ... ok
+#15 278.6 test oidc::tests::caches_keys_and_refetches_once_for_unknown_kid ... ok
+#15 278.6 test oidc::tests::validates_signature_and_login_binding ... ok
+#15 278.6 test oidc::tests::rejects_encryption_keys_and_mismatched_alg ... ok
+#15 278.7 test http_tests::speech_statuses_name_the_failure ... ok
+#15 278.7 test speech::tests::eval_stalled_reader_released_at_deadline ... ok
+#15 278.8 test speech::tests::provider_error_body_is_bounded_and_not_echoed ... ok
+#15 278.8 
+#15 278.8 test result: ok. 74 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.21s
+#15 278.8 
+#15 278.8      Running tests/container.rs (target/debug/build/robot-buddy-server/1bdb3bc9359d5e88/out/container-1bdb3bc9359d5e88)
+#15 278.8 
+#15 278.8 running 1 test
+#15 278.8 test first_boot_recovers_identity_and_scopes_the_rivet_client ... ignored, requires isolated container and BUDDY_TEST_IDENTITY_FILE
+#15 278.8 
+#15 278.8 test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#15 278.8 
+#15 278.8    Doc-tests robot_buddy
+#15 279.0 
+#15 279.0 running 0 tests
+#15 279.0 
+#15 279.0 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#15 279.0 
+#15 279.0 
+#15 279.0 >>> [trixie][DEFAULT] cargo test -p robot-buddy --no-default-features --locked -j 2
+#15 279.2    Compiling proc-macro2 v1.0.107
+#15 279.2    Compiling serde_core v1.0.229
+#15 279.5    Compiling quote v1.0.47
+#15 279.6    Compiling syn v3.0.10
+#15 280.0    Compiling syn v2.0.119
+#15 280.8    Compiling cc v1.11.2
+#15 281.2    Compiling zerocopy-derive v0.8.63
+#15 281.3    Compiling serde v1.0.229
+#15 281.4    Compiling serde_derive v1.0.229
+#15 281.8    Compiling zerocopy v0.8.63
+#15 282.5    Compiling bytes v1.12.1
+#15 282.7    Compiling http v1.5.0
+#15 283.2    Compiling subtle v2.6.1
+#15 283.2    Compiling digest v0.10.7
+#15 283.2    Compiling http-body v1.1.0
+#15 283.3    Compiling tokio-macros v2.7.2
+#15 283.3    Compiling getrandom v0.2.17
+#15 283.3    Compiling mio v1.2.5
+#15 283.5    Compiling socket2 v0.6.5
+#15 283.6    Compiling serde_json v1.0.154
+#15 283.6    Compiling tokio v1.54.1
+#15 283.9    Compiling rand_core v0.6.4
+#15 284.0    Compiling tracing v0.1.44
+#15 284.1    Compiling libsqlite3-sys v0.35.0
+#15 284.2    Compiling ppv-lite86 v0.2.21
+#15 284.3    Compiling half v2.7.1
+#15 284.4    Compiling alloca v0.4.0
+#15 284.5    Compiling cpufeatures v0.2.17
+#15 284.5    Compiling slab v0.4.12
+#15 284.6    Compiling zeroize v1.9.1
+#15 284.6    Compiling sync_wrapper v1.0.2
+#15 284.6    Compiling futures-task v0.3.34
+#15 284.7    Compiling hyper v1.12.0
+#15 284.8    Compiling futures-util v0.3.34
+#15 285.0    Compiling ciborium-ll v0.2.2
+#15 285.1    Compiling curve25519-dalek v4.1.3
+#15 285.3    Compiling sha2 v0.10.9
+#15 285.4    Compiling rand_chacha v0.3.1
+#15 285.6    Compiling getrandom v0.4.3
+#15 285.6    Compiling http-body-util v0.1.5
+#15 285.7    Compiling serde_urlencoded v0.7.1
+#15 285.7    Compiling axum-core v0.5.6
+#15 286.2    Compiling uuid v1.29.2
+#15 286.4    Compiling rand v0.8.8
+#15 286.7    Compiling ed25519-dalek v2.2.0
+#15 286.7    Compiling tower v0.5.3
+#15 286.9    Compiling ciborium v0.2.2
+#15 287.1    Compiling hyper-util v0.1.21
+#15 287.1    Compiling tinytemplate v1.2.1
+#15 287.3    Compiling hmac v0.12.1
+#15 287.3    Compiling serde_ignored v0.1.14
+#15 287.3    Compiling serde_path_to_error v0.1.20
+#15 287.4    Compiling page_size v0.6.0
+#15 287.5    Compiling bitflags v2.13.2
+#15 287.5    Compiling axum v0.8.9
+#15 288.0    Compiling rusqlite v0.37.0
+#15 288.4    Compiling tracing-subscriber v0.3.23
+#15 288.9    Compiling criterion v0.8.2
+#15 289.1    Compiling robot-buddy v0.1.0 (/src/crates/buddy)
+#15 291.4     Finished `test` profile [unoptimized] target(s) in 12.39s
+#15 291.4      Running unittests src/lib.rs (target/debug/build/robot-buddy/4540dfd8799d7dc0/out/robot_buddy-4540dfd8799d7dc0)
+#15 291.4 
+#15 291.4 running 21 tests
+#15 291.4 test audio::tests::requires_explicit_supported_audio_format ... ok
+#15 291.4 test auth::tests::ct_eq_matches_equality ... ok
+#15 291.4 test auth::tests::short_keys_are_rejected_for_sign_and_verify ... ok
+#15 291.4 test auth::tests::signing_keys_zeroize_on_drop ... ok
+#15 291.4 test sentences::tests::coalesces_terminal_runs_and_closers ... ok
+#15 291.4 test sentences::tests::bounds_unpunctuated_unicode ... ok
+#15 291.4 test sentences::tests::first_chunk_breaks_early_at_a_clause ... ok
+#15 291.4 test sentences::tests::digits_and_domains ... ok
+#15 291.4 test sentences::tests::flush_boundary_decides_a_stalled_sentence_end ... ok
+#15 291.4 test auth::tests::tokens_are_bound_to_purpose_and_key ... ok
+#15 291.4 test sentences::tests::splits_before_completion_and_preserves_text ... ok
+#15 291.4 test auth::tests::secrets_are_redacted_and_round_trip_identity_files ... ok
+#15 291.4 test sentences::tests::whitespace_stays_with_the_chunk_it_ends ... ok
+#15 291.4 test voice::speech_rule_tests::annotations_preserve_punctuation_and_word_boundaries ... ok
+#15 291.4 test voice::speech_rule_tests::rejects_markup_in_phonemes ... ok
+#15 291.4 test voice::tests::curated_voice_rejects_arbitrary_provider_ids ... ok
+#15 291.4 test voice::tests::legacy_fish_names_load_as_premade_speakers ... ok
+#15 291.4 test voice::tests::eleven_request_speaks_the_line_only ... ok
+#15 291.4 test voice::tests::default_voice_is_will_and_factory_adrian_still_matches ... ok
+#15 291.4 test voice::tests::synthesis_rejects_out_of_bounds_controls ... ok
+#15 291.4 test auth::tests::certificate_and_proof_bind_device_key ... ok
+#15 291.4 
+#15 291.4 test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#15 291.4 
+#15 291.4      Running tests/core_index_cost.rs (target/debug/build/robot-buddy/992a61690cd24c81/out/core_index_cost-992a61690cd24c81)
+#15 291.4 
+#15 291.4 running 1 test
+#15 291.4 test turns_completed_build_cost ... ignored, measurement; run explicitly
+#15 291.4 
+#15 291.4 test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#15 291.4 
+#15 291.4      Running tests/core_logs.rs (target/debug/build/robot-buddy/7da8fa28bd505e4f/out/core_logs-7da8fa28bd505e4f)
+#15 291.4 
+#15 291.4 running 0 tests
+#15 291.4 
+#15 291.4 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#15 291.4 
+#15 291.4      Running tests/core_retention.rs (target/debug/build/robot-buddy/9cf27bfcc5bca45d/out/core_retention-9cf27bfcc5bca45d)
+#15 291.4 
+#15 291.4 running 0 tests
+#15 291.4 
+#15 291.4 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#15 291.4 
+#15 291.4      Running tests/core_sql_counts.rs (target/debug/build/robot-buddy/ad04a2e390e2b092/out/core_sql_counts-ad04a2e390e2b092)
+#15 291.4 
+#15 291.4 running 0 tests
+#15 291.4 
+#15 291.4 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#15 291.4 
+#15 291.4      Running tests/protocol_golden.rs (target/debug/build/robot-buddy/3c40455396a60c84/out/protocol_golden-3c40455396a60c84)
+#15 291.4 
+#15 291.4 running 16 tests
+#15 291.4 test busy_refusals_name_the_open_turn ... ok
+#15 291.4 test enrollment_and_bundle_are_pinned ... ok
+#15 291.4 test expression_reader_ignores_future_fields_but_never_moves_on_unknown_or_invalid_cues ... ok
+#15 291.4 test action_envelope_and_connection_params_are_pinned ... ok
+#15 291.4 test action_replies_are_pinned ... ok
+#15 291.4 test settings_payloads_are_pinned ... ok
+#15 291.4 test speech_ready_carries_only_the_sentence_index ... ok
+#15 291.4 test stored_voice_names_from_older_actors_still_parse ... ok
+#15 291.4 test replies_older_clients_read_are_unchanged ... ok
+#15 291.4 test messages_a_client_reads_ignore_additive_fields ... ok
+#15 291.4 test every_command_variant_has_a_golden_fixture ... ok
+#15 291.4 test output_events_are_pinned ... ok
+#15 291.4 test settings_read_back_ignore_additive_fields ... ok
+#15 291.4 test unknown_event_kinds_parse_and_unknown_commands_are_rejected ... ok
+#15 291.4 test speech_request_is_pinned_and_stream_defaults_off ... ok
+#15 291.4 test settings_writes_reject_unknown_fields ... ok
+#15 291.4 
+#15 291.4 test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#15 291.4 
+#15 291.4      Running tests/sentences.rs (target/debug/build/robot-buddy/dc03d227f656cef0/out/sentences-dc03d227f656cef0)
+#15 291.4 
+#15 291.4 running 4 tests
+#15 291.4 test corpus_has_realistic_coverage ... ok
+#15 291.4 test corpus_matches_whole_input ... ok
+#15 291.4 test corpus_is_fragmentation_invariant ... ok
+#15 291.6 test random_text_concatenates_bounds_and_ignores_fragmentation ... ok
+#15 291.6 
+#15 291.6 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+#15 291.6 
+#15 291.6      Running tests/voice_rules.rs (target/debug/build/robot-buddy/a392ba1c65b5ab3e/out/voice_rules-a392ba1c65b5ab3e)
+#15 291.6 
+#15 291.6 running 11 tests
+#15 291.6 test equal_length_overlaps_go_to_the_leftmost ... ok
+#15 291.6 test every_style_renders_whisper_or_plain ... ok
+#15 291.6 test longest_overlapping_match_wins_across_start_positions ... ok
+#15 291.6 test model_authored_tags_do_not_reach_the_provider ... ok
+#15 291.6 test model_markup_is_removed_with_tidy_spacing ... ok
+#15 291.6 test corpus_cases_render_exactly ... ok
+#15 291.6 test rendering_never_changes_the_spoken_words ... ok
+#15 291.6 test rules_do_not_change_the_canonical_transcript ... ok
+#15 291.6 test thirty_two_rules_are_allowed_and_the_thirty_third_is_not ... ok
+#15 291.6 test provider_input_has_no_markup_except_whispering ... ok
+#15 291.6 test rendered_input_is_capped_at_24_kib ... ok
+#15 291.6 
+#15 291.6 test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+#15 291.6 
+#15 291.6    Doc-tests robot_buddy
+#15 291.7 
+#15 291.7 running 0 tests
+#15 291.7 
+#15 291.7 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#15 291.7 
+#15 291.7 
+#15 291.7 >>> [trixie][FULL] cargo clippy --workspace --all-targets --all-features --locked -j 2 -- -D warnings
+#15 291.9  Downloading crates ...
+#15 292.1   Downloaded clang-sys v1.9.1
+#15 292.1   Downloaded libloading v0.8.9
+#15 292.2   Downloaded clang v2.1.0
+#15 292.3   Downloaded opencv-binding-generator v0.108.0
+#15 292.9   Downloaded opencv v0.102.0
+#15 293.1    Compiling num-traits v0.2.19
+#15 293.1    Compiling clang-sys v1.9.1
+#15 293.2    Compiling libloading v0.8.9
+#15 293.2    Compiling aho-corasick v1.1.5
+#15 293.3     Checking ordered-float v5.5.1
+#15 293.4     Checking chrono v0.4.45
+#15 293.7     Checking rig-core v0.46.0
+#15 293.7     Checking chrono-tz v0.10.4
+#15 295.5     Checking croner v2.2.0
+#15 295.5     Checking rivetkit-core v3.1.1
+#15 299.9     Checking rivetkit v3.1.1
+#15 300.6     Checking rig-memory v0.46.0
+#15 301.0     Checking rig-agent v0.46.0
+#15 302.2     Checking rig v0.46.0
+#15 302.2     Checking criterion v0.8.2
+#15 302.6    Compiling regex-syntax v0.8.11
+#15 303.5    Compiling regex-automata v0.4.18
+#15 305.8    Compiling clang v2.1.0
+#15 306.1    Compiling regex v1.13.1
+#15 306.2    Compiling matrixmultiply v0.3.11
+#15 306.3    Compiling opencv-binding-generator v0.108.0
+#15 308.1    Compiling ort-sys v2.0.0-rc.9
+#15 308.2     Checking rawpointer v0.2.1
+#15 308.3    Compiling opencv v0.102.0
+#15 309.4     Checking num-integer v0.1.47
+#15 309.5     Checking num-complex v0.4.6
+#15 309.6     Checking ndarray v0.16.1
+#15 310.6     Checking ort v2.0.0-rc.9
+#15 348.8     Checking robot-buddy v0.1.0 (/src/crates/buddy)
+#15 351.8     Checking robot-buddy-server v0.1.0 (/src/apps/server)
+#15 353.0     Checking robot-buddy-robot v0.1.0 (/src/apps/robot)
+#15 356.9     Finished `dev` profile [unoptimized] target(s) in 1m 05s
+#15 356.9 
+#15 356.9 >>> [trixie][FULL] cargo test --workspace --all-features --locked -j 2
+#15 357.2    Compiling num-traits v0.2.19
+#15 357.2    Compiling rawpointer v0.2.1
+#15 357.2    Compiling matrixmultiply v0.3.11
+#15 357.4    Compiling ort-sys v2.0.0-rc.9
+#15 357.4    Compiling ordered-float v5.5.1
+#15 357.4    Compiling chrono v0.4.45
+#15 357.5    Compiling rig-core v0.46.0
+#15 357.9    Compiling chrono-tz v0.10.4
+#15 359.9    Compiling croner v2.2.0
+#15 360.0    Compiling rivetkit-core v3.1.1
+#15 368.5    Compiling rig-memory v0.46.0
+#15 369.4    Compiling rig-agent v0.46.0
+#15 369.8    Compiling rivetkit v3.1.1
+#15 371.4    Compiling rig v0.46.0
+#15 371.4    Compiling criterion v0.8.2
+#15 372.4    Compiling num-integer v0.1.47
+#15 372.5    Compiling num-complex v0.4.6
+#15 372.6    Compiling ndarray v0.16.1
+#15 373.6    Compiling ort v2.0.0-rc.9
+#15 374.3    Compiling opencv v0.102.0
+#15 447.2    Compiling robot-buddy v0.1.0 (/src/crates/buddy)
+#15 462.7    Compiling robot-buddy-server v0.1.0 (/src/apps/server)
+#15 481.0    Compiling robot-buddy-robot v0.1.0 (/src/apps/robot)
+#15 496.4     Finished `test` profile [unoptimized] target(s) in 2m 19s
+#15 496.4      Running unittests src/lib.rs (target/debug/build/robot-buddy/44635fd765b22e37/out/robot_buddy-44635fd765b22e37)
+#15 496.4 
+#15 496.4 running 79 tests
+#15 496.4 test audio::tests::requires_explicit_supported_audio_format ... ok
+#15 496.4 test actor::tests::codes_are_six_digits_and_inputs_are_bounded ... ok
+#15 496.4 test auth::tests::signing_keys_zeroize_on_drop ... ok
+#15 496.4 test auth::tests::short_keys_are_rejected_for_sign_and_verify ... ok
+#15 496.4 test auth::tests::ct_eq_matches_equality ... ok
+#15 496.4 test auth::tests::tokens_are_bound_to_purpose_and_key ... ok
+#15 496.4 test config::tests::errors_never_contain_the_key ... ok
+#15 496.4 test config::tests::signing_key_requires_32_bytes ... ok
+#15 496.4 test context::tests::rejects_unknown_timezone ... ok
+#15 496.4 test conversation::delivery::tests::all_valid_connections_broadcast ... ok
+#15 496.4 test context::tests::local_time_handles_dst_and_date_boundary ... ok
+#15 496.4 test conversation::delivery::tests::an_expired_connection_that_failed_to_close_gets_nothing ... ok
+#15 496.4 test conversation::delivery::tests::closed_connections_are_forgotten ... ok
+#15 496.4 test conversation::delivery::tests::closed_connections_lose_their_subscription ... ok
+#15 496.4 test conversation::delivery::tests::fallback_skips_connections_never_seen_subscribing ... ok
+#15 496.4 test auth::tests::secrets_are_redacted_and_round_trip_identity_files ... ok
+#15 496.4 test conversation::delivery::tests::sessions_are_verified_once_per_connection ... ok
+#15 496.4 test conversation::harness::tests::first_dialogue_pins_once_then_accepts ... ok
+#15 496.4 test conversation::harness::tests::leading_whitespace_does_not_admit_speech ... ok
+#15 496.4 test conversation::harness::tests::modes_gate_admission ... ok
+#15 496.4 test conversation::harness::tests::spoken_budget_is_enforced ... ok
+#15 496.4 test conversation::harness::tests::spoken_numbers_chunks_and_skips_whitespace ... ok
+#15 496.4 test conversation::harness::tests::spoken_phase_tolerates_a_tool_start_before_text ... ok
+#15 496.4 test auth::tests::certificate_and_proof_bind_device_key ... ok
+#15 496.4 test conversation::harness::tests::tool_call_after_dialogue_closes_speech_but_keeps_the_sentence ... ok
+#15 496.4 test conversation::harness::tests::unpinned_calls_finish_without_chunks ... ok
+#15 496.4 test conversation::harness::tests::whitespace_before_dialogue_is_not_in_the_output ... ok
+#15 496.4 test conversation::history::tests::batch_size_matches_the_statement ... ok
+#15 496.4 test conversation::history::tests::older_triggers_force_a_restart ... ok
+#15 496.4 test conversation::retention::tests::prune_guard_prevents_overlap_and_releases_on_drop_or_panic ... ok
+#15 496.4 test conversation::speech::tests::early_speech_waits_for_a_queued_turn_and_stops_with_the_turn ... ok
+#15 496.4 test conversation::tests::drain_guard_clears_the_flag_and_rechecks_on_panic ... ok
+#15 496.4 test conversation::tests::drain_guard_clears_the_flag_on_return ... ok
+#15 496.4 test actor::tests::migration_is_idempotent_and_keeps_rows ... ok
+#15 496.4 test conversation::tests::schema_changes_raise_the_schema_version ... ok
+#15 496.4 test actor::tests::five_wrong_codes_invalidate_the_pending_claim ... ok
+#15 496.4 test conversation::tools::tests::a_web_search_refuses_persistent_and_history_tools_for_the_rest_of_the_turn ... ok
+#15 496.4 test conversation::tools::tests::arguments_name_what_is_missing ... ok
+#15 496.4 test actor::tests::a_correct_code_after_some_failures_claims ... ok
+#15 496.4 test db::tests::bot_key_is_exactly_one_string_segment ... ok
+#15 496.4 test conversation::tools::tests::every_write_tool_in_the_catalog_is_refused_after_a_web_search ... ok
+#15 496.4 test db::tests::readers_check_column_types ... ok
+#15 496.4 test db::tests::params_bind_text_in_order ... ok
+#15 496.4 test memory::tests::inputs_are_bounded ... ok
+#15 496.4 test memory::tests::fact_cap_rejects_new_keys_but_allows_updates ... ok
+#15 496.4 test memory::tests::newest_fact_reads_use_the_updated_index ... ok
+#15 496.4 test model::tests::budget_counts_reasoning_arguments_and_unknown_payloads ... ok
+#15 496.4 test model::tests::budget_limits_text_separately ... ok
+#15 496.4 test model::tests::catalog_holds_every_tool_with_the_voice_schema ... ok
+#15 496.4 test model::tests::express_schema_names_match_the_device_wire_names ... ok
+#15 496.4 test model::tests::only_loopback_hosts_may_skip_tls ... ok
+#15 496.4 test model::tests::tools_are_parsed_once ... ok
+#15 496.4 test sentences::tests::bounds_unpunctuated_unicode ... ok
+#15 496.4 test sentences::tests::coalesces_terminal_runs_and_closers ... ok
+#15 496.4 test sentences::tests::digits_and_domains ... ok
+#15 496.4 test sentences::tests::first_chunk_breaks_early_at_a_clause ... ok
+#15 496.4 test sentences::tests::flush_boundary_decides_a_stalled_sentence_end ... ok
+#15 496.4 test sentences::tests::splits_before_completion_and_preserves_text ... ok
+#15 496.4 test sentences::tests::whitespace_stays_with_the_chunk_it_ends ... ok
+#15 496.4 test voice::speech_rule_tests::annotations_preserve_punctuation_and_word_boundaries ... ok
+#15 496.4 test voice::speech_rule_tests::rejects_markup_in_phonemes ... ok
+#15 496.4 test voice::tests::curated_voice_rejects_arbitrary_provider_ids ... ok
+#15 496.4 test voice::tests::default_voice_is_will_and_factory_adrian_still_matches ... ok
+#15 496.4 test voice::tests::eleven_request_speaks_the_line_only ... ok
+#15 496.4 test voice::tests::legacy_fish_names_load_as_premade_speakers ... ok
+#15 496.4 test voice::tests::synthesis_rejects_out_of_bounds_controls ... ok
+#15 496.5 test conversation::speech::tests::pinning_twice_keeps_the_first_voice ... ok
+#15 496.5 test conversation::expression::tests::only_a_running_turn_can_offer_one_cue_and_the_log_is_inert ... ok
+#15 496.5 test conversation::speech::tests::one_read_returns_status_and_the_chunk_once_committed ... ok
+#15 496.5 test conversation::speech::tests::a_stopped_turn_is_never_pinned ... ok
+#15 496.5 test conversation::tests::schema_state_tracks_version_and_legacy_triggers ... ok
+#15 496.5 test memory::tests::search_reads_matches_then_the_newest_facts_in_one_statement ... ok
+#15 496.5 test conversation::tests::factory_adoption_keeps_a_persona_saved_after_the_read ... ok
+#15 496.5 test conversation::retention::tests::only_the_newest_turns_keep_events_and_speech ... ok
+#15 496.5 test conversation::retention::tests::an_active_turn_is_never_pruned ... ok
+#15 496.5 test conversation::retention::tests::a_full_window_keeps_everything ... ok
+#15 496.5 test conversation::tests::replay_pages_hold_the_byte_budget_and_never_stall ... ok
+#15 496.5 test conversation::retention::tests::the_start_probe_finds_rows_past_the_window_until_a_pass_clears_them ... ok
+#15 496.6 test conversation::retention::tests::batches_are_bounded ... ok
+#15 496.6 
+#15 496.6 test result: ok. 79 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.15s
+#15 496.6 
+#15 496.6      Running tests/actors.rs (target/debug/build/robot-buddy/4822de943452e0bc/out/actors-4822de943452e0bc)
+#15 496.6 
+#15 496.6 running 23 tests
+#15 496.6 test a_cancel_in_the_spoken_phase_frees_the_worker_at_once ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test barge_in_closes_the_provider_stream_and_commits_nothing_after ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test bots_are_isolated_from_each_other ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test cancel_by_request_id_stops_an_unacknowledged_turn_and_one_not_yet_submitted ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test challenges_are_single_use_and_claims_confirm_once ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test chat_turn_is_one_provider_call_and_hides_private_text ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test direct_mode_tool_call_after_spoken_text_runs_the_tool_and_continues ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test enrollment_is_idempotent_and_session_bound ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test expression_push_is_typed_and_replay_is_inert ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test history_pages_newest_first_and_searches_phrases ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test memory_remembers_searches_and_forgets ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test output_events_match_their_golden_fixtures ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test persona_library_keeps_50_names_and_16_versions ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test personas_save_activate_and_roll_back_together ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test restart_interrupts_streams_and_fails_closed_on_unresolved_tools ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test revoke_blocks_bot_conversation_and_memory ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test running_turn_pins_voice_rejects_busy_and_cancels_cleanly ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test speech_streams_one_numbered_chunk_per_sentence ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test system_prompt_tool_write_applies_to_the_next_turn ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test tool_turn_writes_memory_then_speaks_without_tools ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test version_one_history_upgrades_on_the_engine_across_interruptions ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test voice_and_context_settings_are_compare_and_swap ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 test web_results_cannot_drive_persistent_writes_in_the_same_turn ... ignored, needs the isolated engine; run bun run test:integration
+#15 496.6 
+#15 496.6 test result: ok. 0 passed; 0 failed; 23 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#15 496.6 
+#15 496.6      Running tests/core_index_cost.rs (target/debug/build/robot-buddy/284937754fdfe828/out/core_index_cost-284937754fdfe828)
+#15 496.6 
+#15 496.6 running 3 tests
+#15 496.6 test history_search_latency ... ignored, measurement; run explicitly
+#15 496.6 test memory_search_cost ... ignored, measurement; run explicitly
+#15 496.6 test turns_completed_build_cost ... ignored, measurement; run explicitly
+#15 496.6 
+#15 496.6 test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#15 496.6 
+#15 496.6      Running tests/core_logs.rs (target/debug/build/robot-buddy/3ac0fa6cc7cad4cf/out/core_logs-3ac0fa6cc7cad4cf)
+#15 496.6 
+#15 496.6 running 1 test
+#15 496.6 test logs_carry_no_conversation_text ... ignored, needs the isolated engine; run with the integration environment
+#15 496.6 
+#15 496.6 test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#15 496.6 
+#15 496.6      Running tests/core_retention.rs (target/debug/build/robot-buddy/72aad1f8f00f36bb/out/core_retention-72aad1f8f00f36bb)
+#15 496.6 
+#15 496.6 running 2 tests
+#15 496.6 test old_turns_lose_events_and_speech_but_replay_still_works ... ignored, needs the isolated engine; run with the integration environment
+#15 496.6 test retention_catches_up_across_short_actor_lifetimes ... ignored, needs the isolated engine; run with the integration environment
+#15 496.6 
+#15 496.6 test result: ok. 0 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#15 496.6 
+#15 496.6      Running tests/core_sql_counts.rs (target/debug/build/robot-buddy/005380590e0a4214/out/core_sql_counts-005380590e0a4214)
+#15 496.6 
+#15 496.6 running 1 test
+#15 496.6 test per_turn_statement_and_transaction_counts ... ignored, needs the isolated engine; run with the integration environment
+#15 496.6 
+#15 496.6 test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#15 496.6 
+#15 496.6      Running tests/history_sql.rs (target/debug/build/robot-buddy/9874a922581c9635/out/history_sql-9874a922581c9635)
+#15 496.6 
+#15 496.6 running 10 tests
+#15 496.6 test an_empty_database_marks_the_rebuild_done ... ok
+#15 496.6 test current_triggers_stand_down_beside_version_one ... ok
+#15 496.6 test recent_turns_use_the_completed_index ... ok
+#15 496.6 test terminal_answer_replaces_its_search_row_by_key ... ok
+#15 496.6 test rebuild_statements_read_by_key_and_range ... ok
+#15 496.7 test version_one_history_migrates_without_loss ... ok
+#15 496.7 test second_rows_from_the_first_keyed_layout_are_removed ... ok
+#15 497.0 test rebuild_resumes_after_interruption_at_any_batch ... ok
+#15 497.3 test version_one_code_during_a_rolling_deploy ... ok
+#15 497.6 test five_thousand_turns_rebuild_in_bounded_batches ... ok
+#15 497.6 
+#15 497.6 test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.98s
+#15 497.6 
+#15 497.6      Running tests/protocol_golden.rs (target/debug/build/robot-buddy/dac36e9b39f1baa0/out/protocol_golden-dac36e9b39f1baa0)
+#15 497.6 
+#15 497.6 running 16 tests
+#15 497.6 test busy_refusals_name_the_open_turn ... ok
+#15 497.6 test action_envelope_and_connection_params_are_pinned ... ok
+#15 497.6 test enrollment_and_bundle_are_pinned ... ok
+#15 497.6 test expression_reader_ignores_future_fields_but_never_moves_on_unknown_or_invalid_cues ... ok
+#15 497.6 test action_replies_are_pinned ... ok
+#15 497.6 test speech_ready_carries_only_the_sentence_index ... ok
+#15 497.6 test settings_payloads_are_pinned ... ok
+#15 497.6 test output_events_are_pinned ... ok
+#15 497.6 test speech_request_is_pinned_and_stream_defaults_off ... ok
+#15 497.6 test unknown_event_kinds_parse_and_unknown_commands_are_rejected ... ok
+#15 497.6 test settings_read_back_ignore_additive_fields ... ok
+#15 497.6 test stored_voice_names_from_older_actors_still_parse ... ok
+#15 497.6 test replies_older_clients_read_are_unchanged ... ok
+#15 497.6 test settings_writes_reject_unknown_fields ... ok
+#15 497.6 test messages_a_client_reads_ignore_additive_fields ... ok
+#15 497.6 test every_command_variant_has_a_golden_fixture ... ok
+#15 497.6 
+#15 497.6 test result: ok. 16 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+#15 497.6 
+#15 497.6      Running tests/sentences.rs (target/debug/build/robot-buddy/157f016a33a9c758/out/sentences-157f016a33a9c758)
+#15 497.6 
+#15 497.6 running 4 tests
+#15 497.6 test corpus_has_realistic_coverage ... ok
+#15 497.6 test corpus_matches_whole_input ... ok
+#15 497.6 test corpus_is_fragmentation_invariant ... ok
+#15 497.8 test random_text_concatenates_bounds_and_ignores_fragmentation ... ok
+#15 497.8 
+#15 497.8 test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s
+#15 497.8 
+#15 497.8      Running tests/voice_rules.rs (target/debug/build/robot-buddy/55ebd932e485a75b/out/voice_rules-55ebd932e485a75b)
+#15 497.8 
+#15 497.8 running 11 tests
+#15 497.8 test every_style_renders_whisper_or_plain ... ok
+#15 497.8 test equal_length_overlaps_go_to_the_leftmost ... ok
+#15 497.8 test model_authored_tags_do_not_reach_the_provider ... ok
+#15 497.8 test longest_overlapping_match_wins_across_start_positions ... ok
+#15 497.8 test corpus_cases_render_exactly ... ok
+#15 497.8 test rules_do_not_change_the_canonical_transcript ... ok
+#15 497.8 test rendering_never_changes_the_spoken_words ... ok
+#15 497.8 test thirty_two_rules_are_allowed_and_the_thirty_third_is_not ... ok
+#15 497.8 test model_markup_is_removed_with_tidy_spacing ... ok
+#15 497.8 test provider_input_has_no_markup_except_whispering ... ok
+#15 497.8 test rendered_input_is_capped_at_24_kib ... ok
+#15 497.8 
+#15 497.8 test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+#15 497.8 
+#15 497.8      Running unittests src/main.rs (target/debug/build/robot-buddy-robot/4c9ae8eecd05b424/out/robot_buddy_robot-4c9ae8eecd05b424)
+#15 497.9 
+#15 497.9 running 254 tests
+#15 497.9 test audio::tests::aplay_environment_strips_secrets_and_gates_bench_socket_on_simulate ... ok
+#15 497.9 test audio::tests::player_arguments_include_buffer_and_device ... ok
+#15 497.9 test audio::tests::player_stderr_is_kept_bounded_and_drained ... ok
+#15 497.9 test backoff::tests::backoff_grows_with_jitter_and_resets_only_when_healthy ... ok
+#15 497.9 test audio::tests::early_exit_of_the_player_ends_playback ... ok
+#15 497.9 test backoff::tests::setup_reopens_only_after_the_grace_period ... ok
+#15 497.9 test audio::tests::a_stop_before_the_headers_cancels_the_request_and_the_player ... ok
+#15 497.9 test cache::tests::debug_output_never_shows_the_claim_token_or_utterance_text ... ok
+#15 497.9 test cache::tests::flush_is_durable_before_returning_and_never_rewinds ... ok
+#15 497.9 test cache::tests::coalesces_a_burst_of_checkpoints_into_few_fsyncs ... ok
+#15 497.9 test cache::tests::load_tolerates_corruption_and_removes_stale_temps ... ok
+#15 497.9 test cache::tests::ordinary_checkpoints_are_written_after_the_interval ... ok
+#15 497.9 test cache::tests::reads_caches_written_before_cancel_and_active_turn_existed ... ok
+#15 497.9 test cache::tests::request_cancellations_are_bounded_and_deduplicated ... ok
+#15 497.9 test cache::tests::shutdown_writes_the_outstanding_checkpoint ... ok
+#15 497.9 test audio::tests::format_mismatch_reaps_early_player_before_spawning_replacement ... ok
+#15 497.9 test cache::tests::terminal_checkpoint_is_written_without_waiting_for_the_interval ... ok
+#15 497.9 test config::tests::engine_endpoints_need_tls_unless_local_and_opted_in ... ok
+#15 497.9 test config::tests::hardware_mode_keeps_the_journal_compact ... ok
+#15 497.9 test config::tests::rejects_plain_http_outside_local_simulation ... ok
+#15 497.9 test config::tests::the_identity_file_must_be_private ... ok
+#15 497.9 test controller::tests::a_cancelled_submit_reply_does_not_start_speech_or_live_turn ... ok
+#15 497.9 test controller::tests::a_failed_write_keeps_the_utterance_and_blocks_only_its_submit ... ok
+#15 497.9 test controller::tests::a_ready_submit_preempts_a_replay_in_flight ... ok
+#15 497.9 test controller::tests::a_request_cancel_an_old_server_refuses_is_dropped ... ok
+#15 497.9 test audio::tests::runtime_shutdown_kills_an_abandoned_player ... ok
+#15 497.9 test controller::tests::a_stale_cached_utterance_is_never_submitted ... ok
+#15 497.9 test controller::tests::a_submit_waits_for_request_cancels_and_never_queues_unsent_ones ... ok
+#15 497.9 test audio::tests::stop_reaps_player_before_returning_for_exclusive_replacement ... ok
+#15 497.9 test controller::tests::a_waiting_replay_that_hangs_is_unanswered_after_its_deadline ... ok
+#15 497.9 test audio::tests::plays_incrementally_before_http_completion_and_stop_kills_the_player ... ok
+#15 497.9 test controller::tests::a_superseded_cancelled_submit_needs_no_followup_cancel ... ok
+#15 497.9 test controller::tests::an_acknowledgement_for_a_replaced_utterance_is_cancelled_silently ... ok
+#15 497.9 test controller::tests::an_answered_replaced_submit_is_cancelled_by_turn_not_by_request ... ok
+#15 497.9 test controller::tests::an_utterance_expires_after_its_time_to_live ... ok
+#15 497.9 test controller::tests::an_unanswered_submit_is_retried_with_the_same_id_and_stays_silent ... ok
+#15 497.9 test controller::tests::an_unanswered_submit_replaced_by_wake_is_cancelled_by_request_after_reconnect ... ok
+#15 497.9 test controller::tests::audible_speech_clears_the_first_audio_deadline ... ok
+#15 497.9 test controller::tests::barge_in_silences_first_and_submits_only_after_persisting ... ok
+#15 497.9 test controller::tests::face_follows_wake_think_speak_and_failure ... ok
+#15 497.9 test controller::tests::idle_rest_and_explicit_sleep_end_on_wake ... ok
+#15 497.9 test controller::tests::busy_stays_true_until_online_speaker_stops_on_wake_sleep_and_offline ... ok
+#15 497.9 test controller::tests::listening_true_clears_sleeping_and_resting_neck ... ok
+#15 497.9 test controller::tests::next_sequence_applies_directly_and_gaps_fall_back_to_replay ... ok
+#15 497.9 test controller::tests::not_owned_robots_keep_the_utterance_until_registration ... ok
+#15 497.9 test controller::tests::long_reply_claim_offline_and_mute_reset_the_rest_timer ... ok
+#15 497.9 test controller::tests::offline_mute_and_say_answer_at_once ... ok
+#15 497.9 test controller::tests::only_a_replay_while_waiting_on_the_turn_has_the_short_deadline ... ok
+#15 497.9 test controller::tests::only_a_stop_into_idle_rewarms_the_speaker ... ok
+#15 497.9 test controller::tests::only_live_contiguous_cues_for_our_turn_move_the_face ... ok
+#15 497.9 test controller::tests::refusals_drop_the_utterance_with_an_apology ... ok
+#15 497.9 test controller::tests::replayed_history_never_auto_speaks ... ok
+#15 497.9 test controller::tests::silent_speech_after_ready_is_retried_once_at_the_deadline ... ok
+#15 497.9 test controller::tests::speech_retries_once_whichever_of_ready_and_silence_comes_first ... ok
+#15 497.9 test controller::tests::speech_starts_at_acknowledgement_only_for_new_turns ... ok
+#15 497.9 test controller::tests::the_busy_turn_is_cancelled_by_the_id_the_server_names ... ok
+#15 497.9 test controller::tests::wake_cancels_the_live_turn_and_clears_the_utterance ... ok
+#15 497.9 test controller::tests::a_request_silent_past_the_deadline_is_cancelled_and_the_retry_plays ... ok
+#15 497.9 test audio::tests::the_player_starts_while_the_request_waits_for_audio ... ok
+#15 497.9 test device::tests::a_question_is_submitted_while_a_catch_up_replay_hangs ... ok
+#15 497.9 test device::tests::a_closed_connection_reconnects_and_owned_bots_poll_rarely ... ok
+#15 497.9 test device::tests::a_lost_submit_ack_never_replays_old_speech_and_the_next_turn_plays ... ok
+#15 497.9 test device::tests::a_request_replaced_mid_submit_is_cancelled_after_reconnect ... ok
+#15 497.9 test controller::tests::offline_announcement_participates_in_busy_and_reaps_before_wake_or_reconnect ... ok
+#15 497.9 test device::tests::a_replacement_that_closes_while_waiting_is_dropped ... ok
+#15 497.9 test device::tests::a_replacement_that_fails_its_first_call_never_touches_the_current_session ... ok
+#15 498.0 test device::tests::an_idle_loop_keeps_beating ... ok
+#15 498.0 test device::tests::an_unowned_robot_refuses_utterances_without_queuing_them ... ok
+#15 498.0 test device::tests::a_spoken_code_confirms_the_claim_and_registers_at_once ... ok
+#15 498.0 test device::tests::an_owned_robot_forgets_its_claim_link ... ok
+#15 498.0 test device::tests::a_silent_connection_is_replaced_fast_only_while_a_turn_is_awaited ... ok
+#15 498.0 test device::tests::cached_pending_is_cleared_when_registration_confirms_unowned ... ok
+#15 498.0 test device::tests::long_claim_and_long_reply_do_not_prematurely_sleep_in_device_loop ... ok
+#15 498.0 test device::tests::barge_in_while_calls_and_the_disk_are_stalled_stops_first ... ok
+#15 498.0 test device::tests::offline_mute_and_say_answer_at_once ... ok
+#15 498.0 test device::tests::rotation_is_scheduled_ahead_of_expiry_but_not_too_early ... ok
+#15 498.0 test device::tests::rotation_mid_speech_keeps_talking_and_closes_the_old_connection ... ok
+#15 498.0 test device::tests::unowned_and_claiming_spoken_digits_are_never_persisted_or_submitted_after_confirm ... ok
+#15 498.0 test device::tests::offline_announcement_clears_busy_on_natural_finish ... ok
+#15 498.0 test device::tests::wake_then_replacement_say_submits_before_a_held_replay_releases ... ok
+#15 498.0 test face::tests::a_failure_clearing_the_eyes_does_not_restart_the_link_on_shutdown ... ok
+#15 498.0 test face::tests::a_flash_never_hides_listening_speaking_or_muted ... ok
+#15 498.0 test controller::tests::wake_never_waits_on_a_paused_journal_reader ... ok
+#15 498.0 test face::tests::commands_serialize_to_the_exact_wire_shapes ... ok
+#15 498.1 test audio::tests::only_an_idle_stop_warms_a_connection ... ok
+#15 498.1 test face::tests::every_open_applies_raw_115200_clocal_without_hupcl ... ok
+#15 498.1 test face::tests::frames_are_every_command_line_in_one_buffer ... ok
+#15 498.1 test face::tests::heartbeat_keeps_the_esp32_out_of_its_5s_fallback ... ok
+#15 498.1 test face::tests::heartbeat_refreshes_expression_but_never_replays_gestures_or_qr ... ok
+#15 498.1 test face::tests::idle_lost_face_releases_tracking_and_sorry_overrides_the_last_cue ... ok
+#15 498.1 test face::tests::mood_follows_conversation_signals ... ok
+#15 498.1 test face::tests::reads_board_status_from_the_same_raw_tty ... ok
+#15 498.1 test face::tests::reopens_the_device_after_it_disappears ... ok
+#15 498.1 test face::tests::second_hello_repaints_qr_mood_and_gaze_without_replaying_gesture ... ok
+#15 498.1 test face::tests::state_changes_are_written_immediately_and_flash_returns_to_steady ... ok
+#15 498.2 test audio::tests::a_stalled_speech_body_ends_playback_at_the_idle_deadline ... ok
+#15 498.2 test audio::tests::started_follows_the_first_pipe_write_not_the_whole_chunk ... ok
+#15 498.2 test guard::tests::connections_past_the_cap_wait_for_a_free_slot ... ok
+#15 498.2 test hardware::tests::face_controls_work_without_a_neck_or_camera ... ok
+#15 498.2 test audio::tests::a_player_that_stops_reading_is_killed_at_the_deadline ... ok
+#15 498.2 test input::tests::a_control_fifo_is_reopened_after_each_writer ... ok
+#15 498.2 test input::tests::a_stale_socket_is_replaced_but_other_files_are_kept ... ok
+#15 498.2 test input::tests::a_failed_reader_spawn_releases_its_slot ... ok
+#15 498.2 test input::tests::bounded_reads_discard_oversized_lines_and_keep_going ... ok
+#15 498.2 test input::tests::confirmation_codes_are_six_digits_only ... ok
+#15 498.2 test input::tests::invalid_lines_are_rejected ... ok
+#15 498.2 test input::tests::json_lines_are_commands ... ok
+#15 498.2 test input::tests::plain_lines_are_utterances ... ok
+#15 498.2 test input::tests::an_open_input_does_not_delay_runtime_shutdown ... ok
+#15 498.2 test input::tests::the_control_socket_comes_from_the_environment ... ok
+#15 498.2 test face::tests::device_sink_writes_lines_to_a_file ... ok
+#15 498.2 test input::tests::the_socket_belongs_to_the_control_group_with_mode_0660 ... ok
+#15 498.2 test input::tests::the_socket_is_owner_only_from_the_moment_it_is_bound ... ok
+#15 498.2 test input::tests::writer_slots_are_bounded_and_released_on_drop ... ok
+#15 498.3 test device::tests::wifi_setup_opens_after_the_boot_grace_while_input_still_works ... ok
+#15 498.3 test journal::tests::claim_lines_emit_clean_urls_and_ignore_unsafe_values ... ok
+#15 498.3 test journal::tests::compact_lines_carry_no_conversation_text ... ok
+#15 498.3 test listen::io::tests::alsa_extracts_selected_channel_and_reports_safe_exit_signal_and_spawn_errors ... ok
+#15 498.3 test listen::io::tests::capture_stop_reaps_the_child_before_a_reopen ... ok
+#15 498.3 test listen::io::tests::cli_drains_long_wav_stdin_and_returns_normalized_segments ... ok
+#15 498.3 test listen::io::tests::local_command_preserves_thread_caps_and_strips_credentials ... ok
+#15 498.3 test listen::io::tests::recognizer_reports_safe_exit_code_signal_and_spawn_errors ... ok
+#15 498.3 test listen::io::tests::wav_has_exact_lengths_rate_and_little_endian_pcm ... ok
+#15 498.3 test listen::policy::tests::barge_requires_address_and_stop_never_starts_a_turn ... ok
+#15 498.3 test listen::policy::tests::followup_is_scoped_to_voice_onset_not_decoder_finish_time ... ok
+#15 498.3 test listen::policy::tests::leading_punctuation_and_misheard_name_work_after_acoustic_wake ... ok
+#15 498.3 test listen::policy::tests::only_confirming_state_interprets_digits_as_claim_input ... ok
+#15 498.3 test listen::policy::tests::silence_and_song_artifacts_are_ignored_without_blocking_addressed_speech ... ok
+#15 498.3 test listen::policy::tests::sleep_clears_the_window_without_a_wake_or_chat_turn ... ok
+#15 498.3 test listen::tests::busy_acoustic_wake_accepts_immediate_idle_clip_but_not_old_playback ... ok
+#15 498.3 test listen::tests::drop_log_is_rate_limited_and_emits_only_safe_metadata ... ok
+#15 498.3 test listen::tests::leaving_claim_mode_cancels_inflight_recognition ... ok
+#15 498.3 test listen::tests::mock_beam_reaches_existing_control_channel_in_order ... ok
+#15 498.3 test listen::tests::neural_wake_interrupts_held_followup_decode_with_full_queue_and_skips_prewake_clip ... ok
+#15 498.3 test listen::tests::priority_wake_preserves_aba_generation_mute_and_claim_confirmation ... ok
+#15 498.3 test listen::tests::transcript_mode_blocks_busy_echo_cancels_stale_decode_and_accepts_post_playback_wake ... ok
+#15 498.3 test listen::tests::transcript_mode_disables_barge_in_even_with_legacy_env_and_preserves_enrollment ... ok
+#15 498.3 test listen::tests::wake_detector_stays_warm_across_busy_and_resets_on_privacy_or_claim_boundaries ... ok
+#15 498.3 test listen::tests::wake_worker_load_failure_falls_back_to_transcript_without_barge_in_and_keeps_claims ... ok
+#15 498.3 test listen::vad::tests::noise_click_and_continuous_input_are_bounded ... ok
+#15 498.3 test journal::tests::a_paused_reader_never_blocks_the_caller ... ok
+#15 498.3 test listen::vad::tests::speech_keeps_onset_and_waits_through_short_pauses ... ok
+#15 498.3 test listen::vad::tests::sustained_ambient_above_500_rms_recovers_for_speech ... ok
+#15 498.3 test listen::wake::onnx::tests::compare_reference_scores ... ignored, needs private wake models, reference scores, and a held-out recording
+#15 498.3 test listen::wake::onnx::tests::gate_batches_hops_enforces_thresholds_and_hysteresis ... ok
+#15 498.3 test motion::poses::tests::gestures_ease_from_rest_and_return_to_neutral ... ok
+#15 498.3 test motion::sts3215::tests::baud_verification_fails_closed_when_rate_is_not_one_megabaud ... ok
+#15 498.3 test motion::sts3215::tests::read_frame_and_fragmented_echo_status ... ok
+#15 498.3 test motion::sts3215::tests::serial_transaction_reads_reply_after_a_real_tty_echo ... ok
+#15 498.3 test listen::vad::tests::reset_preserves_noise_floor_and_clears_inflight_recording ... ok
+#15 498.3 test motion::sts3215::tests::status_tolerates_extra_leading_0xff_before_header_and_echo ... ok
+#15 498.3 test motion::sts3215::tests::sync_write_packs_three_bounded_goals_in_one_frame ... ok
+#15 498.3 test motion::tests::admission_rejects_unlocked_wrong_mode_limits_and_outside_position ... ok
+#15 498.3 test motion::tests::arm_uses_measured_position_and_drop_disables_every_axis ... ok
+#15 498.3 test input::tests::the_control_socket_survives_its_writer_restarting ... ok
+#15 498.3 test motion::sts3215::tests::write_uses_addressed_inst_write_and_handles_ack_silent_and_error ... ok
+#15 498.3 test cache::tests::interrupted_write_never_replaces_the_cache_with_partial_content ... ok
+#15 498.3 test motion::tests::cue_expires_after_four_seconds_reenabling_tracking_while_express_persists_and_gesture_completes ... ok
+#15 498.3 test cache::tests::claim_url_helper_reports_active_expired_owned_and_missing_states ... ok
+#15 498.3 test cache::tests::store_writes_real_files ... ok
+#15 498.3 test motion::tests::loop_timing_tracks_p95_and_missed_20ms_deadlines_across_windows ... ok
+#15 498.3 test motion::tests::malformed_or_missing_calibration_is_never_replaced_by_defaults ... ok
+#15 498.3 test motion::tests::planned_goals_stay_inset_bounded_by_center_clearance_while_initial_goal_is_preserved ... ok
+#15 498.3 test guard::tests::a_half_sent_request_is_cut_off_and_its_slot_freed ... ok
+#15 498.3 test motion::tests::provisioning_needs_explicit_consent_before_hardware_access ... ok
+#15 498.3 test motion::tests::staggered_health_reads_once_per_tick_and_latches_every_safety_fault ... ok
+#15 498.3 test motion::tests::tracking_does_not_absorb_yaw_or_pitch_gestures ... ok
+#15 498.3 test motion::tests::tracking_moves_then_recenters_and_manual_pose_wins_over_gesture ... ok
+#15 498.3 test motion::tests::tracking_pitch_clamp_is_relative_to_active_expression ... ok
+#15 498.3 test motion::tests::worker_alive_flips_false_on_stop_fault_and_panic_with_torque_off ... ok
+#15 498.3 test piper::tests::failed_partial_and_oversized_renders_never_start_playback ... ok
+#15 498.4 test piper::tests::speaks_only_housekeeping_line_and_sends_pcm_to_player ... ok
+#15 498.4 test motion::tests::deadline_log::run_emits_missed_deadline_warning_when_bus_exceeds_20ms_period ... ok
+#15 498.4 test piper::tests::startup_validation_rejects_bad_paths_binary_and_model ... ok
+#15 498.4 test piper::tests::startup_and_announce_reject_unsafe_or_invalid_sidecar ... ok
+#15 498.4 test piper::tests::voice_colouring_is_feedforward_and_bounded ... ok
+#15 498.4 test screen::operator::tests::aborted_setup_clears_physical_qr_pair ... ok
+#15 498.4 test motion::tests::failed_arm_readback_does_not_leave_partially_enabled_neck ... ok
+#15 498.4 test piper::tests::stop_cancels_and_reaps_synth_and_player_before_returning ... ok
+#15 498.4 test screen::operator::tests::enrollment_surfaces_sanitized_precondition_and_offline_errors_without_leaks ... ok
+#15 498.4 test screen::operator::tests::limits_and_local_only_address ... ok
+#15 498.4 test input::tests::reader_skips_bad_lines_and_eof_disables_the_branch ... ok
+#15 498.4 test screen::operator::tests::log_retains_only_bounded_callsite_metadata ... ok
+#15 498.4 test screen::operator::tests::local_people_enrollment_and_recognition_use_the_device_adapter ... ok
+#15 498.4 test screen::operator::tests::offline_camera_returns_503_immediately_and_preserves_caps ... ok
+#15 498.4 test screen::tests::a_moved_panel_answers_only_its_own_host_and_origin ... ok
+#15 498.4 test screen::tests::an_off_or_invalid_panel_binds_nothing ... ok
+#15 498.4 test screen::tests::an_unchanged_qr_code_is_rendered_once ... ok
+#15 498.4 test screen::tests::confirm_checks_origin_host_and_rotating_csrf ... ok
+#15 498.4 test screen::tests::page_is_locked_down ... ok
+#15 498.4 test screen::tests::the_address_is_loopback_configurable_or_off ... ok
+#15 498.4 test session::tests::a_busy_refusal_names_the_open_turn ... ok
+#15 498.4 test session::tests::a_cleared_claim_is_replaced_at_once ... ok
+#15 498.4 test session::tests::calls_keep_the_typed_wire_shape ... ok
+#15 498.4 test session::tests::http_dates_parse_to_unix_seconds ... ok
+#15 498.4 test session::tests::only_server_answers_count_as_rejections ... ok
+#15 498.4 test session::tests::output_events_decode_from_one_argument ... ok
+#15 498.4 test session::tests::request_cancels_and_probes_use_the_shared_wire_shape ... ok
+#15 498.4 test session::tests::session_lifetime_uses_the_server_clock_within_bounds ... ok
+#15 498.4 test session::tests::submit_reply_honors_cancelled_and_duplicate_flags ... ok
+#15 498.4 test systemd::tests::notifications_reach_the_socket ... ok
+#15 498.4 test systemd::tests::the_watchdog_is_pinged_only_while_the_loop_beats ... ok
+#15 498.4 test systemd::tests::watchdog_interval_honors_pid_and_zero ... ok
+#15 498.4 test vision::native::tests::enrollment_matches_another_view_but_not_an_unknown_person ... ignored, requires operator-owned models and three labeled local I420 frames; see vision/README.md
+#15 498.4 test vision::native::tests::packed_i420_converts_to_full_size_decodable_jpeg ... ok
+#15 498.4 test motion::tests::confirm_retries_read_only_without_extra_write ... ok
+#15 498.4 test vision::tests::camera_accepts_a_complete_i420_frame_and_rejects_a_truncated_next_frame ... ok
+#15 498.4 test vision::tests::camera_passes_noir_options_and_reports_bounded_exit_status_without_private_data ... ok
+#15 498.4 test vision::tests::capture_drives_tracking_lost_face_and_disconnect ... ok
+#15 498.4 test vision::tests::config_validates_model_files_and_rejects_git_lfs_pointers ... ok
+#15 498.4 test vision::tests::config_validates_noir_tuning_file_and_awb_gains ... ok
+#15 498.4 test vision::tests::error_rate_limiter_suppresses_bursts_and_reports_suppressed_count ... ok
+#15 498.4 test vision::tests::bad_boxes_are_skipped_without_failing_detection ... ok
+#15 498.4 test vision::tests::gallery_rejects_shared_files_invalid_vectors_and_symlinks ... ok
+#15 498.4 test vision::tests::inference_activity_log_emits_once_per_interval_only_on_valid_inference_without_private_data ... ok
+#15 498.4 test vision::tests::jpeg_is_decoupled_from_engine_mutex_and_avoids_reencoding_same_frame ... ok
+#15 498.4 test vision::tests::gallery_roundtrips_samples_and_forgets_without_storing_photos ... ok
+#15 498.4 test motion::tests::provision_skips_matching_eeprom_and_relocks_after_readback_error ... ok
+#15 498.4 test vision::tests::per_frame_inference_errors_recover_then_stop_at_bounded_limit ... ok
+#15 498.4 test vision::tests::panel_enrolls_only_one_fresh_face_clears_stale_labels_and_loses_access_on_shutdown ... ok
+#15 498.4 test wifi::card::tests::a_damaged_file_is_an_error_not_a_new_password ... ok
+#15 498.4 test vision::tests::recognition_uses_cosine_and_rejects_a_close_but_below_threshold_match ... ok
+#15 498.4 test wifi::card::tests::a_symlink_at_setup_wifi_is_refused ... ok
+#15 498.4 test wifi::card::tests::generated_credentials_differ_per_robot ... ok
+#15 498.4 test wifi::card::tests::credentials_are_created_once_private_and_reused ... ok
+#15 498.4 test wifi::card::tests::the_card_carries_the_network_password_and_a_qr_code ... ok
+#15 498.4 test wifi::card::tests::the_setup_card_command_prints_the_stored_network ... ok
+#15 498.4 test wifi::tests::a_mistyped_password_keeps_the_working_home_network ... ok
+#15 498.4 test wifi::tests::a_proven_join_clears_stale_home_profiles ... ok
+#15 498.5 test wifi::tests::an_unsaved_password_fails_the_join_and_keeps_the_old_profile ... ok
+#15 498.5 test wifi::tests::interface_names_cannot_be_options ... ok
+#15 498.5 test wifi::tests::connected_reads_the_general_state ... ok
+#15 498.5 test wifi::tests::nmcli_never_receives_the_operator_secret ... ok
+#15 498.5 test wifi::tests::only_a_global_route_counts_as_connected ... ok
+#15 498.5 test wifi::tests::passwords_are_escaped_for_passwd_file_and_terse_output ... ok
+#15 498.5 test wifi::tests::rejects_keyfile_injection ... ok
+#15 498.5 test wifi::tests::setup_form_requires_host_origin_and_csrf ... ok
+#15 498.5 test wifi::tests::joining_home_proves_the_new_profile_before_retiring_the_old ... ok
+#15 498.5 test motion::tests::cli_reports_unconfirmed_torque_off_to_stderr_on_finish_error_and_panic ... ok
+#15 498.5 test wifi::tests::the_new_profile_uuid_comes_from_nmcli ... ok
+#15 498.5 test vision::tests::recognition_intervals_distinguish_unchecked_no_match_and_known_and_react_to_forget ... ok
+#15 498.6 test screen::operator::tests::camera_enforces_work_and_viewer_caps_and_closes_when_camera_drops ... ok
+#15 498.6 test screen::operator::tests::operator_requires_local_authenticated_owned_session_on_every_route ... ok
+#15 498.7 test wifi::tests::the_setup_bind_waits_for_its_address ... ok
+#15 498.7 test screen::operator::tests::guarded_camera_and_routes_recover_across_guard_lifetime ... ok
+#15 498.7 test audio::tests::first_audio_tracks_server_latency_and_reuses_the_connection ... ok
+#15 498.8 test guard::tests::a_silent_or_trickling_client_is_disconnected ... ok
+#15 498.9 test device::tests::offline_announcement_reaps_before_online_playback_on_reconnect ... ok
+#15 499.0 test wifi::tests::setup_timeout_cancels_inflight_join_home_cleanly ... ok
+#15 499.2 test wifi::tests::the_hotspot_is_deleted_when_setup_is_abandoned ... ok
+#15 499.3 test motion::tests::center_accepts_reference_tolerance_eight_and_preserves_stall_cutoff ... ok
+#15 499.3 test audio::tests::a_slow_steady_player_takes_a_large_chunk_past_the_deadline ... ok
+#15 499.7 test device::tests::claim_url_is_emitted_once_per_new_url_and_reset_when_owned ... ok
+#15 504.0 test face::tests::a_stalled_port_times_out_without_leaking_threads_and_reopens_raw ... FAILED
+#15 504.0 
+#15 504.0 failures:
+#15 504.0 
+#15 504.0 ---- face::tests::a_stalled_port_times_out_without_leaking_threads_and_reopens_raw stdout ----
+#15 504.0 
+#15 504.0 thread 'face::tests::a_stalled_port_times_out_without_leaking_threads_and_reopens_raw' (16158) panicked at apps/robot/src/face.rs:1340:17:
+#15 504.0 no reopen
+#15 504.0 
+#15 504.0 
+#15 504.0 failures:
+#15 504.0     face::tests::a_stalled_port_times_out_without_leaking_threads_and_reopens_raw
+#15 504.0 
+#15 504.0 test result: FAILED. 251 passed; 1 failed; 2 ignored; 0 measured; 0 filtered out; finished in 6.15s
+#15 504.0 
+#15 504.1 error: test failed, to rerun pass `-p robot-buddy-robot --bin robot-buddy-robot`
+#15 ERROR: process "/bin/sh -c /usr/local/bin/arm64-matrix-check trixie \"$CARGO_JOBS\" \"$SOURCE_SHA\" \"$EXPECTED_TREE_HASH\"" did not complete successfully: exit code: 101
+------
+ > [trixie-gate 1/1] RUN --mount=type=cache,id=arm64-matrix-cargo-registry,target=/usr/local/cargo/registry,sharing=locked     --mount=type=cache,id=arm64-matrix-trixie-target,target=/src/target,sharing=locked     /usr/local/bin/arm64-matrix-check trixie "2" "b960f1c1e2202cab1a2802d3513779ef08881b5d" "dcbcb88569e1ec1655b3b9d88a9c8d2a8107fcf393695c1d6baa6e12d2465189":
+504.0 thread 'face::tests::a_stalled_port_times_out_without_leaking_threads_and_reopens_raw' (16158) panicked at apps/robot/src/face.rs:1340:17:
+504.0 no reopen
+504.0 
+504.0 
+504.0 failures:
+504.0     face::tests::a_stalled_port_times_out_without_leaking_threads_and_reopens_raw
+504.0 
+504.0 test result: FAILED. 251 passed; 1 failed; 2 ignored; 0 measured; 0 filtered out; finished in 6.15s
+504.0 
+504.1 error: test failed, to rerun pass `-p robot-buddy-robot --bin robot-buddy-robot`
+------
+arm64-matrix.Dockerfile:92
+--------------------
+  91 |     ARG EXPECTED_TREE_HASH=skip
+  92 | >>> RUN --mount=type=cache,id=arm64-matrix-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
+  93 | >>>     --mount=type=cache,id=arm64-matrix-trixie-target,target=/src/target,sharing=locked \
+  94 | >>>     /usr/local/bin/arm64-matrix-check trixie "$CARGO_JOBS" "$SOURCE_SHA" "$EXPECTED_TREE_HASH"
+  95 |     
+--------------------
+ERROR: failed to build: failed to solve: process "/bin/sh -c /usr/local/bin/arm64-matrix-check trixie \"$CARGO_JOBS\" \"$SOURCE_SHA\" \"$EXPECTED_TREE_HASH\"" did not complete successfully: exit code: 101
+
+View build details: docker-desktop://dashboard/build/desktop-linux/desktop-linux/u93cm3m4jflya7eq4k52fn43x

@@ -70,6 +70,8 @@ pub enum Control {
     Say(String),
     /// The wake word fired: stop talking, cancel the turn, show listening.
     Wake,
+    /// Stop the active turn and rest the neck/eyes until addressed.
+    Sleep,
     /// Show (true) or clear (false) the listening face without an utterance.
     Listening(bool),
     /// Mute stops playback and suppresses automatic speech until unmuted.
@@ -129,6 +131,7 @@ pub fn parse(line: &[u8]) -> Result<Control, Rejected> {
     match (key.as_str(), value) {
         ("say", Value::String(text)) => utterance(text.trim()).map(Control::Say),
         ("wake", Value::Bool(true)) => Ok(Control::Wake),
+        ("sleep", Value::Bool(true)) => Ok(Control::Sleep),
         ("listening", Value::Bool(on)) => Ok(Control::Listening(on)),
         ("mute", Value::Bool(on)) => Ok(Control::Mute(on)),
         ("confirm", Value::String(code)) => confirm_code(&code).map(Control::Confirm),
@@ -281,7 +284,7 @@ struct WriterSlot(Arc<AtomicUsize>);
 impl WriterSlot {
     fn claim(writers: &Arc<AtomicUsize>) -> Option<Self> {
         let claimed = writers
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
                 (n < MAX_WRITERS).then_some(n + 1)
             })
             .is_ok();
@@ -307,15 +310,31 @@ impl Input {
     /// Read `reader` on a detached OS thread, plus the control socket or FIFO
     /// named by `BUDDY_CONTROL_SOCKET` when it is set. Threads hold no state
     /// that needs cleanup, so process exit may end them mid-read.
+    #[cfg(test)]
     pub fn spawn<R: BufRead + Send + 'static>(reader: R) -> std::io::Result<Self> {
         Self::open(reader, control_source().as_ref())
     }
 
+    /// Built-in microphone and optional control-socket clients share ordering and backpressure.
+    pub fn with_microphone<R: BufRead + Send + 'static>(
+        reader: R,
+    ) -> std::io::Result<(Self, mpsc::Sender<Control>)> {
+        Self::sources(reader, control_source().as_ref())
+    }
+
     /// Read `stdin`, and also the control socket or FIFO at `control` when given.
+    #[cfg(test)]
     pub fn open<R: BufRead + Send + 'static>(
-        mut stdin: R,
+        stdin: R,
         control: Option<&ControlSource>,
     ) -> std::io::Result<Self> {
+        Self::sources(stdin, control).map(|(input, _)| input)
+    }
+
+    fn sources<R: BufRead + Send + 'static>(
+        mut stdin: R,
+        control: Option<&ControlSource>,
+    ) -> std::io::Result<(Self, mpsc::Sender<Control>)> {
         let (tx, commands) = mpsc::channel(16);
         if let Some(control) = control {
             let path = &control.path;
@@ -326,13 +345,17 @@ impl Input {
                 listen(control, tx.clone())?;
             }
         }
+        let local = tx.clone();
         thread("control-input", move || {
             pump(&mut stdin, &tx, Tail::Keep);
         })?;
-        Ok(Self {
-            commands,
-            open: true,
-        })
+        Ok((
+            Self {
+                commands,
+                open: true,
+            },
+            local,
+        ))
     }
 
     pub async fn next(&mut self) -> Control {
