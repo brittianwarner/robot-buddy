@@ -28,8 +28,8 @@ Nothing from butty is copied into this repository ([NOTICE.md](NOTICE.md)).
 
 This is the only question that needs Brittian. Everything else in this guide comes from this repository, your butty checkout, or your own Pip.
 
-- **Run your own backend (simplest for bring-up).** You need nothing from Brittian. You need a domain and a public-CA certificate for two names ([TLS in front of the server](#tls-in-front-of-the-server) has a Caddy recipe). Run `init` fresh in §1, point the two HTTPS names at a TLS proxy in front of `:8080` (`BUDDY_PUBLIC_URL`) and `:6420` (`BUDDY_PUBLIC_RIVET_URL`), and set up OIDC (below).
-- **Reuse Brittian's running backend.** Ask Brittian for access to the host that runs the container, its `secrets/secrets.env`, the issuer key used to provision robots, the `/data` volume, DNS and TLS for the two public origins, and the OIDC app already registered for it. Do not run `init` against that deployment: it would replace its secrets.
+- **Run your own backend.** You need a domain and a public-CA certificate for two names ([TLS in front of the server](#tls-in-front-of-the-server) has a Caddy recipe). Run `init` fresh in §1, point the two HTTPS names at a TLS proxy in front of `:8080` (`BUDDY_PUBLIC_URL`) and `:6420` (`BUDDY_PUBLIC_RIVET_URL`), and set up OIDC (below).
+- **Reuse Brittian's running backend.** Brittian runs `provision` with his issuer key and sends you two things: this robot's device identity file, privately (it holds the robot's private key), and his two public URLs, `BUDDY_PUBLIC_URL` (registration) and `BUDDY_PUBLIC_RIVET_URL` (Rivet). His OIDC is already configured, so you claim by signing in through his provider. On the Pi, set `BUDDY_SERVER_URL` to his `BUDDY_PUBLIC_URL` and install the identity file (§3); those are the only two values the robot reads for its server (`apps/robot/src/config.rs`, [infra/device.env.example](infra/device.env.example)). The robot learns the Rivet URL from the server at enrollment, so you need it only to check that the Pi can reach it. You need no access to his host and never the issuer key. Skip §1, and do not run `init` or `provision` yourself.
 
 **Set up OIDC owner sign-in before bring-up.** The server starts with `OIDC_ISSUER` empty (`apps/server/src/config.rs`), and Pip still enrolls and connects. But then nobody can claim the robot, and an unclaimed Pip does not talk or open its operator panel:
 
@@ -44,7 +44,7 @@ Several §4 and §5 checks need the operator panel or a reply, so OIDC is part o
 
 **Web search is optional.** Create your own Brave Search API key at <https://brave.com/search/api/> and set `BRAVE_SEARCH_API_KEY=<your-brave-key>`; without it the web-search tool is off.
 
-Not needed from Brittian: the hardware (you have it), butty, its firmware and `hey_pip.onnx` (Gage manages butty access), the OpenRouter key (you create it) and ElevenLabs (spoken replies go through OpenRouter on the same key). An animated architecture walkthrough and the full soak report exist outside this repository; neither is needed to bring up Pip.
+An animated architecture walkthrough and the full soak report exist outside this repository; neither is needed to bring up Pip.
 
 ### Confirm on your Pip
 
@@ -113,6 +113,8 @@ GND: buck A, buck B, ESP32, ring and ear servos all share ground
 - Rev-1 fit issues, including the head hitting a stop at about +21.5° pitch-up (butty's software limit is +20°), are in butty `REV2.md`. Measure your own build's limits (§4).
 
 ## 1. Bring up the backend and issue one device identity
+
+Reusing Brittian's backend? Skip this section: you already have the identity file and the URLs (§0).
 
 On the trusted provisioning machine, from the repository root, with the [pinned Rust toolchain](rust-toolchain.toml):
 
