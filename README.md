@@ -62,7 +62,26 @@ How one turn works:
 
 Actor ownership: **Bot** owns identity and ownership, **Conversation** owns the transcript and the Rig run, and **Memory** owns facts. Details: [backend architecture](docs/architecture/backend.md), [robot client](docs/architecture/robot-client.md), [voice](docs/architecture/voice.md).
 
-**Walkthrough.** An animated architecture walkthrough ("How one Pip turn works", with an MP4) exists outside this repo. Ask Brittian for it. The diagram and steps above match it and the code. The walkthrough shows only OpenRouter for inference. The code also accepts an OpenAI-compatible endpoint.
+**Walkthrough.** An animated architecture walkthrough ("How one Pip turn works", with an MP4) exists outside this repo. The diagram and steps above match it and the code. The walkthrough shows only OpenRouter for inference. The code also accepts an OpenAI-compatible endpoint.
+
+## butty and robot-buddy
+
+Pip started as **butty**, ToschLogic's repository at <https://github.com/ToschLogic/butty> (Gage manages access). butty holds Pip's CAD, the ESP32-S3 face firmware, the wiring and the original Python brain. robot-buddy keeps butty's hardware and firmware and replaces the software on the Pi. Comparisons below are against butty at commit `c0ca680`.
+
+| | butty | robot-buddy |
+| --- | --- | --- |
+| On-robot code | `brain/`, Python 3.11+, one systemd service `pip.service` | The Rust robot client `apps/robot` (`robot-buddy-robot`), one systemd service `robot-buddy.service` |
+| Wake word | openWakeWord with a custom-trained "Hey Pip" model (`SPEC.md`). `brain/config.yaml` ships `wake_engine: transcript` and recommends openWakeWord on the Pi | Built-in energy VAD, then a whisper transcript that starts with "Hey Pip", "Hi Pip" or "Pip". Optional in-process neural wake: ONNX Runtime (loaded through `ORT_DYLIB_PATH`) runs the openWakeWord frontend and butty's `hey_pip.onnx`, Cargo feature `onnx-wake`. Only neural wake can barge in |
+| Speech to text | Moonshine, with whisper.cpp as a fallback (`SPEC.md`). `brain/config.yaml` ships `stt: whispercpp` | Built-in energy VAD and whisper.cpp only, as a separate `whisper-cli` process |
+| Thinking | LiteLLM, on the Pi. OpenAI Codex by default; Anthropic, Gemini and Ollama can be swapped in | A separate server: `robot-buddy-server` and Rivet actors (`crates/buddy`) running a [Rig](https://github.com/0xPlaygrounds/rig) agent. OpenRouter by default, or `AI_PROVIDER=openai_compatible` |
+| Speech output | Piper, local, pitched up | OpenRouter `elevenlabs/eleven-v4-turbo`, streamed as PCM from the server's `/v1/speech` to `aplay`. Piper is used only for an optional fixed offline announcement, with butty's pitch-up coloring |
+| Vision | picamera2 → OpenCV YuNet detection and SFace recognition, in Python | `rpicam-vid` → in-process OpenCV YuNet and optional SFace, Cargo feature `pi-vision` |
+| Web page | Built-in stdlib HTTP server, key-protected, on `0.0.0.0:8080` by default: camera, log, controls, people, Wi-Fi setup | Loopback-only pages on the Pi: the claim panel (`127.0.0.1:8090`) and the token-protected operator console (`127.0.0.1:8091`, reached over an SSH tunnel). On the server, the optional `/lab` workbench |
+| Face firmware | `firmware/` (PlatformIO, C++) | Uses butty's firmware unchanged, over the same JSON-lines protocol at 115200 ([DEPLOYMENT.md §4](DEPLOYMENT.md#face-and-neck)) |
+
+Both run the neck at 50 Hz, show Wi-Fi setup QR codes on the eyes when offline, and keep face recognition on the device. Run only one of them: stop butty's `pip.service` before you install robot-buddy.
+
+**Operating system.** Brittian's spec sheet and butty's `brain/README.md` name Raspberry Pi OS **Bookworm**. The robot binary that passed the 30-minute soak was built with the **Trixie** recipe, and the ARM64 toolchain matrix validated both Bookworm and Trixie ([evidence](infra/toolchain-validation.md)). A Trixie binary does not run on Bookworm. [DEPLOYMENT.md §2](DEPLOYMENT.md#2-build-the-linux-arm64-binary) says which binary to install for each, and how to check the soaked binary's SHA-256 (`be7cae4e42fda047f857d327af875e0dbf91b54af3a8076df84080e802e2768b`, GNU BuildID `c15c88b7594bd0919c5a0bf78609c2b01c6162e9`).
 
 ## Repository map
 
@@ -112,7 +131,7 @@ DEVICE_ISSUER_PUBLIC_KEY=<from secrets/secrets.env>
 BUDDY_PUBLIC_URL=https://buddy.example.com          # registration origin, through your TLS proxy to :8080
 BUDDY_PUBLIC_RIVET_URL=https://rivet.buddy.example.com  # Rivet origin incl. WebSockets, to :6420
 AI_PROVIDER=openrouter                              # or openai_compatible
-AI_API_KEY=<your-openrouter-key>
+AI_API_KEY=<your-openrouter-key>                    # create it at https://openrouter.ai/keys
 AI_MODEL=<model id, e.g. the validated z-ai/glm-5.3-flash:nitro>
 TTS_MODEL=elevenlabs/eleven-v4-turbo                # optional; enables spoken replies, uses the OpenRouter key
 OIDC_ISSUER=<https issuer URL>                      # optional; needed to claim a robot
@@ -141,12 +160,12 @@ Every variable is described in [.env.example](.env.example). To try a robot with
 
 Follow **[DEPLOYMENT.md](DEPLOYMENT.md)** from top to bottom. It covers the hardware and wiring, face firmware, getting the ARM64 binary (including the exact soaked ELF), models and checksums, systemd install, enrollment and the OIDC claim, the bring-up checklist with pass thresholds, troubleshooting and rollback.
 
-Get these from Brittian before you start: access to the private butty repo (face firmware, CAD, hardware notes), the private `hey_pip.onnx` wake model, the walkthrough video, and the accounts and credentials the server needs (OpenRouter key, OIDC client).
+Before you start, read [DEPLOYMENT.md §0](DEPLOYMENT.md#0-what-you-need-before-you-start). It lists what comes from your butty checkout (face firmware, `hey_pip.onnx`, hardware reference), what you create yourself (an OpenRouter key at <https://openrouter.ai/keys>, in `AI_API_KEY`), what Gage must get from Brittian (OIDC client credentials; server hosting, domain and TLS access; a Brave Search key if Brittian holds one), and the open "Check with Brittian" items.
 
 ## More
 
 - [docs/README.md](docs/README.md): index of every doc
 - [AGENTS.md](AGENTS.md): rules and commands for contributors and coding agents (tests, `check:all`, E2E, soak, ARM64 matrix, bench)
-- [NOTICE.md](NOTICE.md): provenance (butty, ToschLogic) and third-party licences
+- [NOTICE.md](NOTICE.md): provenance (ToschLogic's butty) and third-party licences
 - [CHANGELOG.md](CHANGELOG.md): what the Pip port changed and its validation status
 - [LICENSE](LICENSE): MIT, for this repository's own code only. See NOTICE.md for the rest
