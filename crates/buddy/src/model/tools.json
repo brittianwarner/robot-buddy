@@ -301,5 +301,22 @@
         "additionalProperties": false
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "express",
+      "description": "Offer one optional face expression and gesture on this turn, e.g. when asked to nod or dance. Use this tool, never inline mood tags or spoken stage directions. No device acknowledgement; do not claim the robot moved.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "emotion": {"type": "string", "enum": ["neutral", "happy", "curious", "thinking", "surprised", "sad", "angry", "sleepy", "love", "asleep"]},
+          "intensity": {"type": "number", "minimum": 0, "maximum": 1},
+          "gesture": {"type": "string", "enum": ["blink", "ear_wiggle", "nod", "shake", "tilt", "look_around", "dance"]}
+        },
+        "required": ["emotion", "intensity"],
+        "additionalProperties": false
+      }
+    }
   }
 ]

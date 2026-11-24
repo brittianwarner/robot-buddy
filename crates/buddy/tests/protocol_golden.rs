@@ -259,9 +259,10 @@ fn action_envelope_and_connection_params_are_pinned() {
 }
 
 /// Every output event kind the actor emits. The fixtures are captured from real turns by
-/// `actors.rs::output_events_match_their_golden_fixtures` (and the restart test for
-/// `turn.interrupted`), not built here, so they show what a robot actually receives.
-const OUTPUT_EVENTS: [&str; 9] = [
+/// `actors.rs::output_events_match_their_golden_fixtures`, the interrupted-turn restart
+/// test and the live-only expression test. They show what a robot actually receives.
+const OUTPUT_EVENTS: [&str; 10] = [
+    "face_express",
     "turn_started",
     "text_delta",
     "speech_ready",
@@ -332,6 +333,38 @@ fn speech_ready_carries_only_the_sentence_index() {
         .collect();
     assert_eq!(keys, ["index"], "{event}");
     assert!(event["payload"]["index"].is_u64(), "{event}");
+}
+
+#[test]
+fn expression_reader_ignores_future_fields_but_never_moves_on_unknown_or_invalid_cues() {
+    use robot_buddy::protocol::{Emotion, ExpressionCue, Gesture};
+
+    let mut event: OutputEvent =
+        serde_json::from_value(read_fixture("output_event.face_express")).unwrap();
+    let expected = ExpressionCue {
+        emotion: Emotion::Happy,
+        intensity: 0.75,
+        gesture: Some(Gesture::Nod),
+    };
+    assert_eq!(event.expression(), Some(expected));
+    event.payload["added_later"] = json!(42);
+    assert_eq!(event.expression(), Some(expected));
+    // Model writes, unlike client reads, may not smuggle free-form/private fields.
+    assert!(robot_buddy::protocol::strict_value::<ExpressionCue>(&event.payload).is_err());
+    for invalid in [
+        json!({}),
+        json!({"emotion":"happy","intensity":1.000_000_001}),
+        json!({"emotion":"happy","intensity":-1}),
+        json!({"emotion":"other","intensity":0}),
+        json!({"emotion":"happy","intensity":1,"gesture":"custom"}),
+    ] {
+        event.payload = invalid;
+        assert_eq!(event.expression(), None);
+    }
+    event.payload = json!({"emotion":"happy","intensity":0});
+    assert!(event.expression().is_some_and(|cue| cue.gesture.is_none()));
+    event.kind = "text.delta".into();
+    assert_eq!(event.expression(), None);
 }
 
 #[test]

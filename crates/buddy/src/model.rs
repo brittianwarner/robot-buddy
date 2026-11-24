@@ -320,6 +320,26 @@ mod tests {
         assert!(!first.is_empty());
     }
     #[test]
+    fn express_schema_names_match_the_device_wire_names() {
+        use crate::protocol::{Emotion, Gesture};
+
+        let tool = tools()
+            .unwrap()
+            .iter()
+            .find(|t| t.name == "express")
+            .unwrap();
+        let fields = &tool.parameters["properties"];
+        for name in fields["emotion"]["enum"].as_array().unwrap() {
+            let emotion: Emotion = serde_json::from_value(name.clone()).unwrap();
+            assert_eq!(emotion.as_str(), name.as_str().unwrap());
+        }
+        for name in fields["gesture"]["enum"].as_array().unwrap() {
+            let gesture: Gesture = serde_json::from_value(name.clone()).unwrap();
+            assert_eq!(gesture.as_str(), name.as_str().unwrap());
+        }
+    }
+
+    #[test]
     fn catalog_holds_every_tool_with_the_voice_schema() {
         let tools = catalog().unwrap();
         let names: Vec<_> = tools
@@ -343,6 +363,7 @@ mod tests {
                 "web_search",
                 "memory_remember",
                 "memory_forget",
+                "express",
             ]
         );
         let schema = crate::voice::schema();
