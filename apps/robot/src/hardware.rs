@@ -1,0 +1,204 @@
+//! Process-owned hardware lifecycle. Only semantic cues and transcripts cross the
+//! session boundary; camera frames and the recognition gallery stay on Pip.
+use crate::{
+    config::Settings,
+    face::{Face, FaceGesture},
+    input, listen,
+    motion::{Motion, MotionInput},
+    piper::OfflineVoice,
+    screen::operator::{Control, Hardware},
+    vision,
+};
+use anyhow::{Context, Result, bail};
+use robot_buddy::protocol::{ExpressionCue, Gesture};
+use std::{path::PathBuf, sync::Arc, time::Duration};
+use tokio::{
+    sync::{mpsc, watch},
+    task::JoinSet,
+};
+
+#[derive(Clone, Default)]
+pub struct Peripherals {
+    pub motion: Option<MotionInput>,
+    pub listen: Option<watch::Sender<listen::State>>,
+    pub piper: Option<OfflineVoice>,
+}
+
+pub struct Devices {
+    pub panel: Arc<Panel>,
+    pub controller: Peripherals,
+    // Aborting the camera and microphone tasks closes their child processes;
+    // dropping Motion stops the servo worker and disables torque.
+    _tasks: JoinSet<()>,
+    _neck: Option<Motion>,
+}
+
+impl Devices {
+    pub fn start(
+        settings: &Settings,
+        face: &Face,
+        microphone: mpsc::Sender<input::Control>,
+    ) -> Result<Self> {
+        let mut tasks = JoinSet::new();
+        let mut controller = Peripherals::default();
+        let camera = vision::Panel::default();
+        let (recognized, last_match) = watch::channel(None);
+        let neck = if settings.simulate {
+            None
+        } else {
+            let env_path = |key| {
+                std::env::var_os(key)
+                    .filter(|s| !s.is_empty())
+                    .map(PathBuf::from)
+            };
+            match (
+                env_path("BUDDY_SERVO_PORT"),
+                env_path("BUDDY_SERVO_CALIBRATION"),
+            ) {
+                (Some(port), Some(calibration)) => {
+                    if let Some(face_port) = &settings.face_serial
+                        && std::fs::canonicalize(face_port)
+                            .ok()
+                            .is_some_and(|f| std::fs::canonicalize(&port).ok().as_ref() == Some(&f))
+                    {
+                        bail!("face and neck require different serial ports");
+                    }
+                    Some(Motion::start(&port, &calibration)?)
+                }
+                (None, None) => None,
+                _ => bail!("set both BUDDY_SERVO_PORT and BUDDY_SERVO_CALIBRATION"),
+            }
+        };
+        controller.motion = neck.as_ref().map(Motion::input);
+        if !settings.simulate {
+            if settings.speech {
+                controller.piper =
+                    OfflineVoice::from_lookup(&|k| std::env::var(k).ok(), settings.player.clone())?;
+            }
+            if let Some(config) = listen::Config::from_env()? {
+                let (tx, rx) = watch::channel(listen::State::default());
+                controller.listen = Some(tx);
+                tasks.spawn(async move {
+                    listen::run(config, microphone, rx).await;
+                });
+            }
+            if let Some(config) = vision::Config::from_env()? {
+                let (face, tracking, camera) =
+                    (face.clone(), controller.motion.clone(), camera.clone());
+                tasks.spawn(async move {
+                    let result =
+                        vision::run(config, camera, move |observation: vision::Observation| {
+                            if let Some(name) = observation.person {
+                                recognized.send_replace(Some((std::time::Instant::now(), name)));
+                            } else if observation.target.is_none() {
+                                recognized.send_replace(None);
+                            }
+                            let target = observation.target.unwrap_or((0., 0.));
+                            face.gaze(target.0, target.1);
+                            if let Some((x, y)) = observation.target
+                                && let Some(motion) = &tracking
+                            {
+                                motion.track(x, y);
+                            }
+                        })
+                        .await;
+                    if let Err(error) = result {
+                        tracing::warn!(%error,"camera stopped");
+                    }
+                });
+            }
+        }
+        let panel = Arc::new(Panel {
+            face: face.clone(),
+            motion: controller.motion.clone(),
+            camera,
+            last_match,
+        });
+        Ok(Self {
+            panel,
+            controller,
+            _neck: neck,
+            _tasks: tasks,
+        })
+    }
+}
+
+pub fn apply(face: &Face, motion: Option<&MotionInput>, cue: ExpressionCue) {
+    face.express(cue.emotion, cue.intensity);
+    if let Some(neck) = motion {
+        neck.express(cue.emotion.as_str(), cue.intensity);
+    }
+    if let Some(g) = cue.gesture {
+        gesture(face, motion, g, cue.intensity);
+    }
+}
+
+fn gesture(face: &Face, motion: Option<&MotionInput>, g: Gesture, i: f32) {
+    match g {
+        Gesture::Blink => face.gesture(FaceGesture::Blink),
+        Gesture::EarWiggle => face.gesture(FaceGesture::EarWiggle),
+        other => {
+            if let Some(neck) = motion {
+                neck.gesture(other.as_str(), i);
+            }
+        }
+    }
+}
+
+pub struct Panel {
+    face: Face,
+    motion: Option<MotionInput>,
+    camera: vision::Panel,
+    last_match: watch::Receiver<Option<(std::time::Instant, String)>>,
+}
+impl Hardware for Panel {
+    fn control(&self, cmd: Control) -> Result<()> {
+        let neck = || self.motion.as_ref().context("neck disabled");
+        match cmd {
+            Control::Pose { yaw, pitch, roll } => {
+                neck()?.manual([yaw, pitch, roll], Duration::from_secs(5));
+            }
+            Control::Release => neck()?.release(),
+            Control::Gesture(name) => {
+                let g = serde_json::from_value(name.into())?;
+                if !matches!(g, Gesture::Blink | Gesture::EarWiggle) {
+                    neck()?;
+                }
+                gesture(&self.face, self.motion.as_ref(), g, 1.);
+            }
+            Control::Emotion(name) => apply(
+                &self.face,
+                self.motion.as_ref(),
+                ExpressionCue {
+                    emotion: serde_json::from_value(name.into())?,
+                    intensity: 1.,
+                    gesture: None,
+                },
+            ),
+            Control::Enroll(name) => self.camera.enroll(&name)?,
+            Control::Forget(name) => self.camera.forget(&name)?,
+        }
+        Ok(())
+    }
+    fn jpeg(&self) -> Result<Option<Vec<u8>>> {
+        self.camera.jpeg()
+    }
+    fn people(&self) -> Result<Vec<String>> {
+        self.camera.people()
+    }
+    fn recognized(&self) -> Result<Option<String>> {
+        Ok(self
+            .last_match
+            .borrow()
+            .as_ref()
+            .filter(|(at, _)| at.elapsed() < Duration::from_secs(2))
+            .map(|(_, name)| name.clone()))
+    }
+    fn wifi_eyes(&self, pair: Option<(&str, &str)>) {
+        let (left, right) = pair.unwrap_or_default();
+        if self.face.qr(left, right, 180).is_err() {
+            let _ = self.face.qr("", "", 180);
+            tracing::warn!("Wi-Fi codes exceed face board capacity");
+        }
+    }
+}

@@ -234,6 +234,10 @@ enum Main {
 )]
 pub struct Controller<'a, S> {
     face: &'a Face,
+    pub peripherals: crate::hardware::Peripherals,
+    offline_voice: tokio::task::JoinSet<()>,
+    rest_after: Instant,
+    rest: Option<Mood>,
     store: &'a CacheStore,
     state: &'a mut RobotState,
     journal: Journal,
@@ -276,6 +280,10 @@ impl<'a, S: Speaker> Controller<'a, S> {
     ) -> Self {
         let mut controller = Self {
             face,
+            peripherals: crate::hardware::Peripherals::default(),
+            offline_voice: tokio::task::JoinSet::new(),
+            rest_after: Instant::now() + Duration::from_mins(5),
+            rest: None,
             store,
             state,
             journal,
@@ -401,7 +409,35 @@ impl<'a, S: Speaker> Controller<'a, S> {
     }
 
     pub async fn control(&mut self, control: Control) {
+        if matches!(
+            control,
+            Control::Wake | Control::Say(_) | Control::Listening(true)
+        ) {
+            self.rest = None;
+            self.rest_after = Instant::now() + Duration::from_mins(5);
+        }
+        if !matches!(control, Control::Listening(false)) {
+            self.offline_voice.abort_all();
+        }
+        if matches!(
+            control,
+            Control::Wake | Control::Say(_) | Control::Mute(true)
+        ) {
+            self.end_cue();
+        }
         match control {
+            Control::Sleep => {
+                self.end_cue();
+                self.interrupt(None);
+                self.playing = None;
+                self.state.listening = false;
+                self.rest = Some(Mood::Asleep);
+                if let Some(neck) = &self.peripherals.motion {
+                    neck.express("asleep", 1.);
+                }
+                self.refresh();
+                self.stop_speaker(Rewarm::No).await;
+            }
             Control::Wake => {
                 self.state.listening = true;
                 self.playing = None;
@@ -536,6 +572,13 @@ impl<'a, S: Speaker> Controller<'a, S> {
     /// submitted waits for the server's answer instead), and stop a speech
     /// request that stayed silent past [`FIRST_AUDIO`].
     pub async fn expire(&mut self, now: Instant) {
+        if self.rest_deadline().is_some_and(|at| now >= at) {
+            self.rest = Some(Mood::Resting);
+            if let Some(neck) = &self.peripherals.motion {
+                neck.express("sleepy", 0.9);
+            }
+            self.refresh();
+        }
         self.silent_speech(now).await;
         let Some(born) = self.pending_born else {
             return;
@@ -580,7 +623,23 @@ impl<'a, S: Speaker> Controller<'a, S> {
             .persist_retry_at
             .filter(|_| self.persist_wanted && !self.persist_inflight);
         let audio = self.voice.as_ref().and_then(|v| v.first_audio_by);
-        expiry.into_iter().chain(retry).chain(audio).min()
+        expiry
+            .into_iter()
+            .chain(retry)
+            .chain(audio)
+            .chain(self.rest_deadline())
+            .min()
+    }
+
+    fn rest_deadline(&self) -> Option<Instant> {
+        (self.online
+            && self.rest.is_none()
+            && !self.is_live()
+            && self.state.cache.pending.is_none()
+            && !self.claiming
+            && !self.state.muted
+            && !self.state.listening)
+            .then_some(self.rest_after)
     }
 
     /// The pending utterance is being given up. If a submit for it went out
@@ -833,6 +892,14 @@ impl<'a, S: Speaker> Controller<'a, S> {
             return;
         }
         if event.sequence == cursor + 1 {
+            if self.online
+                && !self.state.muted
+                && !self.state.listening
+                && self.live_turn.as_deref() == Some(event.turn_id.as_str())
+                && let Some(cue) = event.expression()
+            {
+                crate::hardware::apply(self.face, self.peripherals.motion.as_ref(), cue);
+            }
             self.apply(event).await;
         } else {
             self.needs_replay = true;
@@ -858,6 +925,7 @@ impl<'a, S: Speaker> Controller<'a, S> {
             match kind {
                 "turn.completed" => self.live_turn = None,
                 "turn.cancelled" | "turn.failed" | "turn.interrupted" => {
+                    self.end_cue();
                     self.live_turn = None;
                     self.voice = None;
                     self.playing = None;
@@ -939,6 +1007,7 @@ impl<'a, S: Speaker> Controller<'a, S> {
 
     /// A new session is up: speak through its speaker and catch up.
     pub fn go_online(&mut self, speaker: S, events: mpsc::Receiver<PlaybackEvent>) {
+        self.offline_voice.abort_all();
         self.online = true;
         self.out = Some(Out { speaker, events });
         self.next_out = None;
@@ -960,6 +1029,8 @@ impl<'a, S: Speaker> Controller<'a, S> {
 
     /// The connection is gone. Recorded intents stay for the next one.
     pub async fn go_offline(&mut self) {
+        self.end_cue();
+        let announce = self.online && !self.state.muted && !self.state.listening;
         self.online = false;
         self.playing = None;
         self.live_turn = None;
@@ -971,9 +1042,18 @@ impl<'a, S: Speaker> Controller<'a, S> {
             out.speaker.stop(Rewarm::No).await;
         }
         self.next_out = None;
+        if announce && let Some(voice) = self.peripherals.piper.clone() {
+            while self.offline_voice.try_join_next().is_some() {}
+            self.offline_voice.spawn(async move {
+                if let Err(error) = voice.announce().await {
+                    tracing::warn!(%error,"offline voice unavailable");
+                }
+            });
+        }
     }
 
     pub async fn shutdown(&mut self) {
+        self.offline_voice.abort_all();
         self.online = false;
         self.playing = None;
         self.face.set(Mood::Offline);
@@ -988,17 +1068,45 @@ impl<'a, S: Speaker> Controller<'a, S> {
         // A claim waiting for the spoken code has its own face. Like Thinking
         // it still shows the apology for a refused code.
         let confirming = self.online && self.claiming;
+        if let Some(listen) = &self.peripherals.listen {
+            let state = crate::listen::State {
+                busy: thinking || speaking,
+                confirming,
+                muted: self.state.muted,
+            };
+            listen.send_if_modified(|old| {
+                if *old == state {
+                    false
+                } else {
+                    *old = state;
+                    true
+                }
+            });
+        }
         // Mute, listening and audio already playing show without a
         // connection; only an otherwise idle robot reads Offline.
         let connected = self.online || self.state.muted || self.state.listening || speaking;
-        self.face.set(face::mood(Signals {
+        let mood = face::mood(Signals {
             connected,
             muted: self.state.muted,
             listening: self.state.listening,
             speaking,
             thinking,
             confirming,
-        }));
+        });
+        self.face.set(if mood == Mood::Idle {
+            self.rest.unwrap_or(mood)
+        } else {
+            mood
+        });
+    }
+
+    fn end_cue(&self) {
+        self.face.clear_expression();
+        if let Some(neck) = &self.peripherals.motion {
+            neck.gesture("none", 0.);
+            neck.express("neutral", 0.);
+        }
     }
 }
 
@@ -1614,6 +1722,47 @@ pub mod tests {
         drop(c);
         assert_eq!(rig.log.count("start"), 0);
         assert_eq!(rig.log.count("cancel turn-first"), 1);
+    }
+
+    #[tokio::test]
+    async fn only_live_contiguous_cues_for_our_turn_move_the_face() {
+        use robot_buddy::protocol::{Emotion, FACE_EXPRESS};
+        let mut rig = Rig::new();
+        let remote = rig.server.clone();
+        let face = rig.face.clone();
+        let mut c = rig.controller();
+        c.control(Control::Say("hello".into())).await;
+        drive(&mut c, &remote).await.unwrap();
+        let cue = |seq, turn: &str| {
+            let mut e = event(seq, turn, FACE_EXPRESS);
+            e.payload = serde_json::json!({"emotion":"love","intensity":0.6,"gesture":"blink"});
+            e
+        };
+        c.apply(cue(1, "turn-hello")).await; // the replay path, even with an actionable body
+        c.pushed(cue(3, "turn-hello")).await; // gap
+        c.pushed(cue(2, "other")).await;
+        assert_eq!(face.override_emotion(), None);
+        c.pushed(cue(3, "turn-hello")).await;
+        assert_eq!(face.override_emotion(), Some(Emotion::Love));
+        c.control(Control::Wake).await;
+        c.pushed(cue(3, "turn-hello")).await;
+        c.pushed(cue(4, "turn-hello")).await;
+        assert_eq!(face.override_emotion(), None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_rest_and_explicit_sleep_end_on_wake() {
+        let mut rig = Rig::new();
+        let face = rig.face.clone();
+        let mut c = rig.controller();
+        c.expire(Instant::now() + Duration::from_secs(301)).await;
+        assert_eq!(face.steady(), Mood::Resting);
+        c.control(Control::Sleep).await;
+        assert_eq!(face.steady(), Mood::Asleep);
+        c.control(Control::Wake).await;
+        assert_eq!(face.steady(), Mood::Listening);
+        c.control(Control::Listening(false)).await;
+        assert_eq!(face.steady(), Mood::Idle);
     }
 
     #[tokio::test]

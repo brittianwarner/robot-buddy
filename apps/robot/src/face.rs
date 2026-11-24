@@ -41,20 +41,7 @@ const OPEN_DEADLINE: Duration = Duration::from_secs(2);
 const STALLED_OPEN_RETRY: Duration = Duration::from_secs(15);
 pub const SORRY: Duration = Duration::from_millis(1500);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Expression {
-    Neutral,
-    Happy,
-    Thinking,
-    Curious,
-    Surprised,
-    Angry,
-    Love,
-    Asleep,
-    Sad,
-    Sleepy,
-}
+pub use robot_buddy::protocol::Emotion as Expression;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -109,11 +96,13 @@ pub enum Mood {
     /// An owner signed in on their phone; the robot waits for them to speak
     /// the six-digit code it shows them.
     Confirming,
+    Resting,
+    Asleep,
 }
 
 impl Mood {
     /// In discriminant order: `frame` indexes it by `self as usize`.
-    const ALL: [Self; 8] = [
+    const ALL: [Self; 10] = [
         Self::Offline,
         Self::Idle,
         Self::Listening,
@@ -122,6 +111,8 @@ impl Mood {
         Self::Muted,
         Self::Sorry,
         Self::Confirming,
+        Self::Resting,
+        Self::Asleep,
     ];
 
     pub fn commands(self) -> Vec<FaceCommand> {
@@ -137,6 +128,8 @@ impl Mood {
             // Listening for the owner's code, glad to meet them: the LED asks
             // for speech, the expression tells it apart from the wake word.
             Self::Confirming => (Led::Listening, Expression::Happy, 0.8),
+            Self::Resting => (Led::Idle, Expression::Sleepy, 0.9),
+            Self::Asleep => (Led::Idle, Expression::Asleep, 1.0),
         };
         let mut commands = vec![L { led }, E { e, i }];
         if matches!(self, Self::Listening | Self::Speaking | Self::Confirming) {
@@ -229,6 +222,10 @@ pub struct FaceRx {
 }
 
 impl Face {
+    pub fn clear_expression(&self) {
+        self.target
+            .send_if_modified(|s| s.expression.take().is_some());
+    }
     pub fn new() -> (Self, FaceRx) {
         let (target, rx) = watch::channel(Target {
             mood: Mood::Offline,
@@ -258,7 +255,7 @@ impl Face {
                     emotion,
                     intensity.clamp(0., 1.),
                     Instant::now() + Duration::from_secs(4),
-                ))
+                ));
             });
         }
     }
@@ -339,6 +336,11 @@ impl Face {
     #[cfg(test)]
     pub fn steady(&self) -> Mood {
         self.target.borrow().mood
+    }
+
+    #[cfg(test)]
+    pub fn override_emotion(&self) -> Option<Expression> {
+        self.target.borrow().expression.map(|(e, _, _)| e)
     }
 
     #[cfg(test)]
@@ -569,7 +571,9 @@ async fn drive<S: LineSink>(
         if !frame.is_empty() {
             send(device, &frame).await?;
         }
-        if now >= next_beat {
+        if now >= next_beat
+            || shown.is_none_or(|p| p.mood != mood || p.expression != desired.expression)
+        {
             next_beat = Instant::now() + HEARTBEAT;
         }
         shown = Some(desired);

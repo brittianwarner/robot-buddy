@@ -86,6 +86,10 @@ pub struct Session<R, S> {
 /// Opens sessions and reaches the network around them. Every future is
 /// `'static`, so the loop keeps serving input while it runs.
 pub trait Connector {
+    /// Revoke operator-panel capabilities immediately when registration is lost.
+    fn panel_owned(&self, _owned: bool) -> impl Future<Output = ()> {
+        std::future::ready(())
+    }
     type Remote: Remote;
     type Speaker: Speaker + 'static;
     fn connect(
@@ -111,6 +115,7 @@ impl Controls for Input {
 }
 
 pub struct Options {
+    pub peripherals: crate::hardware::Peripherals,
     /// Where conversation event lines go.
     pub journal: Journal,
     /// How long the network must stay down before Wi-Fi setup reopens.
@@ -129,7 +134,8 @@ pub async fn run<C: Connector, I: Controls>(
     options: Options,
     shutdown: impl Future<Output = ()>,
 ) -> Result<()> {
-    let controller = Controller::new(face, store, state, options.journal.clone(), auth::now());
+    let mut controller = Controller::new(face, store, state, options.journal.clone(), auth::now());
+    controller.peripherals = options.peripherals.clone();
     let mut device = Device::new(connector, controller, options);
     device.status("Connecting…");
     device.connecting = Some(device.connector.connect().boxed_local());
@@ -521,6 +527,7 @@ impl<'a, C: Connector> Device<'a, C> {
             self.teardown(next.remote);
         }
         self.controller.go_offline().await;
+        self.connector.panel_owned(false).await;
         self.status("Connecting…");
         self.schedule_retry();
     }
@@ -582,6 +589,7 @@ impl<'a, C: Connector> Device<'a, C> {
                 return;
             }
         };
+        self.connector.panel_owned(registration.owned).await;
         if let Some(claim) = registration.claim {
             self.controller.update_cache(|cache| {
                 cache.claim_url = claim.url;
@@ -663,6 +671,7 @@ impl<'a, C: Connector> Device<'a, C> {
 
     /// Silence, then close the connections briefly; the caller flushes the cache.
     async fn stop(&mut self) {
+        self.connector.panel_owned(false).await;
         self.controller.shutdown().await;
         let remotes: Vec<_> = self
             .live
@@ -1001,6 +1010,7 @@ mod tests {
 
     fn options() -> Options {
         Options {
+            peripherals: crate::hardware::Peripherals::default(),
             journal: quiet(),
             wifi_grace: Duration::from_mins(5),
             pulse: None,
