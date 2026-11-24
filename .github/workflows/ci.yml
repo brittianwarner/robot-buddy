@@ -22,6 +22,11 @@ jobs:
       # Uses the release binaries above: the robot must stop on SIGTERM/SIGINT within
       # 500 ms with stdin still open, and write its cache on the way out.
       - run: bun run test:shutdown
+      # Same release binaries, through a fault proxy: a wake during a held replay, a lost
+      # submit ack and the reconnect, then no speech for old turns. The known wake-latency
+      # bug is reported as XFAIL; every other check fails the job. Timing limits in the
+      # integration suite are reported only here (no BUDDY_STRICT_TIMING on shared runners).
+      - run: bun tests/robot-reconnect.mjs --no-build
       - run: cargo bench --workspace --locked --no-run
       # Deterministic and offline: a local Bun server feeds PCM to the lab voice player.
       - run: bunx playwright install --with-deps chromium

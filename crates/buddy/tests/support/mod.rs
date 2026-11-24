@@ -13,7 +13,6 @@
 //!
 //! Background tasks (engine I/O, the registry, the mock model) run on a runtime owned by the
 //! harness, because each `#[tokio::test]` runtime is dropped when its test returns.
-#![allow(dead_code)]
 
 use anyhow::{Context, Result, bail, ensure};
 use axum::response::{IntoResponse, Response};
@@ -112,7 +111,7 @@ fn env_port(name: &str, default: u16) -> Result<u16> {
 }
 
 /// `BUDDY_TEST_STATE_DIR`, else `<tmp>/robot-buddy-it`.
-pub fn state_dir() -> PathBuf {
+fn state_dir() -> PathBuf {
     std::env::var_os("BUDDY_TEST_STATE_DIR").map_or_else(
         || std::env::temp_dir().join("robot-buddy-it"),
         PathBuf::from,
@@ -239,10 +238,12 @@ impl Harness {
             .engine
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(engine);
-        self.serve().await
+        self.serve(robot_buddy::registry).await
     }
 
-    async fn serve(&self) -> Result<()> {
+    /// Serves `registry` against the running engine. Every registry the suite serves has
+    /// the real `Bot`, which the readiness probe enrolls.
+    async fn serve(&self, registry: fn() -> rivetkit::Registry) -> Result<()> {
         let shutdown = CancellationToken::new();
         let config = ServeConfig {
             endpoint: self.endpoint.clone(),
@@ -257,8 +258,7 @@ impl Harness {
             pool_name: POOL.into(),
             ..Default::default()
         };
-        let task =
-            tokio::spawn(robot_buddy::registry().serve_with_config(config, shutdown.clone()));
+        let task = tokio::spawn(registry().serve_with_config(config, shutdown.clone()));
         // rivetkit does not expose envoy readiness, so prove it with a real action.
         let client = self.client();
         let probe = format!("probe-{}", auth::random());
@@ -336,8 +336,28 @@ impl Harness {
             .context("join restart")?
     }
 
+    /// Stops the registry and serves `registry` on the same engine and storage. Actors
+    /// stop as in a deploy and wake under the new registry with their databases intact.
+    /// Callers hold [`Harness::exclusive`] and serve `robot_buddy::registry` again before
+    /// releasing it. Returns how long the swap took.
+    pub async fn swap_registry(
+        &'static self,
+        registry: fn() -> rivetkit::Registry,
+    ) -> Result<Duration> {
+        let this = self;
+        self.runtime
+            .spawn(async move {
+                let started = Instant::now();
+                this.stop_serving().await?;
+                this.serve(registry).await?;
+                Ok(started.elapsed())
+            })
+            .await
+            .context("join registry swap")?
+    }
+
     /// Listeners on the engine ports, for the no-engine-left assertions.
-    pub fn engine_ports(&self) -> [u16; 3] {
+    fn engine_ports(&self) -> [u16; 3] {
         [
             self.engine_port,
             self.engine_port + 1,
@@ -749,7 +769,7 @@ fn describe(pid: u32) -> String {
 }
 
 /// Fails with the owner of any listener on our ports.
-pub fn ensure_ports_free(ports: &[u16]) -> Result<()> {
+fn ensure_ports_free(ports: &[u16]) -> Result<()> {
     let mut busy = Vec::new();
     for &port in ports {
         match listeners(port) {
@@ -832,18 +852,6 @@ pub struct ModelRequest {
     /// The tool-disabled spoken phase after tool work.
     pub spoken: bool,
     pub tool_results: usize,
-}
-
-impl ModelRequest {
-    pub fn messages(&self) -> &[Value] {
-        self.body["messages"].as_array().map_or(&[], Vec::as_slice)
-    }
-    pub fn text(&self) -> String {
-        self.body.to_string()
-    }
-    pub fn has_tools(&self) -> bool {
-        self.body["tools"].as_array().is_some_and(|t| !t.is_empty())
-    }
 }
 
 pub type Script = Arc<dyn Fn(&ModelRequest) -> Response + Send + Sync>;
@@ -1053,7 +1061,10 @@ pub struct TestBot {
     pub client: Client,
 }
 
-fn handle<A: rivetkit::Actor>(
+pub type Handle<A> = TypedActorHandle<A>;
+
+/// A handle to actor `name` keyed by `bot`, connecting with `session`.
+pub fn handle<A: rivetkit::Actor>(
     client: &Client,
     name: &str,
     bot: &str,
@@ -1209,6 +1220,8 @@ pub struct Events {
     rx: tokio::sync::mpsc::UnboundedReceiver<(Instant, OutputEvent)>,
     _connection: TypedActorConnection<robot_buddy::conversation::Conversation>,
     log: BTreeMap<i64, Seen>,
+    /// The pushed copy of each event, as the subscription delivered it.
+    pushed: BTreeMap<i64, OutputEvent>,
 }
 
 pub const TERMINAL: [&str; 4] = [
@@ -1235,9 +1248,15 @@ impl Events {
             rx,
             _connection: connection,
             log: BTreeMap::new(),
+            pushed: BTreeMap::new(),
         };
         events.pull().await?;
         Ok(events)
+    }
+
+    fn record_push(&mut self, event: OutputEvent, at: Instant) {
+        self.pushed.insert(event.sequence, event.clone());
+        self.record(event, at);
     }
 
     /// Keeps the earliest sighting: a replayed copy never moves `at` later than the push.
@@ -1294,6 +1313,33 @@ impl Events {
         }
     }
 
+    /// One raw `Replay` page after `after`, exactly as the actor returns it.
+    pub async fn replayed(&self, after: i64) -> Result<Vec<OutputEvent>> {
+        let page = self
+            .conversation
+            .send(Call {
+                session: self.session.clone(),
+                command: Command::Replay { after },
+            })
+            .await?;
+        Ok(serde_json::from_value(page)?)
+    }
+
+    /// Waits for the pushed copy of the event at `sequence`.
+    pub async fn wait_pushed(&mut self, sequence: i64, within: Duration) -> Result<OutputEvent> {
+        let deadline = tokio::time::Instant::now() + within;
+        loop {
+            if let Some(event) = self.pushed.get(&sequence) {
+                return Ok(event.clone());
+            }
+            match tokio::time::timeout_at(deadline, self.rx.recv()).await {
+                Ok(Some((at, event))) => self.record_push(event, at),
+                Ok(None) => bail!("subscription closed before event {sequence} was pushed"),
+                Err(_) => bail!("event {sequence} was never pushed within {within:?}"),
+            }
+        }
+    }
+
     pub fn log(&self) -> Vec<Seen> {
         self.log.values().cloned().collect()
     }
@@ -1323,9 +1369,9 @@ impl Events {
             tokio::select! {
                 event = self.rx.recv() => {
                     if let Some((at, event)) = event {
-                        self.record(event, at);
+                        self.record_push(event, at);
                         while let Ok((at, event)) = self.rx.try_recv() {
-                            self.record(event, at);
+                            self.record_push(event, at);
                         }
                     } else {
                         tokio::time::sleep(Duration::from_millis(250)).await;
@@ -1399,4 +1445,57 @@ pub fn init_tracing() {
         )
         .with_test_writer()
         .try_init();
+}
+
+/// Fixed turn ID and sequence in the output event fixtures.
+pub const GOLDEN_TURN: &str = "0195f0a2-7c1e-7d2b-9a40-3f1c2b8e9d10";
+pub const GOLDEN_SEQUENCE: i64 = 7;
+
+/// Compares an event the actor produced with `fixtures/protocol/output_event.<name>.json`
+/// after replacing its sequence and turn ID with the fixture's. `BUDDY_UPDATE_GOLDEN=1`
+/// writes the fixture instead, so fixtures are captured from the actor, never written by
+/// hand.
+pub fn golden_event(name: &str, event: &OutputEvent) -> Result<()> {
+    let mut normalized = event.clone();
+    normalized.sequence = GOLDEN_SEQUENCE;
+    normalized.turn_id = GOLDEN_TURN.into();
+    let actual = serde_json::to_value(&normalized)?;
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/protocol")
+        .join(format!("output_event.{name}.json"));
+    if std::env::var("BUDDY_UPDATE_GOLDEN").is_ok_and(|v| v == "1") {
+        let text = serde_json::to_string_pretty(&actual)?;
+        std::fs::write(&path, format!("{text}\n"))?;
+    }
+    let raw = std::fs::read_to_string(&path).with_context(|| {
+        format!(
+            "{}; capture it with BUDDY_UPDATE_GOLDEN=1 bun run test:integration",
+            path.display()
+        )
+    })?;
+    let expected: Value = serde_json::from_str(&raw)?;
+    ensure!(
+        actual == expected,
+        "{name}: the actor emitted {actual}, the fixture says {expected}"
+    );
+    Ok(())
+}
+
+/// Wall-clock bounds are reported, and enforced only with `BUDDY_STRICT_TIMING=1` on a
+/// controlled runner. Functional assertions never depend on this.
+pub fn timing_bound(what: &str, took: Duration, limit: Duration) -> Result<()> {
+    let strict = std::env::var("BUDDY_STRICT_TIMING").is_ok_and(|v| v == "1");
+    let within = took < limit;
+    println!(
+        "TIMING {what}_ms={} limit_ms={} {}",
+        took.as_millis(),
+        limit.as_millis(),
+        match (within, strict) {
+            (true, _) => "ok",
+            (false, true) => "OVER (enforced)",
+            (false, false) => "OVER (reported; BUDDY_STRICT_TIMING=1 enforces)",
+        }
+    );
+    ensure!(within || !strict, "{what} took {took:?}, limit {limit:?}");
+    Ok(())
 }

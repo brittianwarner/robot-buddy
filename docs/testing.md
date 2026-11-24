@@ -11,15 +11,18 @@ the repository root with Bun (`bun install` first). Results from a dated run are
 | `bun run format:check`, `bun run check`, `bun run lint` | yes | Rust toolchain | Formatting, type check of every target, Clippy with `-D warnings`. |
 | `bun run lint:pedantic` | via `lint` | Rust toolchain | Clippy pedantic with the four noisy lints allowed. `[workspace.lints.clippy]` already enables the same set, so `bun run lint` (`-D warnings`) gates it; this script only spells it out. |
 | `bun run test` | yes | Rust toolchain | Unit tests plus the offline integration-test crates below. Tests that need an engine are `#[ignore]`d here. |
-| `bun run test:integration` | yes | Network once (engine download), free ports | The 17 actor scenarios against a real Rivet engine. |
+| `bun run test:integration` | yes | Network once (engine download), free ports | The 19 actor scenarios against a real Rivet engine, including output-event fixtures captured from the actor and the version 1 history upgrade. Timing limits are reported, not enforced (see [timing limits](#timing-limits)). |
 | `cargo build --release`, `cargo bench --no-run` | yes | Rust toolchain | Release builds link; benches compile. |
 | `bun tests/early-player.mjs` | yes | Chromium (`bunx playwright install chromium`) | The lab voice player plays streamed PCM and stops on demand. Offline and deterministic. |
 | `bun run deny` | yes (`cargo-deny-action`) | `cargo install cargo-deny` | Advisories, licenses, crate sources and bans per `deny.toml` (`cargo deny --locked --all-features check`). |
 | robot-aarch64 job | yes | `gcc-aarch64-linux-gnu` | The robot client type-checks for the Raspberry Pi 5 target. |
-| `bun run bench:e2e` | no (opt-in) | Release build, free ports, port 8090 | End-to-end latency with the real server, engine and robot client. See below. |
+| `bun run bench:e2e` | no (opt-in) | Release build, free ports, port 8090 | End-to-end latency with the real server, engine and robot client, and the audio checks below. See below. |
+| `bun run bench:report` | no | `docs/research/e2e-latency.json` | Rewrites the results table in [e2e latency](research/e2e-latency.md) from the published raw JSON. `--check` fails when the doc is stale. |
+| `bun run test:reconnect` | yes, after the release build (`--no-build`) | Release build, free ports, port 8090 | The real robot binary through a fault proxy: interruption during a held replay, reconnect after a lost submit ack, no old speech after it. See below. |
+| `bun run eval:voice` | no (opt-in) | Release build, free ports, port 8090 | A JSON scorecard of six voice-turn metrics against `tests/eval/voice-thresholds.json`. See below. |
 | `bun run test:container` | no | Docker | Enrollment and stored memory across a container replacement. |
 | `bun run test:lab`, `tests/early-live.mjs`, `tests/latency-live.mjs` | no | A running lab, `BUDDY_LAB_TOKEN`, a device identity; the live scripts also need a provider key | Browser acceptance of the lab. See [lab](lab.md). |
-| `bun run test:shutdown` | yes, after the release build | Release build of server and robot, free port 8090 | The robot exits 0 within 500 ms of SIGTERM or SIGINT with stdin open or closed, and writes its cache file on the way out (3 SIGTERM, 1 SIGINT, 1 closed-stdin run). |
+| `bun run test:shutdown` | yes, after the release build | Release build of server and robot, free port 8090 | The robot exits 0 within 500 ms of SIGTERM or SIGINT with stdin open or closed, and writes its cache file on the way out (3 SIGTERM, 1 SIGINT, 1 closed-stdin run). Each signal is sent after the robot's first connection to its server URL, so the stop handler is installed; a signal earlier in startup still has the default action. |
 
 ### Offline test crates (`crates/buddy/tests`)
 
@@ -34,6 +37,14 @@ the repository root with Bun (`bun install` first). Results from a dated run are
   are rejected. After a deliberate wire
   change, regenerate with `BUDDY_UPDATE_GOLDEN=1 cargo test -p robot-buddy --test protocol_golden`
   and review the fixture diff.
+- Output events are not built in that file. Their fixtures (`output_event.*.json`, one per
+  kind: `turn.started`, `text.delta`, `speech.ready`, `tool.started`, `tool.completed`,
+  `turn.completed`, `turn.cancelled`, `turn.failed`, `turn.interrupted`) are captured from
+  real turns by `actors.rs::output_events_match_their_golden_fixtures` and the restart test,
+  which check that each pushed event equals its replayed copy and that both equal the fixture
+  once sequence and turn ID are normalized. `protocol_golden.rs` then checks the set is
+  complete, each round-trips and ignores additive fields, and `speech.ready` carries only
+  `index`. Recapture with `BUDDY_UPDATE_GOLDEN=1 bun run test:integration` and review the diff.
 - `voice_rules.rs` runs the table in `fixtures/voice_rules.json` (34 cases) through
   `VoiceConfig::speech_input` and `speech_body`: styles, word boundaries, case, overlap,
   validation errors, the 32-rule cap and the 24 KiB rendered-input cap. Overlaps resolve
@@ -41,6 +52,8 @@ the repository root with Bun (`bun install` first). Results from a dated run are
   `<break/>`, a stray `[whispering]`) is removed, so rule-derived `[whispering] ` is the
   only tag that reaches the provider; the canonical transcript is never changed.
 - `sentences.rs` and `history_sql.rs` cover the sentence splitter and the history queries.
+  `history_sql.rs` measures the startup DDL apart from the rebuild start transaction and
+  its batches (WAL pages per commit, numbers in [benchmarks](research/benchmarks.md)).
 
 ### Integration harness (`crates/buddy/tests/actors.rs`, `tests/support/mod.rs`)
 
@@ -80,7 +93,20 @@ voice, rejects a second submit and cancels cleanly; bot isolation; compare-and-s
 voice and context settings; system-prompt tool writes apply to the next turn; persona
 save, activate and roll back; persona library limits (50 names, 16 versions); history
 paging and phrase search; memory remember, search and forget; engine restart interrupts
-live streams and fails closed on unresolved tools.
+live streams and fails closed on unresolved tools; every output event kind matches its
+captured fixture; a version 1 history database upgraded by the actual actor on the
+engine, stopped mid-rebuild at least once by swapping the registry (`Harness::swap_registry`)
+to a stand-in actor that inspects the database, with exact search results at every stop.
+
+### Timing limits
+
+Wall-clock limits in the integration suite (submit to first `speech.ready` under 1500 ms,
+provider stream closed under 300 ms after a cancel) go through `support::timing_bound`. It
+always prints `TIMING <name>_ms=<took> limit_ms=<limit> ok|OVER`, and fails the test only
+when `BUDDY_STRICT_TIMING=1`. Set that on a controlled runner (idle, dedicated hardware).
+CI runners are shared, so CI reports the timings and enforces only the functional
+assertions, which always run: speech chunks numbered in order, zero events committed after
+`turn.cancelled`, the provider connection dropped within 5 s, and so on.
 
 ## Ports
 
@@ -88,14 +114,19 @@ live streams and fails closed on unresolved tools.
 | --- | --- |
 | Integration engine | `BUDDY_TEST_ENGINE_PORT` (default 16420), +1 api peer, +10 metrics |
 | Integration model mock | `BUDDY_TEST_MODEL_PORT` (default 19091) |
-| E2E bench | `BENCH_PORT_BASE` (default 17500): engine +20 (+21, +30), server +80, model +91, speech +92 |
+| E2E bench, reconnect test, voice eval | `BENCH_PORT_BASE` (default 17500): engine +20 (+21, +30), server +80, model +91, speech +92, fault proxy +93 |
 | Robot loopback panel | 8090 (fixed in `apps/robot/src/screen.rs`) |
 | Local lab compose | 18080, 17420 |
 
 The integration run and the bench use different ports and can run side by side; two
-benches cannot, because the robot panel port is fixed.
+benches (or a bench and the reconnect test, the eval or `test:shutdown`) cannot, because the
+robot panel port is fixed. Check `lsof -iTCP:8090 -sTCP:LISTEN` first; each script refuses to
+start (exit 2) when a port is busy.
 
 ## E2E latency bench
+
+The bench, the reconnect test and the voice eval share one stack, `tests/lib/stack.mjs`,
+and one set of turn and barge-in checks, `tests/lib/voice-turns.mjs`.
 
 `bun run bench:e2e` builds release binaries, then runs the real `robot-buddy-server` (it
 spawns its own engine on isolated ports), enrolls and owner-claims a device through the
@@ -105,8 +136,11 @@ server and the Rivet gateway, and starts the real `robot-buddy-robot --simulate`
 - Fake model: SSE, first token at 250 ms, then 4 characters every 15 ms; replies of 2 to 3
   sentences (12 for barge-in turns).
 - Fake speech (`TTS_BASE_URL`): `POST /v1/audio/speech` returns `audio/pcm` after 300 ms, then
-  24 kHz mono s16 in real time (48 kB/s), 60 ms of audio per input character.
-- Fake `aplay` on `PATH` (`tests/lib/fake-aplay.mjs`): timestamps every PCM chunk, keeps
+  24 kHz mono s16 in real time (48 kB/s), 60 ms of audio per input character. Every byte of a
+  response is that request's tag (1 to 255), so the audio a player receives names the
+  sentences it came from.
+- Fake `aplay` on `PATH` (`tests/lib/fake-aplay.mjs`): timestamps every PCM chunk and its first
+  byte (the tag), keeps
   playing its buffer after stdin closes like aplay, and its socket closing marks the kill.
   It is launched once before measuring, because its first launch from the fresh work
   directory sometimes takes 3 s on macOS (see [e2e latency](research/e2e-latency.md)).
@@ -117,12 +151,67 @@ audio ran out, 20 ms floor); barge-in to player killed, to the turn's end event 
 model stream closing; server and engine RSS. Percentiles are nearest-rank, so with 20 turns
 p95 is the 19th value and p99 is the maximum.
 
+Checks, with speech faked. Each failure is listed in the JSON's `failures` with expected and
+observed values, and the bench exits 1:
+
+- every ordinary turn (warm-up included) plays PCM at the player, its player exits cleanly
+  (stdin closed, buffered audio played out), and it receives exactly the samples the fake
+  provider sent for that turn, from every sentence;
+- every barged turn ends in `turn.cancelled`, and its player is stopped (it exits before
+  playing out what it was sent);
+- every turn completes, and nothing outlives shutdown.
+
+`--publish` writes the raw JSON to `docs/research/e2e-latency.json` with the commit from
+`git describe --always --dirty`; `bun run bench:report` regenerates the doc's table from it.
+
 Options: `--turns N` (20), `--barge N` (5), `--out file.json`, `--no-build`, `--no-speech`,
 `--keep` (keep the work directory, including `server.log`; `BENCH_SERVER_LOG` sets its
 `RUST_LOG`), `--repo DIR` and `--label NAME` to measure another checkout. A server without `TTS_BASE_URL` is never given `TTS_MODEL`, so it cannot reach the
 real provider; only text and `speech.ready` are measured there. The bench refuses to start
 if a port is busy and exits non-zero if a turn fails or the server, engine or a listener
 outlives shutdown. Credentials are generated per run in a temporary directory and deleted.
+
+## Reconnect test
+
+`bun run test:reconnect` (`tests/robot-reconnect.mjs`) runs the same stack with a fault proxy
+(`tests/lib/fault-proxy.mjs`) between the robot and the engine: the server hands the robot the
+proxy as its Rivet endpoint, so robot actions (HTTP) and its event socket pass through it.
+Each reply sentence carries its turn's marker word, so every request at the fake provider and
+every player is attributed to a turn.
+
+1. Turn A plays to the end.
+2. Long turn B plays. The proxy holds pushed events, so the robot's 2 s catch-up replay fires,
+   and holds that replay's response. A wake (`{"wake":true}`) arrives. B must end in
+   `turn.cancelled` and its player must stop. The player must also stop within 1000 ms while
+   the replay is still held; today it cannot, because the session awaits each replay page
+   (up to the 15 s call deadline) before it reads input. That check is a known bug
+   (wave5-robot), reported as XFAIL; `--strict` makes it fail.
+3. Turn C's submit reaches the actor, but the proxy discards the ack and cuts the
+   connection. The robot reconnects.
+4. Turn D plays.
+
+Then no speech request for A or B may follow the reconnect. C's speech count is reported, not
+checked. Options: `--no-build`, `--strict`, `--out file.json`, `--keep`.
+
+## Voice eval
+
+`bun run eval:voice` (`tests/eval-voice.mjs`) runs ordinary turns, barge-ins and the reconnect
+scenario on one stack and writes a JSON scorecard (stdout, or `--out file.json`). The pass
+thresholds and the turn and barge-in counts live only in `tests/eval/voice-thresholds.json`
+(`--thresholds file` swaps it):
+
+| Metric | Stat |
+| --- | --- |
+| submit → first `speech.ready` | p95 |
+| submit → first PCM at the player | p95 |
+| longest silence between sentences in a turn | max |
+| barge-in → player stop | p95 |
+| barge-in → model stream closed | p95 |
+| speech requests for old turns after a reconnect | value, must be 0 |
+
+A functional failure from the bench checks or the reconnect test fails the eval whatever the
+scores; the known-bug check goes to `known_bugs` instead. Exit 0 on pass, 1 on fail, 2 when a
+port is busy. Options: `--no-build`, `--out`, `--thresholds`, `--keep`.
 
 ## Fixed bugs pinned by tests
 

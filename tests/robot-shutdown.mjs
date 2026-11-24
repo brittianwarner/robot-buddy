@@ -10,6 +10,7 @@
 // being killed.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -24,6 +25,26 @@ try {
     if (spawnSync(bin('robot-buddy-server'), args).status !== 0) throw new Error('server init/provision failed');
   }
   const cache = path.join(work, 'cache.json');
+  // The robot's first connection to its server URL comes from the session loop, which runs
+  // in the same select as the stop-signal handler, so the handler is installed by then. A
+  // fixed delay raced startup: before that select, SIGTERM still has its default action.
+  let connected = () => {};
+  const server = net.createServer((socket) => {
+    socket.destroy();
+    connected();
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const serverUrl = `http://127.0.0.1:${server.address().port}`;
+  const started = (robot) =>
+    new Promise((resolve) => {
+      const give = setTimeout(resolve, 15000);
+      connected = () => {
+        clearTimeout(give);
+        connected = () => {};
+        setTimeout(resolve, 50);
+      };
+      robot.on('exit', resolve);
+    });
   const exitAfterTerm = (closeStdin, signal = 'SIGTERM') =>
     new Promise((resolve) => {
       fs.rmSync(cache, { force: true });
@@ -31,14 +52,14 @@ try {
         env: {
           ...process.env,
           RUST_LOG: 'off',
-          // Nothing listens here: the robot stays in its reconnect loop.
-          BUDDY_SERVER_URL: 'http://127.0.0.1:9',
+          // Accepts and drops every connection: the robot stays in its reconnect loop.
+          BUDDY_SERVER_URL: serverUrl,
           BUDDY_IDENTITY_FILE: path.join(work, 'device.json'),
           BUDDY_CACHE_FILE: cache,
         },
         stdio: ['pipe', 'ignore', 'ignore'],
       });
-      setTimeout(() => {
+      started(robot).then(() => {
         if (closeStdin) robot.stdin.end();
         const t = Date.now();
         robot.kill(signal);
@@ -50,7 +71,7 @@ try {
           clearTimeout(kill);
           resolve({ ms: Date.now() - t, code, flushed: fs.existsSync(cache) });
         });
-      }, 1500);
+      });
     });
   // Well under systemd's TimeoutStopSec; a clean stop takes tens of milliseconds.
   const LIMIT_MS = 500;
@@ -74,6 +95,7 @@ try {
       }`,
     );
   }
+  server.close();
   process.exitCode = failed ? 1 : 0;
 } finally {
   fs.rmSync(work, { recursive: true, force: true });

@@ -62,13 +62,17 @@ Local in-memory SQLite (rusqlite, bundled), with the real schema files. `v1` is 
 
 | Measure | Value |
 |---|---|
+| Startup DDL, first start after the upgrade | 54 pages |
+| Startup DDL, every later start | 0 pages |
+| Start transaction (`begin_history_backfill`) | 5 pages |
 | Batches (index, then sweep) | 42 |
 | Largest batch | 84 pages |
-| Start transaction | 59 pages |
 | One-shot rebuild it replaced | 260 pages in one transaction |
 | Rivet limit per transaction | 32,768 pages |
 
-Batch size depends on the batch, not on history. The one-shot rebuild grows with every turn stored.
+Startup DDL is measured apart from the rebuild. It is the schema `create` runs on every start; on the first start after the upgrade its index builds (such as `turns_completed`) read all of history once, so it grows with history like the one-shot rebuild did, at about a fifth of its size. Every later start writes nothing. Batch size depends on the batch, not on history.
+
+The same upgrade also runs on the real engine: `version_one_history_upgrades_on_the_engine_across_interruptions` in `tests/actors.rs` (`bun run test:integration -- version_one`) seeds 12,000 version 1 turns, lets the actor's own startup and batch task run, stops the actor mid-rebuild at least once, and checks search results at every stop and after the rebuild. It prints `UPGRADE` lines with the wake times.
 
 ## SQL per direct spoken turn
 
@@ -97,7 +101,7 @@ Stream commits happen at each sentence boundary, on each 100 ms tick with uncomm
 
 ## Turn latency (integration)
 
-`tests/actors.rs` runs against a real Rivet engine with a mock provider. The mock streams 4-character SSE tokens every 20 ms. Times are measured by the test client, which polls replay every 5 ms.
+`tests/actors.rs` runs against a real Rivet engine with a mock provider. The mock streams 4-character SSE tokens every 20 ms. Times are measured by the test client on push arrival: it holds a connection subscribed to the conversation's events, stamps each pushed event when it arrives, and replays every 250 ms only as a fallback for a missed push. Timing limits print as `TIMING` lines and fail the test only with `BUDDY_STRICT_TIMING=1` (see [testing](../testing.md#timing-limits)).
 
 | Measure | Run 1 | Run 2 |
 |---|---|---|
@@ -108,6 +112,8 @@ Stream commits happen at each sentence boundary, on each 100 ms tick with uncomm
 | Barge-in: cancel sent to provider connection closed | 183 ms | 10 ms |
 | Barge-in: cancel action round trip | 184 ms | 11 ms |
 | Events committed after `turn.cancelled` | 0 | 0 |
+
+Run 1 and run 2 predate the push-timed harness. The full `bun run test:integration` run on wave5-tests (8ea8cd7-dirty, November 23, 2026, load average about 38) printed `TIMING submit_to_first_speech_ready_ms=579` and `TIMING provider_close_after_cancel_ms=43`, both within their limits (1500 ms and 300 ms).
 
 The latency eval is new, so there is no before number. The close time includes the cancel action round trip. The connection closes as soon as the cancellation commits.
 

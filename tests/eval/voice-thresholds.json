@@ -1,0 +1,13 @@
+{
+  "$comment": "Pass thresholds for bun run eval:voice (tests/eval-voice.mjs). Each metric passes when its stat is at most max. Times are ms against the fixed fakes in tests/lib/stack.mjs: model first token 250 ms, speech first byte 300 ms. Edit thresholds here only.",
+  "turns": 10,
+  "barges": 3,
+  "metrics": {
+    "submit_to_first_speech_ready_ms": { "stat": "p95", "max": 900 },
+    "submit_to_first_pcm_at_player_ms": { "stat": "p95", "max": 1400 },
+    "max_inter_sentence_silence_ms": { "stat": "max", "max": 250 },
+    "barge_in_to_player_stop_ms": { "stat": "p95", "max": 200 },
+    "barge_in_to_model_stream_closed_ms": { "stat": "p95", "max": 400 },
+    "old_speech_after_reconnect": { "stat": "value", "max": 0 }
+  }
+}
