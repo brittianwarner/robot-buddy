@@ -57,7 +57,7 @@ impl WakeDetector for Transcript {
 
 #[cfg(feature = "onnx-wake")]
 mod onnx {
-    use super::*;
+    use super::{FRAME, Models, Result, WakeDetector, ensure};
     use anyhow::Context;
     use ort::{session::Session, value::Tensor};
     use std::{collections::VecDeque, path::Path, time::Duration};
