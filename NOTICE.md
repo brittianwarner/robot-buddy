@@ -8,7 +8,7 @@ The robot client does not link Piper or espeak-ng. Optional offline speech launc
 
 - **butty** is Brittian's private project and Pip's original robot: the 3D-printed body and CAD, the ESP32-S3 face firmware, and a Python "brain" that this Rust port replaces on the Pi. Its `SPEC.md` names the repository `ToschLogic/butty`. Ask Brittian for access. No butty source, firmware, model or recording is copied into this repository.
 - **ToschLogic** collaborated on the port.
-- This repository's own code is under the MIT [LICENSE](LICENSE). That licence does not extend to the butty-derived behaviour above or to the components below.
+- This repository's own code is under the MIT [LICENSE](LICENSE). The butty-derived behaviour and the third-party components below are covered by the notes above, not by that grant alone.
 
 ## What adapts or depends on butty
 
