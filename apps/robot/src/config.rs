@@ -40,9 +40,11 @@ impl Settings {
             url.scheme() == "https" || (simulate && local),
             "HTTPS required for robot server"
         );
+        // On hardware stdout is the journal, which never carries conversation text.
         let events = match (get("BUDDY_EVENTS").as_deref(), simulate) {
-            (Some("full"), _) | (None | Some(""), true) => EventDetail::Full,
+            (Some("full" | "") | None, true) => EventDetail::Full,
             (Some("compact"), _) | (None | Some(""), false) => EventDetail::Compact,
+            (Some("full"), false) => anyhow::bail!("BUDDY_EVENTS=full requires --simulate"),
             (Some(_), _) => anyhow::bail!("BUDDY_EVENTS must be full or compact"),
         };
         let wifi_grace = match get("BUDDY_WIFI_GRACE_SECS") {
@@ -97,11 +99,14 @@ mod tests {
         let s = settings(&["robot", "--simulate"], &BASE)?;
         assert_eq!(s.events, EventDetail::Full);
         let mut vars = BASE.to_vec();
-        vars.push(("BUDDY_EVENTS", "full"));
         vars.push(("BUDDY_FACE_SERIAL", "/dev/ttyACM0"));
         let s = settings(&["robot"], &vars)?;
-        assert_eq!(s.events, EventDetail::Full);
         assert_eq!(s.face_serial.as_deref(), Some("/dev/ttyACM0".as_ref()));
+        // Full event lines (with conversation text) never reach the journal.
+        vars.push(("BUDDY_EVENTS", "full"));
+        assert!(settings(&["robot"], &vars).is_err());
+        let s = settings(&["robot", "--simulate"], &vars)?;
+        assert_eq!(s.events, EventDetail::Full);
         Ok(())
     }
 

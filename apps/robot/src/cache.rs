@@ -1,14 +1,16 @@
 //! Durable robot cache and its single ordered writer.
 //!
 //! The session loop never touches the disk. It hands snapshots to one writer
-//! task, which coalesces cursor checkpoints to at most one write per interval,
-//! writes urgent checkpoints (terminal turn events) right away, and confirms
-//! `flush` only after the data is on disk. Each write is temp file + fsync +
-//! rename + parent directory fsync, so a crash leaves the old or new file,
-//! never a partial one.
+//! task, which delays an ordinary cursor checkpoint by the coalescing interval
+//! (so a burst of events costs one write), writes urgent checkpoints (terminal
+//! turn events) right away, and confirms `flush` only after the data is on
+//! disk. Each write is temp file + fsync + rename + parent directory fsync, so
+//! a crash leaves the old or new file, never a partial one. The parent
+//! directory is created once, when the store starts.
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::{
+    future::Future,
     io::{self, Write},
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -44,16 +46,32 @@ pub struct Cache {
 pub struct Pending {
     pub request_id: String,
     pub text: String,
+    /// Wall-clock creation time (Unix seconds). An utterance is only worth
+    /// submitting for a short while; caches written before this field existed
+    /// read as 0, which is always expired.
+    #[serde(default)]
+    pub created: i64,
 }
 
 /// Read the cache, or start empty when it is missing or unreadable. Also
-/// removes temp files left by an interrupted write.
+/// removes temp files left by an interrupted write. A file that exists but
+/// cannot be read or parsed is reported: starting empty replays the whole
+/// history (silently), so it should not go unnoticed.
 pub fn load(path: &Path) -> Cache {
     remove_stale_temps(path);
-    std::fs::read(path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Cache::default(),
+        Err(error) => {
+            tracing::warn!(%error, "cache file unreadable; starting from an empty cache");
+            return Cache::default();
+        }
+    };
+    serde_json::from_slice(&bytes).unwrap_or_else(|error| {
+        // Never print the content: it can hold a pending utterance.
+        tracing::warn!(%error, "cache file corrupt; starting from an empty cache");
+        Cache::default()
+    })
 }
 
 fn temp_prefix(path: &Path) -> Option<String> {
@@ -77,7 +95,7 @@ fn remove_stale_temps(path: &Path) {
     }
 }
 
-/// Atomically replace `path` with `bytes`.
+/// Atomically replace `path` with `bytes`. The parent directory must exist.
 pub fn persist(path: &Path, bytes: &[u8]) -> io::Result<()> {
     persist_with(path, bytes, Write::write_all)
 }
@@ -89,9 +107,6 @@ fn persist_with(
 ) -> io::Result<()> {
     use std::os::unix::fs::OpenOptionsExt;
     let parent = path.parent().filter(|p| !p.as_os_str().is_empty());
-    if let Some(parent) = parent {
-        std::fs::create_dir_all(parent)?;
-    }
     let temp = path.with_extension(format!("{}.tmp", robot_buddy::auth::random()));
     let written = (|| {
         let mut file = std::fs::OpenOptions::new()
@@ -138,6 +153,11 @@ pub struct CacheStore {
 
 impl CacheStore {
     pub fn spawn(path: PathBuf, interval: Duration) -> Self {
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty())
+            && let Err(error) = std::fs::create_dir_all(parent)
+        {
+            tracing::warn!(%error, "cache directory unavailable");
+        }
         Self::spawn_with(Arc::new(move |bytes| persist(&path, bytes)), interval)
     }
 
@@ -191,15 +211,26 @@ impl CacheStore {
 
     /// Write `cache` now and wait until it is durable.
     pub async fn flush(&self, cache: &Cache) -> Result<()> {
-        let snapshot = self.snapshot(cache, true).context("cache encoding")?;
-        let (done, wait) = oneshot::channel();
-        self.messages
-            .send(Message::Flush(snapshot, done))
-            .await
-            .ok()
-            .context("cache writer stopped")?;
-        wait.await.context("cache writer stopped")??;
-        Ok(())
+        self.flush_later(cache).await
+    }
+
+    /// Snapshot `cache` now and return a future that writes it and resolves
+    /// once it is durable. The future borrows nothing, so the session loop
+    /// can keep serving input while the disk works.
+    pub fn flush_later(&self, cache: &Cache) -> impl Future<Output = Result<()>> + 'static {
+        let snapshot = self.snapshot(cache, true);
+        let messages = self.messages.clone();
+        async move {
+            let snapshot = snapshot.context("cache encoding")?;
+            let (done, wait) = oneshot::channel();
+            messages
+                .send(Message::Flush(snapshot, done))
+                .await
+                .ok()
+                .context("cache writer stopped")?;
+            wait.await.context("cache writer stopped")??;
+            Ok(())
+        }
     }
 
     /// Write any outstanding checkpoint and stop the writer.
@@ -218,14 +249,12 @@ async fn writer(
     interval: Duration,
 ) {
     let mut written = 0u64;
-    let mut last_write: Option<Instant> = None;
     let mut due: Option<Instant> = None;
     loop {
         tokio::select! {
             message = inbox.recv() => match message {
                 Some(Message::Flush(snapshot, done)) => {
                     let result = store(&write, &snapshot, &mut written).await;
-                    last_write = Some(Instant::now());
                     let _ = done.send(result);
                 }
                 Some(Message::Shutdown(done)) => {
@@ -241,15 +270,15 @@ async fn writer(
             () = shared.wake.notified() => {
                 let urgent = shared.latest.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
                     .as_ref().is_some_and(|s| s.urgent);
-                let earliest = last_write.map_or_else(Instant::now, |t| t + interval);
-                let next = if urgent { Instant::now() } else { earliest.max(Instant::now()) };
+                // An ordinary checkpoint waits a full interval from the first
+                // change, so a turn's events share one write with its terminal
+                // event. Urgent ones go now.
+                let next = if urgent { Instant::now() } else { Instant::now() + interval };
                 due = Some(due.map_or(next, |d| d.min(next)));
             },
             () = sleep_until(due), if due.is_some() => {
                 due = None;
-                if write_latest(&shared, &write, &mut written).await {
-                    last_write = Some(Instant::now());
-                }
+                write_latest(&shared, &write, &mut written).await;
             },
         }
     }
@@ -261,20 +290,16 @@ async fn sleep_until(due: Option<Instant>) {
     }
 }
 
-async fn write_latest(shared: &Shared, write: &WriteFn, written: &mut u64) -> bool {
+async fn write_latest(shared: &Shared, write: &WriteFn, written: &mut u64) {
     let snapshot = shared
         .latest
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .take();
-    match snapshot {
-        Some(snapshot) => {
-            if let Err(error) = store(write, &snapshot, written).await {
-                tracing::warn!(%error, "cache checkpoint failed");
-            }
-            true
-        }
-        None => false,
+    if let Some(snapshot) = snapshot
+        && let Err(error) = store(write, &snapshot, written).await
+    {
+        tracing::warn!(%error, "cache checkpoint failed");
     }
 }
 
@@ -336,7 +361,7 @@ mod tests {
         }
         tokio::time::sleep(Duration::from_millis(450)).await;
         let writes = count.load(Ordering::SeqCst);
-        assert!((1..=3).contains(&writes), "{writes} writes for 1000 events");
+        assert!((1..=2).contains(&writes), "{writes} writes for 1000 events");
         assert_eq!(seen.lock().unwrap().last().unwrap().cursor, 1000);
     }
 
@@ -344,13 +369,27 @@ mod tests {
     async fn terminal_checkpoint_is_written_without_waiting_for_the_interval() {
         let (write, count, seen) = counting();
         let store = CacheStore::spawn_with(write, Duration::from_secs(30));
-        store.checkpoint(&at(1), false); // first write after a quiet period
+        store.checkpoint(&at(1), false); // ordinary: due in 30 s
         tokio::time::sleep(Duration::from_millis(50)).await;
-        store.checkpoint(&at(2), false); // coalesced: due in 30 s
-        store.checkpoint(&at(3), true); // terminal event: due now
+        assert_eq!(count.load(Ordering::SeqCst), 0, "a turn's deltas wait");
+        store.checkpoint(&at(2), false);
+        store.checkpoint(&at(3), true); // terminal event: due now, carries the rest
         tokio::time::sleep(Duration::from_millis(100)).await;
-        assert_eq!(count.load(Ordering::SeqCst), 2);
+        assert_eq!(count.load(Ordering::SeqCst), 1, "one write per short turn");
         assert_eq!(seen.lock().unwrap().last().unwrap().cursor, 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ordinary_checkpoints_are_written_after_the_interval() {
+        let (write, count, seen) = counting();
+        let store = CacheStore::spawn_with(write, Duration::from_secs(30));
+        store.checkpoint(&at(1), false);
+        tokio::time::sleep(Duration::from_secs(29)).await;
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+        store.checkpoint(&at(2), false);
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        assert_eq!(seen.lock().unwrap().last().unwrap().cursor, 2);
     }
 
     #[tokio::test]
@@ -362,6 +401,7 @@ mod tests {
         pending.pending = Some(Pending {
             request_id: "r".into(),
             text: "hi".into(),
+            created: 1,
         });
         store.flush(&pending).await.unwrap();
         assert_eq!(seen.lock().unwrap().last(), Some(&pending));
@@ -379,7 +419,11 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(20)).await;
         store.checkpoint(&at(7), false);
         store.shutdown().await;
-        assert_eq!(count.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            1,
+            "both coalesced into the shutdown write"
+        );
         assert_eq!(seen.lock().unwrap().last().unwrap().cursor, 7);
     }
 
@@ -421,16 +465,27 @@ mod tests {
         let cache: Cache = serde_json::from_slice(old).unwrap();
         assert_eq!(cache.cursor, 9);
         assert!(cache.cancel.is_none() && cache.active_turn.is_none());
-        assert_eq!(cache.pending.unwrap().text, "t");
+        let pending = cache.pending.unwrap();
+        assert_eq!(pending.text, "t");
+        assert_eq!(pending.created, 0, "an undated utterance reads as expired");
     }
 
     #[tokio::test]
     async fn store_writes_real_files() {
         let dir = temp_dir();
-        let path = dir.join("cache.json");
+        // The store creates the directory once at start, not on every write.
+        let path = dir.join("state").join("cache.json");
         let store = CacheStore::spawn(path.clone(), Duration::from_millis(10));
         store.flush(&at(5)).await.unwrap();
         assert_eq!(load(&path).cursor, 5);
+        let later = store.flush_later(&at(6));
+        store.checkpoint(&at(7), false);
+        later.await.unwrap();
+        assert_eq!(
+            load(&path).cursor,
+            6,
+            "the snapshot is taken when the flush is requested"
+        );
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
