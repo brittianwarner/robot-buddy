@@ -1282,34 +1282,24 @@ impl Events {
         end
     }
 
-    /// Replays from the first hole in the log, then pages forward.
+    /// Replays from the first hole in the log, then pages forward until a page is
+    /// empty. Pages are capped by count and by bytes, so a short page is not the end.
     pub async fn pull(&mut self) -> Result<()> {
         let mut after = self.contiguous_end();
         loop {
-            let page = self
-                .conversation
-                .send(Call {
-                    session: self.session.clone(),
-                    command: Command::Replay { after },
-                })
-                .await?;
-            let page: Vec<OutputEvent> = serde_json::from_value(page)?;
-            let full = page.len() >= 128;
+            let page = self.replayed(after).await?;
+            let Some(last) = page.last().map(|event| event.sequence) else {
+                return Ok(());
+            };
+            ensure!(
+                last > after,
+                "replay after {after} went backwards to {last}"
+            );
             let at = Instant::now();
             for event in page {
                 self.record(event, at);
             }
-            if !full {
-                return Ok(());
-            }
-            // Follow the contiguous end while it moves, then page past whatever is newest.
-            let newest = self.log.keys().next_back().copied().unwrap_or(0);
-            let next = self.contiguous_end().max(after);
-            let next = if next > after { next } else { newest };
-            if next <= after {
-                return Ok(());
-            }
-            after = next;
+            after = last;
         }
     }
 

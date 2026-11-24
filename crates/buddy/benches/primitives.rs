@@ -62,9 +62,11 @@ fn bench(c: &mut Criterion) {
         });
     });
     let (config, text) = voice_with_rules();
+    // One sentence of a stream: the config was validated once when the stream began.
+    let voice = config.for_speech().expect("valid voice");
     c.bench_function("voice/speech_body_32_rules", |b| {
         b.iter(|| {
-            config
+            voice
                 .speech_body(black_box(SPEECH_MODEL), black_box(&text))
                 .expect("body")
         });

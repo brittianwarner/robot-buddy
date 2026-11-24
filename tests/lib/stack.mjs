@@ -13,8 +13,9 @@
 //          and its first byte (the tag)
 //
 // The stack refuses to start if any of its ports is in use; `shutdown()` reports anything
-// that outlives it in `leaks`. Port 8090 (the robot's loopback screen) is fixed and shared
-// with other worktrees, so only one stack runs per machine at a time.
+// that outlives it in `leaks`. Every port, the robot's loopback panel included
+// (BUDDY_SCREEN_ADDR), comes from the port base, so stacks with different bases can run
+// side by side. A `repo` whose robot predates BUDDY_SCREEN_ADDR keeps its panel on 8090.
 import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -110,13 +111,15 @@ export async function startStack(options = {}) {
   const repo = path.resolve(options.repo ?? root);
   const base = Number(options.base ?? process.env.BENCH_PORT_BASE ?? 17500);
   const log = options.log ?? ((...a) => console.error('stack:', ...a));
+  const screenSource = path.join(repo, 'apps/robot/src/screen.rs');
+  const screenMovable = fs.existsSync(screenSource) && fs.readFileSync(screenSource, 'utf8').includes('BUDDY_SCREEN_ADDR');
   const PORTS = {
     engine: base + 20, // + 1 api_peer, + 10 metrics
     server: base + 80,
     model: base + 91,
     speech: base + 92,
     proxy: base + 93,
-    screen: 8090, // fixed in apps/robot/src/screen.rs
+    screen: screenMovable ? base + 94 : 8090,
   };
   const allPorts = [
     PORTS.engine,
@@ -554,6 +557,7 @@ export async function startStack(options = {}) {
         BUDDY_IDENTITY_FILE: path.join(work, 'device.json'),
         BUDDY_CACHE_FILE: path.join(work, 'robot-cache.json'),
         BUDDY_EVENTS: 'full',
+        ...(screenMovable ? { BUDDY_SCREEN_ADDR: `127.0.0.1:${PORTS.screen}` } : {}),
         ...(SPEECH ? { BUDDY_SPEECH: 'true' } : {}),
       }),
       stdio: ['pipe', 'pipe', fs.openSync(path.join(work, 'robot.log'), 'w')],

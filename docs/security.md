@@ -17,7 +17,7 @@ Threat model and controls for the server, the actors and the robot's local pages
 | Public HTTPS (`/v1/*`, `/claim`, `/login`, `/auth/callback`, `/lab`) | Anyone on the internet | Certificates, proofs, claim tokens, OIDC codes |
 | Rivet gateway | Robots with a scoped gateway token | Actor actions with a signed session |
 | Identity provider | The configured OIDC issuer | Authorization codes, ID tokens, userinfo |
-| Robot loopback panel (`127.0.0.1:8090`) | The robot's kiosk browser, and any web page that browser opens | Owner confirmation |
+| Robot loopback panel (`127.0.0.1:8090` by default, `BUDDY_SCREEN_ADDR`) | The robot's kiosk browser, and any web page that browser opens | Owner confirmation |
 | Robot `SoftAP` page (`http://10.42.0.1`) | Phones on the setup hotspot | Home Wi-Fi credentials |
 | Data volume (`/data`) | Backups and operators | Engine logs and objects |
 
@@ -46,6 +46,7 @@ Residual risk: a person who opens an attacker's claim link and chooses to sign i
 | Certificates are issuer-signed; proofs sign a short-lived challenge; the Bot actor consumes each nonce once. | Forged devices, replayed proofs. | `auth::tests::certificate_and_proof_bind_device_key`, integration suite |
 | Signing keys must be at least 32 bytes, in `sign`, `verify`, `Bot::create` and `Memory::create`. | A short key that makes every session forgeable. | `auth::tests::short_keys_are_rejected_for_sign_and_verify` |
 | Signing keys, the engine token, the lab token, the OIDC client secret and the device private key are `Secret<T>`: `Debug` prints `[redacted]` and the buffer is zeroized on drop (`zeroize`). Copies a library makes, such as Rig's API key, are outside this guarantee. | Secrets in logs, panics and debug output. | `auth::tests::secrets_are_redacted_and_round_trip_identity_files` |
+| Actor errors reach a client masked as internal, except the one public refusal: a submit while another turn is open answers `user/busy` with that turn's ID as metadata, to the authenticated session of the same conversation, which can already list its turns. | Internal error text reaching devices; a robot cancelling turns by guesswork. | `actors::running_turn_pins_voice_rejects_busy_and_cancels_cleanly` (integration suite) |
 
 ### HTTP surface
 
@@ -86,6 +87,7 @@ Direct Rivet callers skip the server's body limit, so actors check their own inp
 |---|---|---|
 | The engine config (admin token, S3 keys) is written to `$XDG_RUNTIME_DIR` or the temp directory, never `/data`. The file is new, `0600`, uniquely named and removed on shutdown. A config left in `/data` by an older release is deleted at start. | Secrets in volume backups. | `http_tests::engine_config_is_private_ephemeral_and_removed` |
 | The engine stops with a direct `SIGTERM`; the image no longer ships `procps`. | Spawning `kill(1)`; a smaller image. | build only |
+| An `openai_compatible` `AI_BASE_URL` must be HTTPS unless its host is loopback. `AI_ALLOW_PLAINTEXT_MODEL=1` allows plain HTTP to another host, for a model on a trusted private network; without it startup fails. | Prompts and the model API key crossing a network in plaintext by accident. | `model::tests::only_loopback_hosts_may_skip_tls` |
 | `RIVET_ENDPOINT`, which carries the engine admin token, must be HTTPS. Plain HTTP is accepted only to loopback (`127.0.0.0/8`, `::1`, `localhost`) or to the single host named by `RIVET_ENDPOINT_PLAINTEXT_HOST`, for a private Docker-network service. No credentials or fragment. | The admin token crossing a network in plaintext. | `http_tests::the_engine_endpoint_needs_tls_off_loopback` |
 
 `compose.yaml` and `compose.local.yaml` mount a `tmpfs` on `/tmp`, so the engine config never touches disk. Do the same in any other production runtime.
@@ -95,11 +97,15 @@ Direct Rivet callers skip the server's body limit, so actors check their own inp
 | Control | Defends against | Test |
 |---|---|---|
 | Face panel and setup page send `Cache-Control: no-store`, a `default-src 'none'` CSP, `X-Frame-Options: DENY` and `Referrer-Policy: same-origin`. | Framing, script injection, cached codes. | `screen::tests::page_is_locked_down`, `wifi::tests::setup_form_requires_host_origin_and_csrf` |
-| Face panel answers only `Host` `127.0.0.1:8090` or `localhost:8090`. Confirm also needs a matching `Origin`. | DNS rebinding and cross-site POSTs from pages the kiosk opens. | `screen::tests::confirm_checks_origin_host_and_rotating_csrf` |
+| Face panel answers only `Host` equal to its own address (`127.0.0.1:8090` by default) or `localhost:<port>`. Confirm also needs a matching `Origin`. | DNS rebinding and cross-site POSTs from pages the kiosk opens. | `screen::tests::confirm_checks_origin_host_and_rotating_csrf`, `screen::tests::a_moved_panel_answers_only_its_own_host_and_origin` |
+| `BUDDY_SCREEN_ADDR` accepts only a loopback `ip:port`, or `off`; anything else fails at start instead of binding. | Exposing the login-free owner confirmation to the network by a typo. | `screen::tests::the_address_is_loopback_configurable_or_off`, `screen::tests::an_off_or_invalid_panel_binds_nothing` |
 | The face CSRF token rotates with each new confirmation code, and a press for an old code is dropped. | Confirming a later claim with an earlier press or token. | same |
 | The setup form POST needs `Host` `10.42.0.1` and `Origin` `http://10.42.0.1`. A missing `Origin` is refused: phone browsers send it on form POSTs. | Cross-site writes of Wi-Fi credentials. | `wifi::tests::setup_form_requires_host_origin_and_csrf` |
-| `BUDDY_WIFI_INTERFACE` must match `^[A-Za-z0-9][A-Za-z0-9_-]{0,14}$`, checked before every use. nmcli takes no `--`; every positional value is a constant, our own path, or this name. | An interface name parsed as an nmcli option or breaking a keyfile line. | `wifi::tests::interface_names_cannot_be_options` |
-| Keyfile values escape `\\`, spaces, `\n`, `\t` and `\r`. An SSID with `;` or `\` is written as a byte list. | Keyfile injection and SSIDs NetworkManager would misread. | `wifi::tests::escapes_network_values`, `wifi::tests::profile_text_is_unchanged` |
+| `BUDDY_WIFI_INTERFACE` must match `^[A-Za-z0-9][A-Za-z0-9_-]{0,14}$`, checked before every use. nmcli runs without a shell, one argument per value. | An interface name parsed as an nmcli option. | `wifi::tests::interface_names_cannot_be_options` |
+| SSIDs are 1–32 bytes without control characters and do not start with `-`; passwords are 8–63 printable ASCII characters. | Values nmcli would read as options, and lines that break its terse output. | `wifi::tests::rejects_keyfile_injection` |
+| The home password never reaches argv: nmcli reads it from a 0600 file in `/run/robot-buddy`, escaped for the passwd-file format, removed when activation ends, also on failure. NetworkManager stores it with the profile. | The password in `ps` output, in the journal, or left on disk. | `wifi::tests::passwords_are_escaped_for_passwd_file_and_terse_output`, `wifi::tests::joining_home_replaces_old_profiles_and_keeps_the_password_out_of_argv`, `wifi::tests::a_failed_join_removes_its_profile_and_secret` |
+| The service runs as the `robot-buddy` account, not root. A polkit rule grants that account only the NetworkManager actions setup needs; its one capability is `CAP_NET_BIND_SERVICE` for the setup page; the unit is sandboxed (`ProtectSystem=strict`, `NoNewPrivileges`). | A compromised client owning the robot. | unit file review (`infra/robot-buddy.service`, `infra/robot-buddy-nm.rules`) |
+| The control socket is mode 0660 in a 0750 runtime directory; only the service account and its group (the speech process) can send wake and utterance lines. A stale socket is replaced; other files at the path are kept. | Other local accounts injecting utterances. | `input::tests::the_control_socket_survives_its_writer_restarting`, `input::tests::a_stale_socket_is_replaced_but_other_files_are_kept` |
 
 ## Not covered
 

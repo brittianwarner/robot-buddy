@@ -152,6 +152,15 @@ pub struct OutputEvent {
 impl rivetkit::Event for OutputEvent {
     const NAME: &'static str = OUTPUT_EVENT;
 }
+/// The action error group and code of a submit refused because another turn is
+/// still open. The error is public, so it reaches the client with its message and
+/// a [`Busy`] as metadata. Servers before it refused with an internal error.
+pub const BUSY_ERROR: (&str, &str) = ("user", "busy");
+/// Metadata of a [`BUSY_ERROR`]: the open turn, so a device cancels exactly it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Busy {
+    pub turn_id: String,
+}
 #[derive(Clone, Serialize, Deserialize)]
 pub struct EnrollmentRequest {
     pub certificate: crate::auth::Certificate,

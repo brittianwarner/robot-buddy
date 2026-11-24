@@ -19,6 +19,7 @@ use crate::{
     controller::{Claim, Controller, Done, Lost, Registration, Remote, RobotState},
     face::Face,
     input::{Control, Input},
+    systemd::Pulse,
 };
 use anyhow::{Result, bail};
 use futures_util::{FutureExt, StreamExt, future::LocalBoxFuture, stream::FuturesUnordered};
@@ -104,11 +105,12 @@ impl Controls for Input {
     }
 }
 
-#[derive(Clone, Copy)]
 pub struct Options {
     pub detail: EventDetail,
     /// How long the network must stay down before Wi-Fi setup reopens.
     pub wifi_grace: Duration,
+    /// Beaten every pass of the loop, for the systemd watchdog.
+    pub pulse: Option<Pulse>,
 }
 
 /// Run until `shutdown` resolves (Ok) or the server names a different bot.
@@ -128,7 +130,11 @@ pub async fn run<C: Connector, I: Controls>(
     tokio::pin!(shutdown);
     loop {
         device.tick().await;
-        let wake = device.wake_at();
+        let mut wake = device.wake_at();
+        if let Some(pulse) = &device.options.pulse {
+            pulse.beat();
+            wake = wake.min(Instant::now() + pulse.every());
+        }
         let accepts = device.controller.accepts_events();
         let background = !device.background.is_empty();
         tokio::select! {
@@ -236,12 +242,13 @@ struct Device<'a, C: Connector> {
 
 impl<'a, C: Connector> Device<'a, C> {
     fn new(connector: C, controller: Controller<'a, C::Speaker>, options: Options) -> Self {
+        let boot_grace = BOOT_GRACE.min(options.wifi_grace);
         Self {
             connector,
             controller,
             options,
             backoff: Backoff::new(RETRY_BASE, RETRY_MAX),
-            link: LinkWatch::new(BOOT_GRACE.min(options.wifi_grace)),
+            link: LinkWatch::new(boot_grace),
             connected_once: false,
             live: None,
             events: None,
@@ -576,6 +583,7 @@ impl<'a, C: Connector> Device<'a, C> {
 mod tests {
     use super::*;
     use crate::{
+        audio::Rewarm,
         cache::Cache,
         controller::{CallError, Submitted, tests::Log, tests::Server, tests::event},
         face::{self, LineSink, Mood, Opener},
@@ -672,10 +680,6 @@ mod tests {
             self.world.network("replay").await;
             Ok(self.world.server.replay(after))
         }
-        async fn open_turns(&self) -> Result<Vec<String>, CallError> {
-            self.world.network("open_turns").await;
-            Ok(self.world.server.open_turns())
-        }
         async fn register(&self, _: Claim) -> Result<Registration> {
             self.world.network("register").await;
             Ok(Registration {
@@ -702,7 +706,7 @@ mod tests {
                 .push(format!("start {turn_id} on {}", self.id));
             Some(self.generation)
         }
-        async fn stop(&mut self) {
+        async fn stop(&mut self, _: Rewarm) {
             self.world
                 .stops
                 .lock()
@@ -829,11 +833,15 @@ mod tests {
     const OPTIONS: Options = Options {
         detail: EventDetail::Compact,
         wifi_grace: Duration::from_mins(5),
+        pulse: None,
     };
 
     /// Run the device until `script` finishes.
     macro_rules! run_with {
-        ($rig:ident, $script:expr) => {{
+        ($rig:ident, $script:expr) => {
+            run_with!($rig, OPTIONS, $script)
+        };
+        ($rig:ident, $options:expr, $script:expr) => {{
             let connector = FakeConnector($rig.world.clone());
             run(
                 connector,
@@ -841,7 +849,7 @@ mod tests {
                 &$rig.face,
                 &$rig.store,
                 &mut $rig.state,
-                OPTIONS,
+                $options,
                 $script,
             )
             .await
@@ -1088,6 +1096,65 @@ mod tests {
         });
         assert_eq!(rig.world.log.count("submit"), 0);
         assert!(rig.state.cache.pending.is_none());
+    }
+
+    /// Pushes go silent and every call hangs (a half-open socket). While the
+    /// robot waits on its own turn it reconnects within a few seconds; idle,
+    /// it leaves the slow catch-up to notice.
+    #[tokio::test(start_paused = true)]
+    async fn a_silent_connection_is_replaced_fast_only_while_a_turn_is_awaited() {
+        let mut rig = Rig::quick();
+        let world = rig.world.clone();
+        let controls = rig.controls.clone();
+        run_with!(rig, async {
+            until("online", SOON, || world.entered.count("register") == 1).await;
+            world.stall(true);
+            tokio::time::sleep(Duration::from_mins(1)).await;
+            assert_eq!(world.entered.count("connect"), 1, "idle: no fast reconnect");
+            world.stall(false);
+            until("idle replay answered", SOON, || {
+                world.log.count("replay") >= 1
+            })
+            .await;
+            controls.send(Control::Say("q".into())).await.unwrap();
+            until("speech requested", SOON, || {
+                world.log.count("start turn-q on 0") == 1
+            })
+            .await;
+            world.stall(true);
+            let silent = Instant::now();
+            until("reconnect", Duration::from_secs(10), || {
+                world.entered.count("connect") == 2
+            })
+            .await;
+            let recovered = silent.elapsed();
+            assert!(
+                recovered
+                    <= CATCH_UP_LIVE + crate::controller::WAITING_REPLAY_DEADLINE + RETRY_BASE,
+                "{recovered:?}"
+            );
+            world.stall(false);
+        });
+        assert_eq!(rig.world.log.count("disconnect 0"), 1);
+    }
+
+    /// The loop beats for the watchdog at least every `Pulse::every`, even
+    /// with nothing to do.
+    #[tokio::test(start_paused = true)]
+    async fn an_idle_loop_keeps_beating() {
+        let mut rig = Rig::quick();
+        let world = rig.world.clone();
+        let pulse = Pulse::new(Duration::from_secs(15));
+        let options = Options {
+            pulse: Some(pulse.clone()),
+            ..OPTIONS
+        };
+        run_with!(rig, options, async {
+            until("online", SOON, || world.entered.count("register") == 1).await;
+            let before = pulse.beats();
+            tokio::time::sleep(Duration::from_mins(10)).await;
+            assert!(pulse.beats() - before >= 40, "{}", pulse.beats() - before);
+        });
     }
 
     #[tokio::test(start_paused = true)]

@@ -88,8 +88,9 @@ async fn robot() -> Result<()> {
         .build()?;
     let stdin = std::io::BufReader::with_capacity(input::MAX_LINE, std::io::stdin());
     let mut input = Input::spawn(stdin)?;
-    // Type=notify: ready once input is served; also starts watchdog pings.
-    systemd::ready();
+    // Type=notify: ready once input is served. Under WatchdogSec= the device
+    // loop's heartbeat gates the watchdog pings.
+    let pulse = systemd::ready();
     // No Wi-Fi gate here: the loop serves input at once, and reopens setup
     // only after a bounded time without any network.
     let link = session::Link {
@@ -103,17 +104,9 @@ async fn robot() -> Result<()> {
     let options = device::Options {
         detail: settings.events,
         wifi_grace: settings.wifi_grace,
+        pulse,
     };
-    let result = device::run(
-        link,
-        &mut input,
-        &face,
-        &store,
-        &mut state,
-        options,
-        stop,
-    )
-    .await;
+    let result = device::run(link, &mut input, &face, &store, &mut state, options, stop).await;
     // The loop silenced the speaker and closed the connection. Persist the
     // in-memory cursor and intents, not only the last coalesced checkpoint.
     tracing::info!("stopping");

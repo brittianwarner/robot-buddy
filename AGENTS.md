@@ -4,7 +4,7 @@ Independent Rust project. Backend and device application code stays Rust. Bun/Tu
 
 Read [architecture](docs/architecture/backend.md), [acceptance status](docs/plans/implementation.md), and [Rig source findings](docs/research/rig-integration.md) before changing the agent runtime. Pin Rig checkpoint format with its crate version and handle migrations explicitly.
 
-Bot owns identity/ownership, Conversation owns transcript and Rig execution, Memory owns facts. Actor struct fields are transient; durable application state goes in actor SQLite. Do not add a global dispatcher actor that owns all devices. Concurrent actions require transactions, unique keys or conditional writes.
+Bot owns identity/ownership, Conversation owns transcript and Rig execution, Memory owns facts. Actor struct fields are transient; durable application state goes in actor SQLite. Do not add a global dispatcher actor that owns all devices. Concurrent actions require transactions, unique keys or conditional writes. Wire changes are additive and readers tolerate unknown fields (`crates/buddy/src/protocol.rs`). Actor errors reach clients masked as internal; the `user` group is public, with message and metadata, so use it only for an outcome a device acts on (today `user/busy`, naming the open turn).
 
 Use Rig's provider adapters and AgentRun instead of another SSE decoder or agent loop. Persist effect intent before execution and result before advancing. Do not repeat an uncertain side effect automatically. Keep inference context, checkpoint size, tool count and streaming buffers bounded. Canonical history remains outside the prompt. Measure release builds before claiming performance gains.
 

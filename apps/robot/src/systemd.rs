@@ -1,39 +1,87 @@
 //! `sd_notify` for `Type=notify` with `WatchdogSec=`, without libsystemd.
 //!
 //! Outside systemd (`NOTIFY_SOCKET` unset) every call is a no-op.
-use std::{io, os::unix::net::UnixDatagram, time::Duration};
+use std::{
+    io,
+    os::unix::net::UnixDatagram,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Duration,
+};
+
+/// The device loop's heartbeat. The loop beats once per pass and wakes at
+/// least every [`Pulse::every`], so a quiet but healthy loop still beats; the
+/// watchdog is pinged only when it has.
+#[derive(Clone, Debug)]
+pub struct Pulse {
+    beats: Arc<AtomicU64>,
+    every: Duration,
+}
+
+impl Pulse {
+    pub(crate) fn new(every: Duration) -> Self {
+        Self {
+            beats: Arc::default(),
+            every,
+        }
+    }
+
+    pub fn beat(&self) {
+        self.beats.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    pub fn beats(&self) -> u64 {
+        self.beats.load(Ordering::Relaxed)
+    }
+
+    /// The longest the loop may go without a pass.
+    pub fn every(&self) -> Duration {
+        self.every
+    }
+}
 
 /// Tell systemd the service is up and, when the unit sets `WatchdogSec=`,
-/// start pinging its watchdog from the runtime at half the interval.
-///
-/// The ping task proves the Tokio runtime still schedules timers and runs
-/// tasks (a deadlocked or fully blocked runtime stops it, and systemd then
-/// restarts the service). It does not prove the session loop is making
-/// progress.
-pub fn ready() {
-    let Some(socket) = std::env::var_os("NOTIFY_SOCKET") else {
-        return;
-    };
+/// return the heartbeat the device loop must keep and start pinging the
+/// watchdog at half the interval, each time only if the loop beat since the
+/// last ping. A wedged loop (an await that never returns, a blocked runtime)
+/// stops the pings, and systemd restarts the service.
+pub fn ready() -> Option<Pulse> {
+    let socket = std::env::var_os("NOTIFY_SOCKET")?;
     let socket = socket.to_string_lossy().into_owned();
     if let Err(error) = notify_to(&socket, "READY=1") {
         tracing::warn!(%error, "systemd readiness notification failed");
-        return;
+        return None;
     }
     let interval = watchdog_interval(
         std::env::var("WATCHDOG_USEC").ok().as_deref(),
         std::env::var("WATCHDOG_PID").ok().as_deref(),
         std::process::id(),
-    );
-    if let (Some(interval), Ok(runtime)) = (interval, tokio::runtime::Handle::try_current()) {
-        runtime.spawn(async move {
-            let mut ticks = tokio::time::interval(interval / 2);
-            loop {
-                ticks.tick().await;
-                if let Err(error) = notify_to(&socket, "WATCHDOG=1") {
-                    tracing::debug!(%error, "systemd watchdog ping failed");
-                }
-            }
-        });
+    )?;
+    let runtime = tokio::runtime::Handle::try_current().ok()?;
+    // Two loop passes per ping, four per watchdog interval.
+    let pulse = Pulse::new(interval / 4);
+    runtime.spawn(watch(pulse.clone(), interval / 2, socket));
+    Some(pulse)
+}
+
+/// Ping `socket` every `period` while `pulse` keeps beating.
+async fn watch(pulse: Pulse, period: Duration, socket: String) {
+    let mut ticks = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+    let mut seen = 0;
+    loop {
+        ticks.tick().await;
+        let beats = pulse.beats.load(Ordering::Relaxed);
+        if beats == seen {
+            tracing::warn!("the device loop made no progress; watchdog not pinged");
+            continue;
+        }
+        seen = beats;
+        if let Err(error) = notify_to(&socket, "WATCHDOG=1") {
+            tracing::debug!(%error, "systemd watchdog ping failed");
+        }
     }
 }
 
@@ -91,6 +139,40 @@ mod tests {
         assert_eq!(watchdog_interval(Some("0"), None, own), None);
         assert_eq!(watchdog_interval(Some("soon"), None, own), None);
         assert_eq!(watchdog_interval(None, None, own), None);
+    }
+
+    /// Pings follow the heartbeat: none while the loop is silent, one per
+    /// period once it beats again.
+    #[tokio::test(start_paused = true)]
+    async fn the_watchdog_is_pinged_only_while_the_loop_beats() {
+        let path = std::env::temp_dir().join(format!("buddy-watchdog-{}", uuid::Uuid::new_v4()));
+        let listener = UnixDatagram::bind(&path).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let pings = || {
+            let mut buffer = [0u8; 64];
+            let mut n = 0;
+            while let Ok(len) = listener.recv(&mut buffer) {
+                assert_eq!(&buffer[..len], b"WATCHDOG=1");
+                n += 1;
+            }
+            n
+        };
+        let period = Duration::from_secs(30);
+        let pulse = Pulse::new(period / 2);
+        let task = tokio::spawn(watch(
+            pulse.clone(),
+            period,
+            path.to_str().unwrap().to_owned(),
+        ));
+        tokio::time::sleep(period * 3).await;
+        assert_eq!(pings(), 0, "a loop that never beats is never vouched for");
+        pulse.beat();
+        tokio::time::sleep(period).await;
+        assert_eq!(pings(), 1);
+        tokio::time::sleep(period * 2).await;
+        assert_eq!(pings(), 0, "wedged again");
+        task.abort();
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

@@ -13,7 +13,7 @@ use crate::{
     auth,
     db::{BATCH_TX_TIMEOUT, Db, Tx, bot_key, integer, named, named_for, params, string},
     model::{Delta, Model, ToolCall},
-    protocol::{Call, Command, Connection, OutputEvent},
+    protocol::{BUSY_ERROR, Busy, Call, Command, Connection, OutputEvent},
 };
 use anyhow::{Context, Result, bail, ensure};
 use async_trait::async_trait;
@@ -175,7 +175,7 @@ const REPLAY_SQL: &str = r"
 const REPLAY_PAGE_BYTES: i64 = 512 * 1024;
 const SNAPSHOT_SQL: &str = r"
     SELECT id, status, text, answer,
-        EXISTS(SELECT 1 FROM speech_chunks c WHERE c.turn_id = turns.id)
+        EXISTS(SELECT 1 FROM speech_chunks c WHERE c.turn_id = turns.id), request_id
     FROM turns ORDER BY id DESC LIMIT 20";
 const LAST_SEQUENCE_SQL: &str = "SELECT COALESCE(MAX(sequence), 0) FROM events";
 const ANSWER_SQL: &str = "SELECT answer FROM turns WHERE id = ? AND status = 'completed'";
@@ -954,6 +954,23 @@ fn ensure_settings_role(session: &auth::Session, what: &str) -> Result<()> {
     Ok(())
 }
 
+/// A submit refused while `turn_id` is open: a public `user/busy` action error
+/// carrying [`Busy`], so the device can cancel that turn and submit again.
+fn busy_error(turn_id: String) -> anyhow::Error {
+    let (group, code) = BUSY_ERROR;
+    let message = "Another turn is still open.";
+    anyhow::Error::new(rivet_error::RivetError {
+        kind: rivet_error::RivetErrorKind::Dynamic {
+            group: group.into(),
+            code: code.into(),
+            default_message: message.into(),
+        },
+        meta: serde_json::value::to_raw_value(&Busy { turn_id }).ok(),
+        message: Some(message.into()),
+        actor: None,
+    })
+}
+
 fn turn_json(row: &[V]) -> Result<Value> {
     Ok(json!({
         "id": string(row, 0)?,
@@ -986,8 +1003,10 @@ impl Conversation {
                 );
                 return Ok(json!({ "turn_id": string(row, 0)?, "duplicate": true }));
             }
-            let busy = tx.execute(BUSY_SQL, None).await?;
-            ensure!(busy.rows.is_empty(), "busy");
+            let busy = tx.execute(BUSY_SQL, None).await?.rows;
+            if let Some(row) = busy.first() {
+                return Err(busy_error(string(row, 0)?));
+            }
             let turn = vec![
                 P::Text(id.clone()),
                 P::Text(request_id),
@@ -1030,6 +1049,7 @@ impl Conversation {
                 .map(|r| {
                     let mut turn = turn_json(&r)?;
                     turn["speech_ready"] = json!(integer(&r, 4)? != 0);
+                    turn["request_id"] = json!(string(&r, 5)?);
                     Ok(turn)
                 })
                 .collect::<Result<Vec<_>>>()?;

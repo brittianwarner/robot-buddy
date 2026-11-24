@@ -54,7 +54,17 @@ fn corpus_cases_render_exactly() {
     assert!(cases.len() >= 30, "corpus shrank to {}", cases.len());
     let mut failures = Vec::new();
     for case in cases {
-        let rendered = config(case.rules).speech_input(&case.input);
+        let rendered = config(case.rules.clone()).speech_input(&case.input);
+        // A stream validates once, then renders each sentence: same output, same errors.
+        let streamed = config(case.rules)
+            .for_speech()
+            .and_then(|voice| voice.speech_input(&case.input));
+        assert_eq!(
+            streamed.as_ref().map_err(|e| format!("{e:#}")),
+            rendered.as_ref().map_err(|e| format!("{e:#}")),
+            "{}: validated-once rendering differs",
+            case.name
+        );
         match (&case.expect, &case.error, rendered) {
             (Some(expect), None, Ok(out)) if &out == expect => {}
             (None, Some(error), Err(e)) if format!("{e:#}").contains(error.as_str()) => {}
@@ -161,6 +171,10 @@ fn thirty_two_rules_are_allowed_and_the_thirty_third_is_not() {
         .expect_err("33 rules must be rejected");
     assert!(format!("{err:#}").contains("at most 32"), "{err:#}");
     assert!(config(rules(33)).validate().is_err());
+    assert!(
+        config(rules(33)).for_speech().is_err(),
+        "a stream validates up front"
+    );
 }
 
 #[test]

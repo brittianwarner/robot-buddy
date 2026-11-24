@@ -25,9 +25,9 @@ try {
     if (spawnSync(bin('robot-buddy-server'), args).status !== 0) throw new Error('server init/provision failed');
   }
   const cache = path.join(work, 'cache.json');
-  // The robot's first connection to its server URL comes from the session loop, which runs
-  // in the same select as the stop-signal handler, so the handler is installed by then. A
-  // fixed delay raced startup: before that select, SIGTERM still has its default action.
+  // The stop handlers are registered first thing in startup, so a signal at any point is a
+  // clean stop. Each run still waits for the robot's first connection to its server URL, so
+  // the signal lands on a robot in its session loop, with a connection to tear down.
   let connected = () => {};
   const server = net.createServer((socket) => {
     socket.destroy();
@@ -56,6 +56,8 @@ try {
           BUDDY_SERVER_URL: serverUrl,
           BUDDY_IDENTITY_FILE: path.join(work, 'device.json'),
           BUDDY_CACHE_FILE: cache,
+          // No panel: the test needs no port of its own.
+          BUDDY_SCREEN_ADDR: 'off',
         },
         stdio: ['pipe', 'ignore', 'ignore'],
       });

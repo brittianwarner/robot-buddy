@@ -175,13 +175,23 @@ pub enum PlaybackEvent {
     Finished { generation: u64, played: bool },
 }
 
+/// Whether a stop warms a fresh speech connection for later.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rewarm {
+    /// The robot goes idle (wake, mute, an ended turn): warm one for the next turn.
+    Yes,
+    /// A new speech request follows at once (a replacing utterance), or none can
+    /// (offline, shutdown): a warm-up would only race it or waste a request.
+    No,
+}
+
 /// What the conversation logic needs from playback.
 pub trait Speaker {
     /// Start speaking `turn_id`; returns the playback generation, or `None`
     /// when speech is disabled.
     fn start(&mut self, turn_id: &str) -> Option<u64>;
     /// Stop now. When this returns the player has been killed.
-    fn stop(&mut self) -> impl Future<Output = ()>;
+    fn stop(&mut self, rewarm: Rewarm) -> impl Future<Output = ()>;
 }
 
 /// Per-session playback. At most one turn plays at a time.
@@ -237,7 +247,7 @@ impl Speaker for Playback {
         Some(generation)
     }
 
-    async fn stop(&mut self) {
+    async fn stop(&mut self, rewarm: Rewarm) {
         let Some(task) = self.current.take() else {
             return;
         };
@@ -246,7 +256,7 @@ impl Speaker for Playback {
         // Dropping the task drops the child (`kill_on_drop`): SIGKILL, so
         // the ALSA buffer is not drained.
         let _ = task.await;
-        if was_running {
+        if was_running && rewarm == Rewarm::Yes {
             // An abandoned HTTP/1.1 stream cannot be reused; warm a new one.
             let media = self.media.clone();
             tokio::spawn(async move { media.prewarm().await });
@@ -572,7 +582,7 @@ mod tests {
         assert_eq!(std::fs::metadata(&path).unwrap().len(), 4096);
         assert!(!finished.load(Ordering::SeqCst));
         let stopping = Instant::now();
-        playback.stop().await;
+        playback.stop(Rewarm::Yes).await;
         assert!(stopping.elapsed() < Duration::from_millis(200));
         std::fs::remove_file(path).unwrap();
     }
@@ -890,5 +900,47 @@ mod tests {
             first_audio[0] < Duration::from_millis(420),
             "{first_audio:?}"
         );
+    }
+
+    /// A stop that a new speech request follows sends no warm-up beside it; a stop
+    /// into idle warms one connection with `GET /health`.
+    #[tokio::test]
+    async fn only_an_idle_stop_warms_a_connection() {
+        let health = Arc::new(AtomicUsize::new(0));
+        let hits = health.clone();
+        let app = Router::new()
+            .route(
+                "/v1/speech",
+                post(|| async {
+                    let stream = futures_util::stream::unfold(0, |i| async move {
+                        if i > 0 {
+                            tokio::time::sleep(Duration::from_mins(1)).await;
+                        }
+                        Some((Ok::<_, std::io::Error>(vec![0u8; 4800]), i + 1))
+                    });
+                    (PCM_HEADERS, Body::from_stream(stream))
+                }),
+            )
+            .route(
+                "/health",
+                axum::routing::get(move || {
+                    hits.fetch_add(1, Ordering::SeqCst);
+                    async { "ok" }
+                }),
+            );
+        let (server, _) = serve(app).await;
+        let media = Arc::new(Media::for_test(&server, player("cat", &[]), WRITE_DEADLINE));
+        let (tx, mut rx) = mpsc::channel(8);
+        let mut playback = Playback::new(media, "s".into(), tx);
+        for (rewarm, warmed) in [(Rewarm::No, 0), (Rewarm::Yes, 1)] {
+            let generation = playback.start("test-turn").unwrap();
+            assert_eq!(
+                next_event(&mut rx).await,
+                PlaybackEvent::Started { generation }
+            );
+            playback.stop(rewarm).await;
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            assert_eq!(health.load(Ordering::SeqCst), warmed, "{rewarm:?}");
+        }
     }
 }

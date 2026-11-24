@@ -15,7 +15,7 @@
 // is reported in `known_bugs` and does not fail it.
 //
 // Exit 0 when every metric passes and no functional check failed, 1 otherwise, 2 when a
-// port is busy. Same port rules as the bench (BENCH_PORT_BASE, and the shared 8090).
+// port is busy. Same port rules as the bench (BENCH_PORT_BASE).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

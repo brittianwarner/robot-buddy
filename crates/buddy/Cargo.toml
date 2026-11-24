@@ -15,11 +15,13 @@ server = [
     "dep:futures-util",
     "dep:reqwest",
     "dep:rig",
+    "dep:rivet-error",
     "dep:rivetkit",
     "dep:tokio",
     "dep:tokio-util",
     "dep:tracing",
     "dep:url",
+    "serde_json/raw_value",
 ]
 
 [dependencies]
@@ -42,6 +44,7 @@ chrono-tz = { version = "0.10", optional = true }
 futures-util = { workspace = true, optional = true }
 reqwest = { workspace = true, optional = true }
 rivetkit = { workspace = true, optional = true }
+rivet-error = { workspace = true, optional = true }
 rig = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 tokio-util = { version = "0.7", optional = true }

@@ -11,24 +11,22 @@
 //
 // Steps:
 //   1. Turn A plays to the end.
-//   2. Long turn B plays. Pushed events are held, so the robot's 2 s catch-up replay fires;
-//      that replay's response is held too. A wake arrives. Checks: B ends turn.cancelled
-//      and its player stops (always), and the player stops within WAKE_STOP_MS while the
-//      replay is still held (known bug, reported as XFAIL unless --strict).
+//   2. Long turn B plays. Everything the engine sends on the robot's WebSocket is held (a
+//      silent socket), so the robot's 2 s live catch-up replay fires and its response is
+//      held too. A wake arrives. Checks: B ends turn.cancelled, and its player stops within
+//      WAKE_STOP_MS while the replay is still held.
 //   3. Turn C's submit runs on the actor but its ack is lost: the connection is cut. The
 //      robot reconnects.
 //   4. Turn D plays.
 //   Then: no speech request for A or B after the reconnect. C's are reported, not checked.
 //
-// Same port rules as the bench (BENCH_PORT_BASE, and the shared 8090); refuses busy ports.
+// Same port rules as the bench (BENCH_PORT_BASE); refuses busy ports. A check may carry an
+// `xfail` (a known bug): reported as XFAIL, and failed only under --strict.
 import fs from 'node:fs';
 import { gitDescribe, now, sleep, startStack, TERMINAL } from './lib/stack.mjs';
 
 /** Longest acceptable wake → player stop while a replay is outstanding. */
 export const WAKE_STOP_MS = 1000;
-const KNOWN_BUG =
-  'BUG: the robot session awaits each replay page (up to the 15 s call deadline) before it reads input, ' +
-  'so a wake during a slow replay does not stop playback (wave5-robot)';
 
 const MARKERS = { a: 'amber', b: 'birch', c: 'cedar', d: 'dune' };
 export const reconnectReply = (text) => {
@@ -101,7 +99,6 @@ export async function reconnectScenario(stack, { log = () => {} } = {}) {
       `wake during a held replay: B player stops within ${WAKE_STOP_MS} ms`,
       Boolean(stoppedWhileHeld),
       { wake_to_player_stop_ms: metrics.wake_to_player_stop_ms, replay_held_ms: Math.round(now() - held) },
-      KNOWN_BUG,
     );
     await sleep(500);
   }

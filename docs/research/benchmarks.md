@@ -36,13 +36,13 @@ bun run test:integration
 
 ## Primitives
 
-These were not changed. One run records the current cost.
+Auth and audio were not changed. One run records the current cost. `voice/speech_body_32_rules` now builds the body from a `SpeechVoice` validated once per stream, so it no longer includes validation; it was rerun after that change.
 
 | Bench | Time |
 |---|---|
 | auth/sign_session | [1.96 2.56 3.34] µs |
 | auth/verify_session | [1.79 2.11 2.48] µs |
-| voice/speech_body_32_rules | [5.75 6.40 7.11] µs |
+| voice/speech_body_32_rules | [4.63 5.62 6.70] µs |
 | audio/pcm_format_parse | [71.1 98.5 141.9] ns |
 
 ## History SQL at 10,000 turns

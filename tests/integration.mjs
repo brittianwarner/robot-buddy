@@ -1,9 +1,10 @@
 #!/usr/bin/env bun
-// Runs the actor integration suite against an isolated engine and proves nothing outlives it.
+// Runs the engine-backed test binaries (the actor scenarios, SQL counts, retention and log
+// redaction) against isolated engines and proves nothing outlives them.
 //
 // Ports: BUDDY_TEST_ENGINE_PORT (default 16420; the engine also takes +1 and +10) and
 // BUDDY_TEST_MODEL_PORT (default 19091). Every credential here is a test-only literal.
-// Extra arguments go to the test binary, e.g. `bun run test:integration -- speech`.
+// Extra arguments go to every test binary, e.g. `bun run test:integration -- speech`.
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -48,49 +49,56 @@ function listeners(port) {
 // Listeners that predate the run are not ours; the harness reports them and refuses to start.
 const before = new Set(ports.flatMap((port) => listeners(port).map((pid) => `${port}:${pid}`)));
 
-const args = [
-  "test",
-  "-p",
-  "robot-buddy",
-  "--test",
-  "actors",
-  "--",
-  "--ignored",
-  "--nocapture",
-  ...process.argv.slice(2),
-];
-const started = Date.now();
-const child = spawn("cargo", args, { env, stdio: "inherit" });
-for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, () => child.kill(signal));
-}
-const code = await new Promise((resolve) => child.on("exit", (c, s) => resolve(c ?? (s ? 1 : 0))));
-console.log(`integration: cargo exited ${code} after ${((Date.now() - started) / 1000).toFixed(1)} s`);
-
-// The test binary's watchdog stops the engine when the binary exits, then removes the run
-// directory; give it time for both.
+// Each binary owns one engine on the same ports, so they run one at a time, and each must
+// leave nothing behind before the next starts.
+const SUITES = ["actors", "core_sql_counts", "core_retention", "core_logs"];
 const runDirs = () => (existsSync(stateDir) ? readdirSync(stateDir).filter((d) => d.startsWith("run-")) : []);
-const deadline = Date.now() + 20_000;
-let survivors = [];
-for (;;) {
-  survivors = ports
-    .flatMap((port) => listeners(port).map((pid) => ({ port, pid })))
-    .filter(({ port, pid }) => !before.has(`${port}:${pid}`));
-  if ((survivors.length === 0 && runDirs().length === 0) || Date.now() > deadline) break;
-  await Bun.sleep(250);
+let child = null;
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => child?.kill(signal));
 }
-let leaked = false;
-if (survivors.length > 0) {
-  leaked = true;
-  for (const { port, pid } of survivors) {
-    const cmd = spawnSync("ps", ["-o", "command=", "-p", pid], { encoding: "utf8" }).stdout.trim();
-    console.error(`integration: LEAK port ${port} still has listener pid ${pid}: ${cmd}`);
+
+async function run(suite) {
+  const args = ["test", "-p", "robot-buddy", "--test", suite, "--", "--ignored", "--nocapture", ...process.argv.slice(2)];
+  const started = Date.now();
+  child = spawn("cargo", args, { env, stdio: "inherit" });
+  const code = await new Promise((resolve) => child.on("exit", (c, s) => resolve(c ?? (s ? 1 : 0))));
+  child = null;
+  console.log(`integration: ${suite} exited ${code} after ${((Date.now() - started) / 1000).toFixed(1)} s`);
+
+  // The test binary's watchdog stops the engine when the binary exits, then removes the
+  // run directory; give it time for both.
+  const deadline = Date.now() + 20_000;
+  let survivors = [];
+  for (;;) {
+    survivors = ports
+      .flatMap((port) => listeners(port).map((pid) => ({ port, pid })))
+      .filter(({ port, pid }) => !before.has(`${port}:${pid}`));
+    if ((survivors.length === 0 && runDirs().length === 0) || Date.now() > deadline) break;
+    await Bun.sleep(250);
   }
+  let leaked = false;
+  for (const { port, pid } of survivors) {
+    leaked = true;
+    const cmd = spawnSync("ps", ["-o", "command=", "-p", pid], { encoding: "utf8" }).stdout.trim();
+    console.error(`integration: LEAK after ${suite}: port ${port} still has listener pid ${pid}: ${cmd}`);
+  }
+  const runs = runDirs();
+  if (runs.length > 0) {
+    leaked = true;
+    console.error(`integration: LEAK after ${suite}: run directories left in ${stateDir}: ${runs.join(", ")}`);
+  }
+  return { code, leaked };
 }
-const runs = runDirs();
-if (runs.length > 0) {
-  leaked = true;
-  console.error(`integration: LEAK run directories left in ${stateDir}: ${runs.join(", ")}`);
+
+let code = 0;
+let leaked = false;
+for (const suite of SUITES) {
+  const result = await run(suite);
+  code ||= result.code;
+  leaked ||= result.leaked;
+  // A leak would make the next suite refuse its ports.
+  if (result.leaked) break;
 }
-if (!leaked) console.log(`integration: no listener on ${ports.join(", ")}; no run directory left`);
+if (!leaked) console.log(`integration: ${SUITES.join(", ")}: no listener on ${ports.join(", ")}; no run directory left`);
 process.exit(code !== 0 ? code : leaked ? 1 : 0);

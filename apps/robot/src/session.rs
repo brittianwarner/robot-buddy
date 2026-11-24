@@ -19,7 +19,10 @@ use rivetkit_client::{
 };
 use robot_buddy::{
     auth::{self, Identity},
-    protocol::{Bundle, CALL_ACTION, Call, Command, EnrollmentRequest, OUTPUT_EVENT, OutputEvent},
+    protocol::{
+        BUSY_ERROR, Bundle, Busy, CALL_ACTION, Call, Command, EnrollmentRequest, OUTPUT_EVENT,
+        OutputEvent,
+    },
 };
 use serde_json::{Value, json};
 use std::{
@@ -269,6 +272,9 @@ async fn subscribe(
 
 /// A failed action: the server answered with an error, or nothing came back.
 fn classify(message: &str) -> CallError {
+    if let Some(turn) = busy_turn(message) {
+        return CallError::Busy(turn);
+    }
     let answered = (message.starts_with("RPC Error(") || message.starts_with("action failed ("))
         && !message.contains("Connection closed");
     if answered {
@@ -276,6 +282,17 @@ fn classify(message: &str) -> CallError {
     } else {
         CallError::Uncertain(message.to_owned())
     }
+}
+
+/// The open turn named by a busy refusal. The client renders a refused action
+/// as `RPC Error(group/code): message, metadata` with the metadata as JSON last.
+/// Anything else, including a busy refusal without readable metadata, is not one.
+fn busy_turn(message: &str) -> Option<String> {
+    let (group, code) = BUSY_ERROR;
+    let rest = message.strip_prefix(&format!("RPC Error({group}/{code}): "))?;
+    let metadata = &rest[rest.find('{')?..];
+    let busy: Busy = serde_json::from_str(metadata).ok()?;
+    Some(busy.turn_id)
 }
 
 #[derive(PartialEq, Eq)]
@@ -387,16 +404,6 @@ impl Remote for Conversation {
     async fn replay(&self, after: i64) -> Result<Vec<OutputEvent>, CallError> {
         let page = self.call(Command::Replay { after }).await?;
         serde_json::from_value(page).map_err(|e| CallError::Rejected(e.to_string()))
-    }
-
-    async fn open_turns(&self) -> Result<Vec<String>, CallError> {
-        let snapshot = self.call(Command::Snapshot).await?;
-        let turns = snapshot["turns"].as_array().cloned().unwrap_or_default();
-        Ok(turns
-            .iter()
-            .filter(|t| matches!(t["status"].as_str(), Some("queued" | "running")))
-            .filter_map(|t| Some(t["id"].as_str()?.to_owned()))
-            .collect())
     }
 
     /// Keep the panel in step with ownership: the ready message once owned,
@@ -529,6 +536,29 @@ mod tests {
         // A robot clock hours off does not matter: only the server's is used.
         assert_eq!(lifetime(1_000, 2_000), Duration::from_mins(2));
         assert_eq!(lifetime(100_000, 0), Duration::from_hours(1));
+    }
+
+    #[test]
+    fn a_busy_refusal_names_the_open_turn() {
+        // The rivetkit-client WebSocket format: `{:#}` of the metadata value.
+        let metadata = serde_json::to_value(Busy {
+            turn_id: "turn-1".into(),
+        })
+        .unwrap();
+        let message = format!("RPC Error(user/busy): Another turn is still open., {metadata:#}");
+        assert!(matches!(classify(&message), CallError::Busy(t) if t == "turn-1"));
+        // Unknown metadata fields are ignored; missing metadata is a plain refusal.
+        let newer = r#"RPC Error(user/busy): Busy., {"turn_id": "t", "since": 1}"#;
+        assert!(matches!(classify(newer), CallError::Busy(t) if t == "t"));
+        for refusal in [
+            "RPC Error(user/busy): Busy., null",
+            "RPC Error(internal/error): busy, null",
+        ] {
+            assert!(
+                matches!(classify(refusal), CallError::Rejected(_)),
+                "{refusal}"
+            );
+        }
     }
 
     #[test]

@@ -12,7 +12,7 @@ cargo run -p robot-buddy-server -- init secrets
 cp .env.example .env
 ```
 
-Copy the three generated values from `secrets/secrets.env` into `.env`. Set `AI_MODEL`, `AI_API_KEY`, public HTTPS URLs, and OIDC sign-in settings. For a local model, set **both** `AI_PROVIDER=openai_compatible` and `AI_BASE_URL` (for example `http://host.docker.internal:11434/v1` on Docker Desktop). Do not commit secrets. The offline `issuer.key` provisions device credentials and is not mounted into the server.
+Copy the three generated values from `secrets/secrets.env` into `.env`. Set `AI_MODEL`, `AI_API_KEY`, public HTTPS URLs, and OIDC sign-in settings. For a local model, set **both** `AI_PROVIDER=openai_compatible` and `AI_BASE_URL` (for example `http://host.docker.internal:11434/v1` on Docker Desktop). Plain HTTP to a host other than loopback also needs `AI_ALLOW_PLAINTEXT_MODEL=1`, so that example needs it; set it only for a model on a trusted private network, or startup fails. The image talks to its own engine over loopback; if you point `RIVET_ENDPOINT` at an engine elsewhere, it must be HTTPS, or plain HTTP to the one host named by `RIVET_ENDPOINT_PLAINTEXT_HOST` (a private Docker-network service name). Do not commit secrets. The offline `issuer.key` provisions device credentials and is not mounted into the server.
 
 ```sh
 docker compose up --build -d

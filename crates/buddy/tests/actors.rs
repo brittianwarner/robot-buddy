@@ -543,12 +543,15 @@ async fn running_turn_pins_voice_rejects_busy_and_cancels_cleanly() -> Result<()
     assert_eq!(early["text"], "Partial output.");
     assert_eq!(b.conv(chunk(1)).await?["state"], "pending");
     assert!(b.conv_as(&b.agent, chunk(0)).await.is_err(), "device-only");
-    assert!(
-        b.submit("second", "Another request while busy")
-            .await
-            .is_err(),
-        "a second turn must be rejected while one runs"
-    );
+    let refused = b
+        .submit("second", "Another request while busy")
+        .await
+        .expect_err("a second turn must be rejected while one runs");
+    // A public typed refusal that names the open turn, so a device cancels exactly it.
+    let refused = format!("{refused:#}");
+    assert!(refused.contains("(user/busy)"), "{refused}");
+    assert!(refused.contains(&turn), "{refused}");
+    assert_eq!(b.turn_record(&turn).await?["request_id"], "slow");
     assert!(
         b.conv(Command::SpokenAnswer {
             turn_id: turn.clone()

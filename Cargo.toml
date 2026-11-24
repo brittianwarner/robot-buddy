@@ -16,6 +16,8 @@ hmac = "0.12"
 rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 rivetkit = "=3.1.1"
+# Public typed action errors (`user/busy`); already in the tree through rivetkit-core.
+rivet-error = "=3.1.1"
 # The client alone: the robot talks to actors without linking the actor runtime.
 rivetkit-client = "=3.1.1"
 rig = { version = "=0.46.0", default-features = false, features = ["agent", "reqwest", "rustls"] }

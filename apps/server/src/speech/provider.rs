@@ -3,7 +3,11 @@ use super::pipeline::{Synthesis, Synthesizer};
 use anyhow::{Context, Result, bail, ensure};
 use axum::http::header;
 use futures_util::StreamExt;
-use robot_buddy::{audio::PcmFormat, auth::Secret, voice::VoiceConfig};
+use robot_buddy::{
+    audio::PcmFormat,
+    auth::Secret,
+    voice::{SpeechVoice, VoiceConfig},
+};
 use serde::Deserialize;
 use std::time::Duration;
 
@@ -68,17 +72,15 @@ impl OpenRouter {
 }
 
 impl Synthesizer for OpenRouter {
-    type Voice = VoiceConfig;
+    type Voice = SpeechVoice;
 
-    /// Decodes the pinned voice once per stream.
-    fn voice(&self, pinned: &serde_json::Value) -> Result<VoiceConfig> {
-        let config = VoiceConfig::deserialize(&pinned["config"])?;
-        config.validate()?;
-        Ok(config)
+    /// Decodes and validates the pinned voice once per stream; each sentence only renders.
+    fn voice(&self, pinned: &serde_json::Value) -> Result<SpeechVoice> {
+        VoiceConfig::deserialize(&pinned["config"])?.for_speech()
     }
 
-    async fn synthesize(&self, config: &VoiceConfig, text: &str) -> Result<Synthesis> {
-        let payload = config.speech_body(&self.model, text)?;
+    async fn synthesize(&self, voice: &SpeechVoice, text: &str) -> Result<Synthesis> {
+        let payload = voice.speech_body(&self.model, text)?;
         if payload["input"].as_str().is_none_or(str::is_empty) {
             // The sentence was only model markup (say "[laughs]"): nothing to speak,
             // so no paid request. The format is the provider's own default.

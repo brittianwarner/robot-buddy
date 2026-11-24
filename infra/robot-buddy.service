@@ -27,8 +27,10 @@ StartLimitIntervalSec=0
 [Service]
 Type=notify
 NotifyAccess=main
-# READY=1 comes after the panel, face and control socket are up. The watchdog is
-# pinged from the runtime at half this interval; a wedged runtime is restarted.
+# READY=1 comes after the panel, face and control socket are up. The device loop
+# beats on every pass (at least every quarter interval); the watchdog is pinged at
+# half this interval only if it beat since the last ping, so a wedged loop or
+# runtime is restarted.
 WatchdogSec=60s
 TimeoutStartSec=60s
 TimeoutStopSec=10s

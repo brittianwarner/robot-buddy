@@ -4,6 +4,8 @@
 //! Run with the integration environment of `bun run test:integration`, for example:
 //! `cargo test -p robot-buddy --test core_sql_counts -- --ignored --nocapture`.
 #![cfg(feature = "server")]
+// The harness is shared with `actors.rs`; this binary uses only part of it.
+#[allow(dead_code)]
 mod support;
 
 use anyhow::{Context, Result, ensure};

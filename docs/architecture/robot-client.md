@@ -13,17 +13,20 @@ Target hardware is the "Pip" robot: Raspberry Pi 5 (8 GB, Raspberry Pi OS Bookwo
 | `session.rs` | Bootstrap, the Rivet connection (untyped `rivetkit-client`), conversation calls over it, owner registration |
 | `controller.rs` | Event order, barge-in, early speech, face state, the utterance's lifetime (transport-free, unit tested) |
 | `cache.rs` | Durable cache and its single ordered writer |
-| `input.rs` | Control input on stdin |
+| `input.rs` | Control input on stdin and the control socket |
 | `face.rs` | ESP32 face bridge |
 | `audio.rs` | `/v1/speech` playback through `aplay` |
-| `screen.rs` | Loopback HTML panel on 127.0.0.1:8090 (QR codes, owner confirmation) |
+| `screen.rs` | Loopback HTML panel, 127.0.0.1:8090 unless `BUDDY_SCREEN_ADDR` says otherwise (QR codes, owner confirmation) |
 | `wifi.rs` | SoftAP setup through NetworkManager |
+| `systemd.rs` | `sd_notify` readiness and the watchdog, gated on the device loop's heartbeat |
 
 The robot links `robot-buddy` with `default-features = false`: the wire types only, without the actor server, Rig or `rivetkit-core`. It calls the `call` action and reads the `output` event through the untyped `rivetkit-client`. The JSON is the same as the typed client sends: one argument holding the serialized `Call`, and one argument holding the `OutputEvent`. Unit tests in `session.rs` pin both shapes.
 
-### Control input (stdin)
+### Control input (stdin and control socket)
 
-One line per command, at most 8 KiB. Longer lines are discarded through their newline. Invalid lines are rejected locally with a warning that never includes the line text. A closed stdin disables input; the robot keeps running. Stdin is read on its own OS thread, so an open pipe never holds up shutdown.
+Commands arrive on stdin and, when `BUDDY_CONTROL_SOCKET` names a path, on a Unix socket there (mode 0660, so the speech process's account joins the service group). The socket takes up to four writers at once and accepts a new one whenever the speech process restarts. If the path is an existing FIFO, it is read instead and reopened after each writer closes it. The systemd unit sets `/run/robot-buddy/control.sock` and gives the service no stdin. Both carry the same lines.
+
+One line per command, at most 8 KiB. Longer lines are discarded through their newline. Invalid lines are rejected locally with a warning that never includes the line text. A closed stdin disables input; the robot keeps running. Stdin and the socket are read on their own OS threads, so an open pipe never holds up shutdown.
 
 | Line | Meaning |
 |---|---|
@@ -39,15 +42,15 @@ Wake, mute and every utterance act locally first: the face changes and the playe
 
 Every utterance replaces the turn in progress. The cancel of the old turn goes out at once on its own lane; cancelling twice is harmless. The new utterance is written to the cache with fsync, and only then submitted. A failed write keeps the utterance in memory, retries the write after 1 s, and holds back only that submit. Submits and cancels go over the open Rivet connection.
 
-A submit with no answer (timeout, dropped socket) is uncertain: the robot replaces the connection and resubmits the same request ID, which the server deduplicates. Only a newly acknowledged turn speaks; a duplicate acknowledgement does not. If the server refuses the submit as busy, that refusal proves no open turn carries this request ID (the server deduplicates before it checks for a running turn), so the robot cancels the open turns, whatever their text, and submits once more. A second refusal drops the utterance and shows Sorry. An acknowledgement for an utterance that was since replaced is cancelled without speaking.
+A submit with no answer (timeout, dropped socket) is uncertain: the robot replaces the connection and resubmits the same request ID, which the server deduplicates. Only a newly acknowledged turn speaks; a duplicate acknowledgement does not. If the server refuses the submit as busy (`user/busy`, with the open turn's ID as metadata), that refusal proves no open turn carries this request ID (the server deduplicates before it checks for an open turn). The server keeps at most one open turn, so the robot cancels the one it names, whatever its text, and submits once more. A second busy refusal, or any other refusal, drops the utterance and shows Sorry. A server from before the typed refusal answers busy with an internal error, which reads as a plain refusal. An acknowledgement for an utterance that was since replaced is cancelled without speaking.
 
 Offline, mute and wake still apply at once. An utterance with no connection shows Sorry for 1.5 s and is not queued. An utterance waiting to be sent (not owned yet, or still reconnecting) carries its wall-clock creation time and expires after 60 s with Sorry; one loaded from the cache that is older, has no time, or is dated in the future is dropped at start. Wake clears a waiting utterance.
 
 ### Events and the cursor
 
-The subscription pushes each event into a bounded channel. The next sequence (`cursor + 1`) applies directly. Already-applied sequences are ignored. A gap, a full channel, or 2 s (live turn) / 10 s (idle) without pushes triggers `Replay`, one page per loop pass so input is serviced between pages.
+The subscription pushes each event into a bounded channel. The next sequence (`cursor + 1`) applies directly. Already-applied sequences are ignored. A gap, a full channel, or a quiet spell triggers `Replay`, one page per loop pass so input is serviced between pages. The quiet spell is 2 s while a turn is live or audio plays; idle it is 10 s, or 60 s once this connection has delivered pushes.
 
-A busy turn polls replay every 2 s without pushes; an idle robot every 10 s, or every 60 s once this connection has delivered pushes.
+The socket has no ping of its own, so a silent, half-open connection shows only as calls that never answer. While the robot waits on its own turn with nothing audible (the face reads Thinking), a replay gets 3 s, not the 15 s call deadline; unanswered, the connection is replaced. A live turn whose pushes go silent therefore recovers about 5 s after its last event. While audio plays, a slow replay waits the full deadline: the answer is already reaching the listener, and a reconnect would cut it off. Once the audio ends the 3 s deadline applies again.
 
 The cursor is at least once. A single writer task coalesces ordinary checkpoints to one write per 30 s and writes at once on a terminal turn event, on an utterance or cancel record, and on SIGTERM or SIGINT. 30 s keeps a whole streamed answer to one SD-card write; a crash re-applies at most 30 s of events, silently, because replayed turns never speak. Each write is temp file, fsync, rename, fsync of the directory; the directory is created once at start. A cache file that cannot be read or parsed is logged (without its content) and replaced by an empty cache.
 
@@ -57,7 +60,7 @@ stdout is the journal. In hardware mode the line is `event sequence=<n> turn=<id
 
 The robot requests `/v1/speech` as soon as a submit is acknowledged as a new turn. The server holds the request until chunk 0 exists and replaces an older request for the same bot. Deduplicated submissions and replayed history never auto-play. If the early request ends with no audio, `speech.ready` index 0 starts one retry.
 
-One pooled HTTP client (keepalive, HTTP/2 when the server offers it) serves all speech requests, warmed with `GET /health` at session start. Stopping speech drops an HTTP/1.1 stream, so the robot warms a new connection right after. Bootstrap uses a separate client.
+One pooled HTTP client (keepalive, HTTP/2 when the server offers it) serves all speech requests, warmed with `GET /health` at session start. `/health` is liveness only and never touches the engine; `/ready` is the engine check. Stopping speech drops an HTTP/1.1 stream, so a stop into idle (wake, mute, a failed or interrupted turn) warms a new connection right after. A stop for a replacing utterance does not: that utterance's own speech request follows at once, and a warm-up would only race it. Bootstrap uses a separate client.
 
 `aplay` gets `--buffer-time=$BUDDY_ALSA_BUFFER_US` (default 120000 µs) and `-D $BUDDY_ALSA_DEVICE` when set (for example `plughw:CARD=sndrpihifiberry,DEV=0`). A smaller buffer stops sooner on barge-in; a larger one survives CPU stalls without underruns. Measure on the device before changing it. Each write to the player and its stdin shutdown has a 2 s progress deadline; a stuck player is killed and reaped. Stop kills the player instead of letting it drain. A player that exits early ends playback. Time to first PCM byte is logged at debug level (`RUST_LOG=robot_buddy_robot=debug`). A failing playback never ends the session.
 
@@ -65,7 +68,7 @@ On SIGTERM or SIGINT the robot stops the speaker, closes the connection (200 ms 
 
 ### ESP32 face
 
-Set `BUDDY_FACE_SERIAL=/dev/ttyACM0` to enable it. The robot opens the device for writing (it never creates the path) and writes one compact JSON object per line: `{"led":"<led>"}`, `{"e":"<expression>","i":<0..1>}` and `{"look":[x,y]}`. The serial line settings come from `stty` in the systemd unit, not from this program.
+Set `BUDDY_FACE_SERIAL=/dev/ttyACM0` to enable it. The robot opens the device for writing (it never creates the path) and writes one compact JSON object per line: `{"led":"<led>"}`, `{"e":"<expression>","i":<0..1>}` and `{"look":[x,y]}`. The program sets the line itself on every open, since a re-enumerated CDC-ACM port comes back at the kernel defaults (9600, cooked, echo): raw (`cfmakeraw`), 115200 baud, `CLOCAL` and `CREAD`, without `HUPCL`. It opens the device `O_WRONLY | O_NOCTTY | O_NONBLOCK`. Use the stable `/dev/serial/by-id/` path.
 
 | State | When | LED | Expression |
 |---|---|---|---|
@@ -81,7 +84,7 @@ Expressions used: neutral, happy, thinking, listening, sad, sleepy. Changes go o
 
 ### Reconnect, credential rotation and Wi-Fi
 
-A close or error on the Rivet connection, an uncertain call, a failed registration or expired credentials replace the connection: the old one is disconnected (2 s limit, in the background), the face shows Offline, and the robot reconnects. Reconnects use exponential backoff from 1 s to 30 s with jitter (a random delay in the upper half of each step). Only a session that lasted 30 s resets it.
+A close or error on the Rivet connection, an uncertain call (no answer within 15 s, or 3 s for a replay while the robot waits on its turn), a failed registration or expired credentials replace the connection: the old one is disconnected (2 s limit, in the background), the face shows Offline, and the robot reconnects. Reconnects use exponential backoff from 1 s to 30 s with jitter (a random delay in the upper half of each step). Only a session that lasted 30 s resets it.
 
 Credentials are rotated without going offline. Session lifetime comes from the bundle's `expires` against the server's `Date` header, clamped to 2–60 minutes and measured on the monotonic clock from before the request. Five minutes before expiry (never sooner than a minute after connecting) the next session connects in the background. It takes over once no call is in flight and no turn is live, or a minute before expiry even mid-turn. Audio already playing finishes on the old speaker; the old connection is then closed. A failed refresh retries every 10 s and shows nothing. Ownership is checked every 3 s until the robot is owned, then every 5 minutes.
 
@@ -98,14 +101,18 @@ There is no Wi-Fi gate at start: input is served at once. After three unhealthy 
 | `BUDDY_FACE_SERIAL` | off | ESP32 serial device |
 | `BUDDY_EVENTS` | `compact` (`full` with `--simulate`) | stdout detail; `full` requires `--simulate` |
 | `BUDDY_WIFI_INTERFACE`, `BUDDY_WIFI_GRACE_SECS` | `wlan0`, 300 | Wi-Fi setup |
+| `BUDDY_CONTROL_SOCKET` | off (the unit sets `/run/robot-buddy/control.sock`) | Control input socket, or FIFO when the path is one |
+| `BUDDY_SCREEN_ADDR` | `127.0.0.1:8090` | Panel address; loopback `ip:port` only, `off` or empty disables it, anything else fails at start |
 
 ### Building for the Pi 5
 
-`.cargo/config.toml` adds `-C target-cpu=cortex-a76` for `aarch64-unknown-linux-gnu` only. On the Pi: `cargo build --release -p robot-buddy-robot`. From another machine: `rustup target add aarch64-unknown-linux-gnu`, then `cross build --release --target aarch64-unknown-linux-gnu -p robot-buddy-robot`, or `cargo build` with an aarch64 linker configured. Install the binary to `/usr/local/bin/robot-buddy-robot` and use [the systemd unit](../../infra/robot-buddy.service). The unit runs `stty -F $BUDDY_FACE_SERIAL 115200 raw -echo` before start, restarts forever, and runs at `Nice=-5` with best-effort I/O priority 2.
+`.cargo/config.toml` adds `-C target-cpu=cortex-a76` for `aarch64-unknown-linux-gnu` only. On the Pi: `cargo build --release -p robot-buddy-robot`. From another machine: `rustup target add aarch64-unknown-linux-gnu`, then `cross build --release --target aarch64-unknown-linux-gnu -p robot-buddy-robot`, or `cargo build` with an aarch64 linker configured. Install the binary to `/usr/local/bin/robot-buddy-robot` and use [the systemd unit](../../infra/robot-buddy.service); its header lists the install steps. In short, as root once: create the system account `robot-buddy` (no login shell, groups `audio` and `dialout`), install the binary, put the identity file in `/etc/robot-buddy/` (mode 0640, `root:robot-buddy`) and [`device.env`](../../infra/device.env.example) beside it (mode 0600), install the [polkit rule](../../infra/robot-buddy-nm.rules) as `/etc/polkit-1/rules.d/50-robot-buddy-nm.rules`, install the unit, enable `NetworkManager-wait-online.service`, then `systemctl daemon-reload && systemctl enable --now robot-buddy`. Add the speech process's account to the `robot-buddy` group so it can write to the control socket.
+
+The service runs as `robot-buddy`, not root. The polkit rule lets that account, and only it, modify system NetworkManager profiles, control the network, share Wi-Fi for the hotspot and toggle Wi-Fi; polkit cannot tell profiles apart, so these cover every profile. The only capability is `CAP_NET_BIND_SERVICE`, for the setup page on 10.42.0.1:80. The unit is sandboxed (`ProtectSystem=strict`, writes only to `/var/lib/robot-buddy` and `/run/robot-buddy`, `NoNewPrivileges`, 256 MB memory cap), restarts forever, and runs at `Nice=-5` with best-effort I/O priority 2. It is `Type=notify`: READY=1 follows the panel, face and control socket. With `WatchdogSec=60s` the device loop beats on every pass and wakes at least every 15 s; the watchdog is pinged every 30 s only if the loop beat since the last ping, so a wedged loop, not only a wedged runtime, is restarted.
 
 ### Validation
 
-Unit and async tests cover input parsing, bounded reads and EOF, cursor coalescing and crash safety, the event fast path and replay, barge-in ordering, early speech, and in `device.rs` the whole loop against a fake remote and speaker: barge-in while calls hang (the latency above), a lost submit acknowledgement (same request ID, no old speech, the next turn plays), rotation mid-speech (speech continues, old connection closed, never Offline), offline mute and say, utterance expiry, reconnect on close, and Wi-Fi setup after the boot grace. A sentinel prompt never appears in compact journal lines. Also covered: face states and heartbeat cadence (paused time), exact face lines through a file, the stuck-player deadline, and a latency trace against a local fake `/v1/speech` (300 ms header delay, then streamed PCM; first byte measured per turn, one TCP connection for two turns). That trace uses plain HTTP on loopback, so it shows connection reuse but not TLS savings. No Pi, ESP32, microphone or amplifier was available: serial timing, ALSA underruns at 120 ms and real barge-in latency are unmeasured.
+Unit and async tests cover input parsing, bounded reads and EOF, cursor coalescing and crash safety, the event fast path and replay, barge-in ordering, early speech, and in `device.rs` the whole loop against a fake remote and speaker: barge-in while calls hang (the latency above), a lost submit acknowledgement (same request ID, no old speech, the next turn plays), rotation mid-speech (speech continues, old connection closed, never Offline), offline mute and say, utterance expiry, reconnect on close, a silent connection replaced within 6 s only while a turn is awaited, the loop's watchdog heartbeat while idle, and Wi-Fi setup after the boot grace. `systemd.rs` tests that the watchdog is pinged only while the loop beats; `audio.rs` that only a stop into idle sends the `/health` warm-up; `session.rs` that a busy refusal yields the open turn's ID from the client's exact error text. A sentinel prompt never appears in compact journal lines. Also covered: face states and heartbeat cadence (paused time), exact face lines through a file, the stuck-player deadline, and a latency trace against a local fake `/v1/speech` (300 ms header delay, then streamed PCM; first byte measured per turn, one TCP connection for two turns). That trace uses plain HTTP on loopback, so it shows connection reuse but not TLS savings. No Pi, ESP32, microphone or amplifier was available: serial timing, ALSA underruns at 120 ms and real barge-in latency are unmeasured.
 
 ## Design targets
 

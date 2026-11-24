@@ -19,7 +19,7 @@
 //! - An utterance is worth submitting for [`PENDING_TTL`] only. Offline, a
 //!   new utterance is refused at once with the Sorry face, never queued.
 use crate::{
-    audio::{PlaybackEvent, Speaker},
+    audio::{PlaybackEvent, Rewarm, Speaker},
     cache::{Cache, CacheStore, Pending},
     config::EventDetail,
     face::{self, Face, Mood, Signals},
@@ -38,8 +38,10 @@ pub const PENDING_TTL: Duration = Duration::from_mins(1);
 const CLOCK_SKEW_SECS: i64 = 5;
 /// Delay before retrying a cache write that failed.
 const PERSIST_RETRY: Duration = Duration::from_secs(1);
-/// Most open turns cancelled to make room for a new utterance.
-const MAX_FOREIGN_CANCELS: usize = 4;
+/// A replay sent while the robot waits on its own turn (Thinking, nothing
+/// audible) gets this long before the connection is presumed dead: its pushes
+/// have gone quiet, and the 15 s call deadline is too long to look stuck.
+pub const WAITING_REPLAY_DEADLINE: Duration = Duration::from_secs(3);
 const TERMINAL: [&str; 4] = [
     "turn.completed",
     "turn.cancelled",
@@ -59,6 +61,9 @@ pub enum CallError {
     /// turn carries the request ID: the server checks for a prior request
     /// before it checks whether it is busy.
     Rejected(String),
+    /// A submit was refused because this turn (another request's) is still
+    /// open. Servers that predate the typed refusal answer [`Self::Rejected`].
+    Busy(String),
     /// No answer (timeout or closed connection): the call may or may not
     /// have run.
     Uncertain(String),
@@ -68,6 +73,7 @@ impl fmt::Display for CallError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Rejected(e) => write!(f, "rejected: {e}"),
+            Self::Busy(turn) => write!(f, "busy with {turn}"),
             Self::Uncertain(e) => write!(f, "unanswered: {e}"),
         }
     }
@@ -96,8 +102,6 @@ pub trait Remote: Clone + 'static {
     ) -> impl Future<Output = Result<Submitted, CallError>>;
     fn cancel(&self, turn_id: &str) -> impl Future<Output = Result<(), CallError>>;
     fn replay(&self, after: i64) -> impl Future<Output = Result<Vec<OutputEvent>, CallError>>;
-    /// IDs of the conversation's queued and running turns.
-    fn open_turns(&self) -> impl Future<Output = Result<Vec<String>, CallError>>;
     /// Check ownership and keep the panel's claim QR current. `shown` is the
     /// claim this robot last displayed.
     fn register(&self, shown: Claim) -> impl Future<Output = anyhow::Result<Registration>>;
@@ -110,15 +114,17 @@ pub trait Remote: Clone + 'static {
 pub enum Op {
     Cancel(String),
     Submit(Pending),
-    /// The server refused a submit: cancel its open turns, then resubmit.
-    ClearBusy,
-    Replay(i64),
+    /// One replay page after `after`. `waiting`: under
+    /// [`WAITING_REPLAY_DEADLINE`] instead of the call deadline.
+    Replay {
+        after: i64,
+        waiting: bool,
+    },
 }
 
 pub enum Done {
     Cancelled(String, Result<(), CallError>),
     Submitted(Pending, Result<Submitted, CallError>),
-    Cleared(Result<usize, CallError>),
     Replayed(Result<Vec<OutputEvent>, CallError>),
 }
 
@@ -133,20 +139,19 @@ impl Op {
                 let result = remote.submit(&pending.request_id, &pending.text).await;
                 Done::Submitted(pending, result)
             }
-            Self::ClearBusy => Done::Cleared(clear_open_turns(&remote).await),
-            Self::Replay(after) => Done::Replayed(remote.replay(after).await),
+            Self::Replay { after, waiting } => {
+                let replay = remote.replay(after);
+                let result = if waiting {
+                    tokio::time::timeout(WAITING_REPLAY_DEADLINE, replay)
+                        .await
+                        .unwrap_or_else(|_| Err(CallError::Uncertain("timed out".into())))
+                } else {
+                    replay.await
+                };
+                Done::Replayed(result)
+            }
         }
     }
-}
-
-async fn clear_open_turns<R: Remote>(remote: &R) -> Result<usize, CallError> {
-    let open = remote.open_turns().await?;
-    let mut cancelled = 0;
-    for turn in open.iter().take(MAX_FOREIGN_CANCELS) {
-        remote.cancel(turn).await?;
-        cancelled += 1;
-    }
-    Ok(cancelled)
 }
 
 /// The connection can no longer be trusted. Every intent stays recorded and
@@ -191,13 +196,7 @@ struct Out<S> {
 
 enum Main {
     Submit(String),
-    ClearBusy,
     Replay,
-}
-
-struct Busy {
-    request_id: String,
-    cleared: bool,
 }
 
 #[expect(
@@ -220,7 +219,9 @@ pub struct Controller<'a, S> {
     pub needs_replay: bool,
     cancelling: Option<String>,
     main: Option<Main>,
-    busy: Option<Busy>,
+    /// Request ID of the pending utterance whose submit was refused as busy
+    /// once; the open turn is being cancelled and a second refusal drops it.
+    busy: Option<String>,
     /// When the pending utterance was created, on the monotonic clock.
     pending_born: Option<Instant>,
     /// Request ID of the pending utterance as last written to disk.
@@ -300,6 +301,14 @@ impl<'a, S: Speaker> Controller<'a, S> {
         self.live_turn.is_some() || self.playing.is_some()
     }
 
+    /// This robot's turn is open and nothing is audible yet: the face reads
+    /// Thinking until an event arrives, so silence must be noticed fast. Once
+    /// audio plays the answer is already reaching the listener, and a
+    /// reconnect would only cut it off.
+    fn waiting(&self) -> bool {
+        self.live_turn.is_some() && !self.playing.as_ref().is_some_and(|p| p.audible)
+    }
+
     /// No conversation call is in flight.
     pub fn lanes_idle(&self) -> bool {
         self.cancelling.is_none() && self.main.is_none()
@@ -319,7 +328,7 @@ impl<'a, S: Speaker> Controller<'a, S> {
                 self.interrupt(None);
                 // Face::set clears any error flash for an active mood.
                 self.refresh();
-                self.stop_speaker().await;
+                self.stop_speaker(Rewarm::Yes).await;
             }
             Control::Listening(on) => self.state.listening = on,
             Control::Mute(on) => {
@@ -327,7 +336,7 @@ impl<'a, S: Speaker> Controller<'a, S> {
                 if on {
                     self.playing = None;
                     self.refresh();
-                    self.stop_speaker().await;
+                    self.stop_speaker(Rewarm::Yes).await;
                 }
             }
             Control::Say(text) => {
@@ -344,7 +353,9 @@ impl<'a, S: Speaker> Controller<'a, S> {
                     tracing::info!("utterance dropped: offline");
                 }
                 self.refresh();
-                self.stop_speaker().await;
+                // The replacing utterance's own speech request follows, so no
+                // warm-up races it. (Offline there is no speaker to stop.)
+                self.stop_speaker(Rewarm::No).await;
             }
         }
         self.refresh();
@@ -375,9 +386,9 @@ impl<'a, S: Speaker> Controller<'a, S> {
         }
     }
 
-    async fn stop_speaker(&mut self) {
+    async fn stop_speaker(&mut self, rewarm: Rewarm) {
         if let Some(out) = self.out.as_mut() {
-            out.speaker.stop().await;
+            out.speaker.stop(rewarm).await;
         }
         self.adopt_next_speaker();
     }
@@ -483,8 +494,8 @@ impl<'a, S: Speaker> Controller<'a, S> {
         Some(Op::Cancel(turn))
     }
 
-    /// The next submit, busy clean-up or replay page. A submit waits until
-    /// the utterance is on disk and the interrupted turn is cancelled.
+    /// The next submit or replay page. A submit waits until the utterance is
+    /// on disk and the interrupted (or busy) turn is cancelled.
     pub fn next_main(&mut self, owned: bool) -> Option<Op> {
         if !self.online || self.main.is_some() {
             return None;
@@ -495,14 +506,6 @@ impl<'a, S: Speaker> Controller<'a, S> {
             && let Some(pending) = self.state.cache.pending.clone()
         {
             let id = &pending.request_id;
-            if self
-                .busy
-                .as_ref()
-                .is_some_and(|b| b.request_id == *id && !b.cleared)
-            {
-                self.main = Some(Main::ClearBusy);
-                return Some(Op::ClearBusy);
-            }
             if self.durable.as_ref() == Some(id) {
                 self.main = Some(Main::Submit(id.clone()));
                 return Some(Op::Submit(pending));
@@ -510,7 +513,10 @@ impl<'a, S: Speaker> Controller<'a, S> {
         }
         if self.needs_replay {
             self.main = Some(Main::Replay);
-            return Some(Op::Replay(self.state.cache.cursor));
+            return Some(Op::Replay {
+                after: self.state.cache.cursor,
+                waiting: self.waiting(),
+            });
         }
         None
     }
@@ -525,10 +531,6 @@ impl<'a, S: Speaker> Controller<'a, S> {
             Done::Submitted(sent, result) => {
                 self.main = None;
                 self.submitted(&sent, result)
-            }
-            Done::Cleared(result) => {
-                self.main = None;
-                self.cleared(result)
             }
             Done::Replayed(result) => {
                 self.main = None;
@@ -585,24 +587,26 @@ impl<'a, S: Speaker> Controller<'a, S> {
                 // the server deduplicates it.
                 return Err(Lost("submit unanswered".into()));
             }
-            Err(CallError::Rejected(_)) if current => {
-                let cleared = self
-                    .busy
-                    .as_ref()
-                    .is_some_and(|b| b.request_id == sent.request_id && b.cleared);
-                if cleared {
-                    self.drop_pending("refused");
+            Err(CallError::Busy(turn)) if current => {
+                if self.busy.as_ref() == Some(&sent.request_id) {
+                    self.drop_pending("busy");
                 } else {
-                    // Usually busy: a turn this robot no longer tracks (for
-                    // example from before a reboot) is still open.
-                    self.busy = Some(Busy {
-                        request_id: sent.request_id.clone(),
-                        cleared: false,
-                    });
+                    // A turn this robot no longer tracks (from before a reboot,
+                    // or a second interruption) is open. The server keeps one
+                    // open turn, so cancelling it makes room; the submit waits
+                    // for that cancel.
+                    tracing::info!("server busy; cancelling its open turn");
+                    self.busy = Some(sent.request_id.clone());
+                    queue_cancel(&mut self.state.cache, turn);
+                    self.store.checkpoint(&self.state.cache, true);
                 }
                 return Ok(());
             }
-            Err(CallError::Rejected(_)) => return Ok(()),
+            Err(CallError::Rejected(_)) if current => {
+                self.drop_pending("refused");
+                return Ok(());
+            }
+            Err(CallError::Rejected(_) | CallError::Busy(_)) => return Ok(()),
         };
         let cache = &mut self.state.cache;
         if current {
@@ -629,24 +633,6 @@ impl<'a, S: Speaker> Controller<'a, S> {
         }
         self.store.checkpoint(&self.state.cache, true);
         Ok(())
-    }
-
-    fn cleared(&mut self, result: Result<usize, CallError>) -> Result<(), Lost> {
-        match result {
-            Ok(cancelled) => {
-                tracing::info!(cancelled, "server busy; cancelled its open turns");
-                if let Some(busy) = self.busy.as_mut() {
-                    busy.cleared = true;
-                }
-                Ok(())
-            }
-            Err(CallError::Rejected(error)) => {
-                tracing::warn!(%error, "could not clear the busy server");
-                self.drop_pending("busy");
-                Ok(())
-            }
-            Err(error) => Err(Lost(format!("busy check {error}"))),
-        }
     }
 
     fn speak(&mut self, turn_id: &str) {
@@ -697,7 +683,7 @@ impl<'a, S: Speaker> Controller<'a, S> {
                     if kind != "turn.cancelled" {
                         self.face.flash(Mood::Sorry, face::SORRY);
                     }
-                    self.stop_speaker().await;
+                    self.stop_speaker(Rewarm::Yes).await;
                 }
                 _ => {}
             }
@@ -796,7 +782,7 @@ impl<'a, S: Speaker> Controller<'a, S> {
         self.main = None;
         self.refresh();
         if let Some(mut out) = self.out.take() {
-            out.speaker.stop().await;
+            out.speaker.stop(Rewarm::No).await;
         }
         self.next_out = None;
     }
@@ -806,7 +792,7 @@ impl<'a, S: Speaker> Controller<'a, S> {
         self.playing = None;
         self.face.set(Mood::Offline);
         if let Some(out) = self.out.as_mut() {
-            out.speaker.stop().await;
+            out.speaker.stop(Rewarm::No).await;
         }
     }
 
@@ -827,12 +813,13 @@ impl<'a, S: Speaker> Controller<'a, S> {
 }
 
 /// One cancel intent is kept. A second interrupted turn (rare: it needs a
-/// cancel still unsent) is left to the busy clean-up before the next submit.
+/// cancel still unsent) is named by the server's busy refusal of the next
+/// submit, and cancelled then.
 fn queue_cancel(cache: &mut Cache, turn: String) {
     if cache.cancel.is_none() {
         cache.cancel = Some(turn);
     } else if cache.cancel.as_deref() != Some(turn.as_str()) {
-        tracing::debug!("cancel already queued; busy clean-up covers the other turn");
+        tracing::debug!("cancel already queued; a busy refusal names the other turn");
     }
 }
 
@@ -911,8 +898,8 @@ pub mod tests {
                     duplicate: true,
                 });
             }
-            if self.turns.lock().unwrap().iter().any(|t| t.1) {
-                return Err(CallError::Rejected("RPC Error(internal/error)".into()));
+            if let Some(open) = self.turns.lock().unwrap().iter().find(|t| t.1) {
+                return Err(CallError::Busy(open.0.clone()));
             }
             let turn = format!("turn-{text}");
             self.open(&turn);
@@ -940,11 +927,6 @@ pub mod tests {
             self.log.push(format!("replay {after}"));
             self.pages.lock().unwrap().pop_front().unwrap_or_default()
         }
-        pub fn open_turns(&self) -> Vec<String> {
-            self.log.push("open_turns".into());
-            let turns = self.turns.lock().unwrap();
-            turns.iter().filter(|t| t.1).map(|t| t.0.clone()).collect()
-        }
     }
 
     #[derive(Clone, Default)]
@@ -958,9 +940,6 @@ pub mod tests {
         }
         async fn replay(&self, after: i64) -> Result<Vec<OutputEvent>, CallError> {
             Ok(self.0.replay(after))
-        }
-        async fn open_turns(&self) -> Result<Vec<String>, CallError> {
-            Ok(self.0.open_turns())
         }
         async fn register(&self, _: Claim) -> anyhow::Result<Registration> {
             Ok(Registration {
@@ -981,8 +960,11 @@ pub mod tests {
             self.log.push(format!("start {turn_id}"));
             Some(self.generation)
         }
-        async fn stop(&mut self) {
-            self.log.push("stop".into());
+        async fn stop(&mut self, rewarm: Rewarm) {
+            self.log.push(match rewarm {
+                Rewarm::Yes => "stop".into(),
+                Rewarm::No => "stop cold".into(),
+            });
         }
     }
 
@@ -1243,19 +1225,19 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn busy_turns_are_cancelled_by_id_whatever_their_text() {
+    async fn the_busy_turn_is_cancelled_by_the_id_the_server_names() {
         let mut rig = Rig::new();
-        // Two turns this robot no longer tracks; one has the same words.
+        // A turn this robot no longer tracks.
         rig.server.0.open("before-reboot");
-        rig.server.0.open("same-words");
         let remote = rig.server.clone();
         let mut c = rig.controller();
         c.control(Control::Say("new question".into())).await;
         drive(&mut c, &remote).await.unwrap();
         drop(c);
-        assert_eq!(rig.log.count("open_turns"), 1);
-        assert_eq!(rig.log.count("cancel"), 2);
-        assert_eq!(rig.log.count("submit new question"), 2);
+        let log = &rig.log;
+        assert_eq!(log.count("cancel"), 1);
+        assert!(log.position("cancel before-reboot") < log.last_position("submit new question"));
+        assert_eq!(log.count("submit new question"), 2);
         assert_eq!(
             rig.state.cache.active_turn.as_deref(),
             Some("turn-new question")
@@ -1263,20 +1245,116 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn a_second_refusal_drops_the_utterance_with_an_apology() {
+    async fn refusals_drop_the_utterance_with_an_apology() {
+        // A second busy refusal (the turn would not close), and an untyped
+        // refusal (any other error, or a server from before the busy outcome).
+        let busy = || Err(CallError::Busy("stuck".into()));
+        for (replies, submits) in [
+            // Refused, the named turn cancelled, refused again.
+            (vec![busy(), Ok(()), busy()], 2),
+            (vec![Err(CallError::Rejected("no".into()))], 1),
+        ] {
+            let mut rig = Rig::new();
+            rig.server.0.replies.lock().unwrap().extend(replies);
+            let remote = rig.server.clone();
+            let shown = rig.face.clone();
+            let mut c = rig.controller();
+            c.control(Control::Say("hi".into())).await;
+            drive(&mut c, &remote).await.unwrap();
+            assert!(c.cache().pending.is_none());
+            assert_eq!(shown.flashing(), Some(Mood::Sorry));
+            assert_eq!(shown.steady(), Mood::Idle);
+            drop(c);
+            assert_eq!(rig.log.count("submit hi"), submits);
+        }
+    }
+
+    #[tokio::test]
+    async fn only_a_stop_into_idle_rewarms_the_speaker() {
         let mut rig = Rig::new();
-        rig.server.0.replies.lock().unwrap().extend([
-            Err(CallError::Rejected("no".into())),
-            Err(CallError::Rejected("no".into())),
-        ]);
+        let log = rig.log.clone();
         let remote = rig.server.clone();
-        let shown = rig.face.clone();
         let mut c = rig.controller();
+        c.control(Control::Say("first".into())).await;
+        drive(&mut c, &remote).await.unwrap();
+        c.control(Control::Say("second".into())).await;
+        assert_eq!(
+            log.count("stop cold"),
+            2,
+            "a replacing utterance warms nothing"
+        );
+        assert_eq!(log.count("stop"), 2);
+        c.control(Control::Wake).await;
+        c.control(Control::Mute(true)).await;
+        assert_eq!(log.count("stop") - log.count("stop cold"), 2);
+        c.go_offline().await;
+        assert_eq!(log.count("stop cold"), 3);
+    }
+
+    #[tokio::test]
+    async fn only_a_replay_while_waiting_on_the_turn_has_the_short_deadline() {
+        let mut rig = Rig::new();
+        let remote = rig.server.clone();
+        let mut c = rig.controller();
+        let replay = |c: &mut Controller<'_, FakeSpeaker>| {
+            c.needs_replay = true;
+            let op = c.next_main(true);
+            c.main = None;
+            match op {
+                Some(Op::Replay { waiting, .. }) => waiting,
+                _ => panic!("replay expected"),
+            }
+        };
+        assert!(!replay(&mut c), "idle");
         c.control(Control::Say("hi".into())).await;
         drive(&mut c, &remote).await.unwrap();
-        assert!(c.cache().pending.is_none());
-        assert_eq!(shown.flashing(), Some(Mood::Sorry));
-        assert_eq!(shown.steady(), Mood::Idle);
+        assert!(replay(&mut c), "submitted, nothing audible");
+        c.playback(PlaybackEvent::Started { generation: 1 });
+        assert!(!replay(&mut c), "speaking");
+        c.playback(PlaybackEvent::Finished {
+            generation: 1,
+            played: true,
+        });
+        assert!(replay(&mut c), "audio ended, the turn still open");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_waiting_replay_that_hangs_is_unanswered_after_its_deadline() {
+        #[derive(Clone)]
+        struct Hung;
+        impl Remote for Hung {
+            async fn submit(&self, _: &str, _: &str) -> Result<Submitted, CallError> {
+                std::future::pending().await
+            }
+            async fn cancel(&self, _: &str) -> Result<(), CallError> {
+                std::future::pending().await
+            }
+            async fn replay(&self, _: i64) -> Result<Vec<OutputEvent>, CallError> {
+                std::future::pending().await
+            }
+            async fn register(&self, _: Claim) -> anyhow::Result<Registration> {
+                std::future::pending().await
+            }
+            async fn disconnect(&self) {}
+        }
+        let started = Instant::now();
+        let op = Op::Replay {
+            after: 0,
+            waiting: true,
+        };
+        let Done::Replayed(Err(CallError::Uncertain(_))) = op.run(Hung).await else {
+            panic!("expected an unanswered replay");
+        };
+        assert_eq!(started.elapsed(), WAITING_REPLAY_DEADLINE);
+        let idle = Op::Replay {
+            after: 0,
+            waiting: false,
+        };
+        let pending = tokio::time::timeout(Duration::from_mins(1), idle.run(Hung)).await;
+        assert!(
+            pending.is_err(),
+            "an idle replay waits for the call deadline"
+        );
     }
 
     #[tokio::test]

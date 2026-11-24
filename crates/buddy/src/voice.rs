@@ -195,30 +195,51 @@ impl VoiceConfig {
         self.synthesis.validate()?;
         Ok(())
     }
-    /// Eleven v4 Turbo body. Delivery is not spoken. Fish controls and speed are omitted.
+    /// Eleven v4 Turbo body for one sentence. Validates first; a stream that speaks
+    /// many sentences validates once with [`Self::for_speech`].
     pub fn speech_body(&self, model: &str, text: &str) -> Result<Value> {
-        let input = self.speech_input(text)?;
-        Ok(json!({
-            "model": model,
-            "input": input,
-            "voice": self.voice.id(),
-            "response_format": "pcm",
-            "provider": {
-                "zdr": true,
-                "options": {
-                    "elevenlabs": {
-                        "seed": 7,
-                        "voice_settings": {
-                            "stability": 0.5,
-                            "similarity_boost": 0.75,
-                            "style": 0.0,
-                            "use_speaker_boost": true
-                        }
+        self.validate()?;
+        Ok(body(self, model, &render(self, text)?))
+    }
+    /// Validate once for a stream of sentences.
+    pub fn for_speech(self) -> Result<SpeechVoice> {
+        self.validate()?;
+        Ok(SpeechVoice(self))
+    }
+}
+/// A [`VoiceConfig`] that passed [`VoiceConfig::validate`]: renders sentence after
+/// sentence without checking the rules again.
+pub struct SpeechVoice(VoiceConfig);
+impl SpeechVoice {
+    pub fn speech_input(&self, text: &str) -> Result<String> {
+        render(&self.0, text)
+    }
+    pub fn speech_body(&self, model: &str, text: &str) -> Result<Value> {
+        Ok(body(&self.0, model, &render(&self.0, text)?))
+    }
+}
+/// Eleven v4 Turbo body. Delivery is not spoken. Fish controls and speed are omitted.
+fn body(config: &VoiceConfig, model: &str, input: &str) -> Value {
+    json!({
+        "model": model,
+        "input": input,
+        "voice": config.voice.id(),
+        "response_format": "pcm",
+        "provider": {
+            "zdr": true,
+            "options": {
+                "elevenlabs": {
+                    "seed": 7,
+                    "voice_settings": {
+                        "stability": 0.5,
+                        "similarity_boost": 0.75,
+                        "style": 0.0,
+                        "use_speaker_boost": true
                     }
                 }
             }
-        }))
-    }
+        }
+    })
 }
 pub fn catalog() -> Value {
     json!(
@@ -601,61 +622,66 @@ impl VoiceConfig {
     /// the longest wins; equal lengths go to the leftmost.
     pub fn speech_input(&self, text: &str) -> Result<String> {
         self.validate()?;
-        let text = strip_markup(text);
-        let text = text.as_ref();
-        let mut hits = Vec::new();
-        for (index, rule) in self.speech_rules.iter().enumerate() {
-            for (start, matched) in text.match_indices(&rule.text) {
-                let end = start + matched.len();
-                if text[..start]
+        render(self, text)
+    }
+}
+
+/// [`VoiceConfig::speech_input`] for a config already validated.
+fn render(config: &VoiceConfig, text: &str) -> Result<String> {
+    let text = strip_markup(text);
+    let text = text.as_ref();
+    let mut hits = Vec::new();
+    for (index, rule) in config.speech_rules.iter().enumerate() {
+        for (start, matched) in text.match_indices(&rule.text) {
+            let end = start + matched.len();
+            if text[..start]
+                .chars()
+                .next_back()
+                .is_some_and(char::is_alphanumeric)
+                || text[end..]
                     .chars()
-                    .next_back()
+                    .next()
                     .is_some_and(char::is_alphanumeric)
-                    || text[end..]
-                        .chars()
-                        .next()
-                        .is_some_and(char::is_alphanumeric)
-                {
-                    continue;
-                }
-                hits.push((start, end, index));
+            {
+                continue;
             }
+            hits.push((start, end, index));
         }
-        if hits.len() > 1 {
-            // Claim bytes longest first (ties leftmost); a hit touching a claimed
-            // byte loses. One bit per input byte.
-            hits.sort_unstable_by_key(|&(start, end, _)| (std::cmp::Reverse(end - start), start));
-            let mut claimed = vec![0u64; text.len().div_ceil(64)];
-            let is_claimed = |claimed: &[u64], i: usize| claimed[i / 64] >> (i % 64) & 1 == 1;
-            hits.retain(|&(start, end, _)| {
-                if (start..end).any(|i| is_claimed(&claimed, i)) {
-                    return false;
-                }
-                for i in start..end {
-                    claimed[i / 64] |= 1 << (i % 64);
-                }
-                true
-            });
-            hits.sort_unstable_by_key(|&(start, ..)| start);
-        }
-        let mut out = String::with_capacity(text.len());
-        let mut cursor = 0;
-        for (start, end, index) in hits {
-            out.push_str(&text[cursor..start]);
-            out.push_str(&self.speech_rules[index].annotate(&text[start..end]));
-            cursor = end;
-            ensure!(
-                out.len() <= SPEECH_INPUT_BUDGET,
-                "annotated speech exceeds budget"
-            );
-        }
-        out.push_str(&text[cursor..]);
+    }
+    if hits.len() > 1 {
+        // Claim bytes longest first (ties leftmost); a hit touching a claimed
+        // byte loses. One bit per input byte.
+        hits.sort_unstable_by_key(|&(start, end, _)| (std::cmp::Reverse(end - start), start));
+        let mut claimed = vec![0u64; text.len().div_ceil(64)];
+        let is_claimed = |claimed: &[u64], i: usize| claimed[i / 64] >> (i % 64) & 1 == 1;
+        hits.retain(|&(start, end, _)| {
+            if (start..end).any(|i| is_claimed(&claimed, i)) {
+                return false;
+            }
+            for i in start..end {
+                claimed[i / 64] |= 1 << (i % 64);
+            }
+            true
+        });
+        hits.sort_unstable_by_key(|&(start, ..)| start);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    for (start, end, index) in hits {
+        out.push_str(&text[cursor..start]);
+        out.push_str(&config.speech_rules[index].annotate(&text[start..end]));
+        cursor = end;
         ensure!(
             out.len() <= SPEECH_INPUT_BUDGET,
             "annotated speech exceeds budget"
         );
-        Ok(out)
     }
+    out.push_str(&text[cursor..]);
+    ensure!(
+        out.len() <= SPEECH_INPUT_BUDGET,
+        "annotated speech exceeds budget"
+    );
+    Ok(out)
 }
 #[cfg(test)]
 mod speech_rule_tests {
